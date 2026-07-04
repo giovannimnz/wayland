@@ -25,6 +25,7 @@ interface DirectoryData {
 interface DirectorySelectionModalProps {
   visible: boolean;
   isFileMode?: boolean;
+  initialPath?: string;
   onConfirm: (paths: string[] | undefined) => void;
   onCancel: () => void;
 }
@@ -32,6 +33,7 @@ interface DirectorySelectionModalProps {
 const DirectorySelectionModal: React.FC<DirectorySelectionModalProps> = ({
   visible,
   isFileMode = false,
+  initialPath = '',
   onConfirm,
   onCancel,
 }) => {
@@ -80,9 +82,9 @@ const DirectorySelectionModal: React.FC<DirectorySelectionModalProps> = ({
   useEffect(() => {
     if (visible) {
       setSelectedPath('');
-      loadDirectory('').catch((error) => console.error('Failed to load initial directory:', error));
+      loadDirectory(initialPath || '').catch((error) => console.error('Failed to load initial directory:', error));
     }
-  }, [visible, loadDirectory]);
+  }, [visible, loadDirectory, initialPath]);
 
   const handleItemClick = (item: DirectoryItem) => {
     if (item.isDirectory) {

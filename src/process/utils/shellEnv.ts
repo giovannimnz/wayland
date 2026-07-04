@@ -187,6 +187,11 @@ const SHELL_INHERITED_ENV_VARS = [
 /** Cache for shell environment (loaded once per session) */
 let cachedShellEnv: Record<string, string> | null = null;
 
+function isNonInteractiveLoginShell(shell: string): boolean {
+  const base = path.basename(shell).toLowerCase();
+  return base === 'nologin' || base === 'false';
+}
+
 /**
  * Resolve the user's login shell path.
  * Falls back to /bin/zsh on macOS, /bin/bash on Linux, or /bin/sh as last resort.
@@ -256,6 +261,9 @@ function loadShellEnvironment(): Record<string, string> {
       console.warn('[ShellEnv] Resolved shell is not an absolute path, skipping shell env loading:', shell);
       return cachedShellEnv;
     }
+    if (isNonInteractiveLoginShell(shell)) {
+      return cachedShellEnv;
+    }
     // Use -l (login) to load login shell configs (.bash_profile, .zprofile, etc.)
     // NOTE: Do NOT use -i (interactive) - interactive shells call tcsetpgrp() to
     // grab the terminal foreground process group and do not restore it on exit,
@@ -314,6 +322,10 @@ export async function loadShellEnvironmentAsync(): Promise<Record<string, string
     const shell = resolveLoginShell();
     if (!path.isAbsolute(shell)) {
       console.warn('[ShellEnv] Resolved shell is not an absolute path, skipping async shell env loading:', shell);
+      cachedShellEnv = {};
+      return cachedShellEnv;
+    }
+    if (isNonInteractiveLoginShell(shell)) {
       cachedShellEnv = {};
       return cachedShellEnv;
     }

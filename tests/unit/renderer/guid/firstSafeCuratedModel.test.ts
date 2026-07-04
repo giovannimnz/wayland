@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { firstSafeCuratedModel } from '@renderer/pages/guid/components/GuidModelSelector';
+import { firstSafeCuratedModel, resolveAcpSelectedLabel } from '@renderer/pages/guid/components/GuidModelSelector';
 import type { CuratedModel } from '@process/providers/types';
 
 const model = (over: Partial<CuratedModel> & { id: string }): CuratedModel =>
@@ -62,5 +62,20 @@ describe('firstSafeCuratedModel', () => {
 
   it('returns undefined for an empty list', () => {
     expect(firstSafeCuratedModel([])).toBeUndefined();
+  });
+});
+
+describe('resolveAcpSelectedLabel', () => {
+  it('uses the selected curated ACP model label when no ACP cache exists yet', () => {
+    expect(
+      resolveAcpSelectedLabel({
+        selectedAcpModel: 'gpt-5.5',
+        acpModels: [
+          { id: 'gpt-5.4', label: 'GPT-5.4' },
+          { id: 'gpt-5.5', label: 'GPT-5.5' },
+        ],
+        currentAcpCachedModelInfo: null,
+      })
+    ).toBe('GPT-5.5');
   });
 });

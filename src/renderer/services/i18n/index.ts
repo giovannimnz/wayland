@@ -33,6 +33,7 @@ export { normalizeLanguageCode } from '@/common/config/i18n';
 export type { SupportedLanguage } from '@/common/config/i18n';
 
 export const supportedLanguages = i18nConfig.supportedLanguages;
+const DEFAULT_LOGIN_LANGUAGE = 'pt-BR';
 
 const localeData: LocaleData = {
   'en-US': enUS,
@@ -89,7 +90,7 @@ i18n
         translation: fallbackLocale,
       },
     },
-    lng: (typeof localStorage !== 'undefined' ? localStorage.getItem('i18nextLng') : null) || DEFAULT_LANGUAGE,
+    lng: (typeof localStorage !== 'undefined' ? localStorage.getItem('i18nextLng') : null) || DEFAULT_LOGIN_LANGUAGE,
     fallbackLng: DEFAULT_LANGUAGE,
     debug: false,
     interpolation: { escapeValue: false },
@@ -102,7 +103,7 @@ i18n
 async function initLanguage(): Promise<void> {
   try {
     const savedLanguage = await ConfigStorage.get('language');
-    const language = savedLanguage || normalizeLanguageCode(navigator.language || DEFAULT_LANGUAGE);
+    const language = savedLanguage || DEFAULT_LOGIN_LANGUAGE;
     await ensureAndSwitch(i18n, language, loadLocaleModules);
     // Sync to localStorage so next page load can use it as a fast hint
     if (typeof localStorage !== 'undefined') {

@@ -83,7 +83,12 @@
     "server:resetpass": "NODE_ENV=development bun dist-server/server.mjs --resetpass",
     "server:resetpass:prod": "NODE_ENV=production bun dist-server/server.mjs --resetpass",
     "build:renderer:web": "bunx vite build --config vite.renderer.config.ts",
-    "build:server": "node scripts/build-server.mjs"
+    "build:server": "node scripts/build-server.mjs",
+    "atius:apply-patch": "bash scripts/atius-apply-source-patch.sh",
+    "atius:build-overlay": "bash scripts/atius-build-renderer-overlay.sh",
+    "atius:reapply-overlay": "bash scripts/atius-reapply-renderer-overlay.sh",
+    "atius:postinstall-hook": "bash scripts/atius-postinstall-hook.sh",
+    "atius:update": "bash scripts/atius-update.sh"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.18.2",

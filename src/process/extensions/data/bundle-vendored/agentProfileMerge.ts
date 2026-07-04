@@ -239,6 +239,7 @@ function buildOverlay(): VendoredAgentProfile[] {
 
   const out: VendoredAgentProfile[] = [];
   const seen = new Set<string>();
+  const missingBodies: string[] = [];
 
   for (const entry of index) {
     if (!entry || typeof entry !== 'object') continue;
@@ -263,10 +264,13 @@ function buildOverlay(): VendoredAgentProfile[] {
         // `bodies/` segment; the actual SKILL.md files live under bodies/.
         body = readFileSync(tried, 'utf-8');
       } catch (err) {
-        // Loud one-line warning so the next time someone wonders why a
-        // vendored agent-profile shows empty rules, the log says exactly
-        // which file failed to resolve and why.
-        console.warn(`${TAG} body read failed for ${name} at ${tried}: ${String(err).slice(0, 200)}`);
+        // Some vendored agent-profile entries ship metadata only; when the body
+        // is absent we still expose the assistant, just without inline rules.
+        if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+          console.warn(`${TAG} body read failed for ${name} at ${tried}: ${String(err).slice(0, 200)}`);
+        } else {
+          missingBodies.push(name);
+        }
       }
     }
 
@@ -290,6 +294,12 @@ function buildOverlay(): VendoredAgentProfile[] {
       _source: 'vendored-agent-profile',
       _kickoffsExcluded: true,
     });
+  }
+
+  if (missingBodies.length > 0) {
+    console.info(
+      `${TAG} ${missingBodies.length} vendored agent-profile bodies missing; assistants loaded without inline rules.`
+    );
   }
 
   cached = out;

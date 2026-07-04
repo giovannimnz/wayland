@@ -200,14 +200,14 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
           )}
         </div>
 
-        {!isWebUI && (
+        {
           <Button
             className='sendbox-model-btn'
             shape='round'
             size='small'
             onClick={() => {
               ipcBridge.dialog.showOpen
-                .invoke({ properties: ['openDirectory', 'createDirectory'] })
+                .invoke({ defaultPath: '/home/ubuntu/GitHub', properties: ['openDirectory', 'createDirectory'] })
                 .then((dirs) => {
                   if (dirs && dirs[0]) {
                     onSelectWorkspace(dirs[0]);
@@ -223,7 +223,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
               <span>{t('conversation.welcome.specifyWorkspace')}</span>
             </span>
           </Button>
-        )}
+        }
 
         <div
           className={`${styles.actionConfigGroup} ${configOptionCount > 1 ? styles.actionConfigGroupWithDivider : ''}`}

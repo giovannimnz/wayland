@@ -15,6 +15,7 @@
  * - eval('require') works via the createRequire banner shim
  */
 
+import { execFileSync } from 'child_process';
 import { build } from 'esbuild';
 import { copyFileSync, mkdirSync, cpSync, existsSync } from 'fs';
 import { join, basename, resolve } from 'path';
@@ -35,6 +36,37 @@ for (const src of wasmSources) {
 const skillsSrc = resolve('src/process/resources/skills');
 if (existsSync(skillsSrc)) {
   cpSync(skillsSrc, resolve('dist-server/skills'), { recursive: true });
+}
+
+// Standalone mode also expects the core MCP stdio scripts at dist-server/.
+// Build them through the canonical script, then copy the required outputs from
+// out/main/ so startup canary checks pass under `dist-server/server.mjs`.
+const standaloneMcpScripts = [
+  'team-mcp-stdio.js',
+  'team-guide-mcp-stdio.js',
+  'builtin-mcp-image-gen.js',
+  'builtin-mcp-search-skills.js',
+  'builtin-mcp-concierge-diag.js',
+];
+try {
+  execFileSync(process.execPath, ['scripts/build-mcp-servers.js'], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+} catch (error) {
+  const err = error;
+  if (err && typeof err === 'object') {
+    const stdout = 'stdout' in err ? err.stdout : undefined;
+    const stderr = 'stderr' in err ? err.stderr : undefined;
+    if (stdout) process.stdout.write(stdout);
+    if (stderr) process.stderr.write(stderr);
+  }
+  throw error;
+}
+for (const script of standaloneMcpScripts) {
+  const src = resolve('out/main', script);
+  if (existsSync(src)) {
+    copyFileSync(src, resolve('dist-server', script));
+  }
 }
 
 // Stub out Vite-specific .wasm?binary imports for the main server entry -

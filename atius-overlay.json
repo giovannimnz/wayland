@@ -1,0 +1,9 @@
+{
+  "overlay_name": "atius-webui-workspace-visible",
+  "runtime_mode": "standalone-source-managed",
+  "owner": "atius-srv-3",
+  "patch_file": "patches/atius-webui-workspace-visible.patch",
+  "update_entrypoint": "scripts/atius-update.sh",
+  "postinstall_entrypoint": "scripts/atius-postinstall-hook.sh",
+  "doc": "docs/guides/atius-fork-runtime.md"
+}

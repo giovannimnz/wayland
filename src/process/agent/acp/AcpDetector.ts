@@ -117,9 +117,7 @@ class AcpDetector {
         try {
           await safeExecFile('where', [cmd], { timeout: 3000, env: this.enhancedEnv });
           return cmd;
-        } catch (err) {
-          console.warn(`[AcpDetector] 'where ${cmd}' failed, trying PowerShell:`, (err as Error).message);
-        }
+        } catch {}
         try {
           await safeExecFile(
             'powershell',
@@ -132,8 +130,7 @@ class AcpDetector {
             { timeout: 5000, env: this.enhancedEnv }
           );
           return cmd;
-        } catch (err) {
-          console.warn(`[AcpDetector] PowerShell Get-Command '${cmd}' also failed:`, (err as Error).message);
+        } catch {
           return null;
         }
       })
@@ -210,9 +207,8 @@ class AcpDetector {
         execSync(`${whichCommand} ${cmd}`, { encoding: 'utf-8', stdio: 'pipe', timeout: 3000, env: this.enhancedEnv });
         found.add(cmd);
         continue;
-      } catch (err) {
+      } catch {
         if (!isWindows) continue;
-        console.warn(`[AcpDetector] sync 'where ${cmd}' failed:`, (err as Error).message);
       }
       try {
         execSync(
@@ -221,9 +217,7 @@ class AcpDetector {
         );
         found.add(cmd);
         continue;
-      } catch (err) {
-        console.warn(`[AcpDetector] sync PowerShell '${cmd}' failed:`, (err as Error).message);
-      }
+      } catch {}
       // WSL-installed CLIs are invisible to the Windows PATH; probe the WSL
       // login-shell PATH - but only when a usable distro exists, so a WSL-less
       // box does not pay a synchronous wsl.exe spawn per missing CLI (#258).
@@ -237,10 +231,7 @@ class AcpDetector {
           env: this.enhancedEnv,
         });
         found.add(cmd);
-      } catch (err) {
-        // WSL installed but CLI not in WSL either - leave as not found.
-        console.info(`[AcpDetector] sync WSL probe '${cmd}' not found:`, (err as Error).message);
-      }
+      } catch {}
     }
     return found;
   }

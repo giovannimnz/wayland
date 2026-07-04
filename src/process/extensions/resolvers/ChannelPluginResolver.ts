@@ -6,6 +6,7 @@
 
 import * as path from 'path';
 import fs from 'fs';
+import { createRequire } from 'node:module';
 import { BasePlugin, type PluginConfirmHandler, type PluginMessageHandler } from '@process/channels/plugins/BasePlugin';
 import type { LoadedExtension, ExtChannelPlugin } from '../types';
 import { isPathWithinDirectory } from '../sandbox/pathSafety';
@@ -13,6 +14,7 @@ import { resolveRuntimeEntryPath } from './utils/entryPointResolver';
 import { toAssetUrl } from '../protocol/assetProtocol';
 
 const DEBUG_ENABLED = process.env.WAYLAND_EXTENSION_DEBUG === '1' || process.env.WAYLAND_EXTENSION_DEBUG === 'true';
+const nativeRequire = createRequire(import.meta.url);
 
 function logSecurity(message: string): void {
   if (DEBUG_ENABLED) {
@@ -170,8 +172,6 @@ export function resolveChannelPlugins(extensions: LoadedExtension[]): Map<string
       // privileges. Move to createSandbox() for crash isolation and permission enforcement.
       // See: docs/specs/extension-market/research/security-model.md
       try {
-        // eslint-disable-next-line no-eval
-        const nativeRequire = eval('require');
         const mod = nativeRequire(entryPath);
 
         let PluginClass = mod.default || mod.Plugin;

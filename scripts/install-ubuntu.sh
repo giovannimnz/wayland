@@ -460,6 +460,18 @@ main() {
     # Step 7: 桌面捷徑（兩種模式都建立）
     create_desktop_entry
 
+    # Step 8: optional local post-install hook (Atius overlay / service wiring)
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local postinstall_hook="/home/ubuntu/GitHub/omni-srv-admin/modules/fleet/scripts/wayland-srv3-postinstall-hook.sh"
+    if [[ ! -x "$postinstall_hook" ]]; then
+        postinstall_hook="${script_dir}/atius-postinstall-hook.sh"
+    fi
+    if [[ -x "$postinstall_hook" ]]; then
+        info "執行 Atius/Omni post-install hook..."
+        "$postinstall_hook" || warn "Atius/Omni post-install hook failed"
+    fi
+
     # 完成！
     print_summary
 }

@@ -11,6 +11,7 @@ import DirectorySelectionModal from '@renderer/components/settings/DirectorySele
 
 interface DirectorySelectionRequest {
   id: string;
+  defaultPath?: string;
   isFileMode?: boolean;
   properties?: string[];
 }
@@ -74,6 +75,7 @@ export const useDirectorySelection = () => {
     <DirectorySelectionModal
       visible={visible}
       isFileMode={requestData?.isFileMode}
+      initialPath={requestData?.defaultPath}
       onConfirm={handleConfirm}
       onCancel={handleCancel}
     />

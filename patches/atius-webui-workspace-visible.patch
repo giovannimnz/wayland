@@ -1,0 +1,120 @@
+diff --git a/package.json b/package.json
+index 34870164d..11ccdb5e8 100644
+--- a/package.json
++++ b/package.json
+@@ -83,7 +83,12 @@
+     "server:resetpass": "NODE_ENV=development bun dist-server/server.mjs --resetpass",
+     "server:resetpass:prod": "NODE_ENV=production bun dist-server/server.mjs --resetpass",
+     "build:renderer:web": "bunx vite build --config vite.renderer.config.ts",
+-    "build:server": "node scripts/build-server.mjs"
++    "build:server": "node scripts/build-server.mjs",
++    "atius:apply-patch": "bash scripts/atius-apply-source-patch.sh",
++    "atius:build-overlay": "bash scripts/atius-build-renderer-overlay.sh",
++    "atius:reapply-overlay": "bash scripts/atius-reapply-renderer-overlay.sh",
++    "atius:postinstall-hook": "bash scripts/atius-postinstall-hook.sh",
++    "atius:update": "bash scripts/atius-update.sh"
+   },
+   "dependencies": {
+     "@agentclientprotocol/sdk": "^0.18.2",
+diff --git a/scripts/install-ubuntu.sh b/scripts/install-ubuntu.sh
+index d9ba0071b..24ff259fe 100755
+--- a/scripts/install-ubuntu.sh
++++ b/scripts/install-ubuntu.sh
+@@ -460,6 +460,15 @@ main() {
+     # Step 7: 桌面捷徑（兩種模式都建立）
+     create_desktop_entry
+
++    # Step 8: optional local post-install hook (Atius overlay / service wiring)
++    local script_dir
++    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++    local postinstall_hook="${script_dir}/atius-postinstall-hook.sh"
++    if [[ -x "$postinstall_hook" ]]; then
++        info "執行 Atius post-install hook..."
++        "$postinstall_hook" || warn "Atius post-install hook failed"
++    fi
++
+     # 完成！
+     print_summary
+ }
+diff --git a/src/renderer/components/settings/DirectorySelectionModal.tsx b/src/renderer/components/settings/DirectorySelectionModal.tsx
+index e6711b8f9..dd662c5d4 100644
+--- a/src/renderer/components/settings/DirectorySelectionModal.tsx
++++ b/src/renderer/components/settings/DirectorySelectionModal.tsx
+@@ -25,6 +25,7 @@ interface DirectoryData {
+ interface DirectorySelectionModalProps {
+   visible: boolean;
+   isFileMode?: boolean;
++  initialPath?: string;
+   onConfirm: (paths: string[] | undefined) => void;
+   onCancel: () => void;
+ }
+@@ -32,6 +33,7 @@ interface DirectorySelectionModalProps {
+ const DirectorySelectionModal: React.FC<DirectorySelectionModalProps> = ({
+   visible,
+   isFileMode = false,
++  initialPath = '',
+   onConfirm,
+   onCancel,
+ }) => {
+@@ -80,9 +82,9 @@ const DirectorySelectionModal: React.FC<DirectorySelectionModalProps> = ({
+   useEffect(() => {
+     if (visible) {
+       setSelectedPath('');
+-      loadDirectory('').catch((error) => console.error('Failed to load initial directory:', error));
++      loadDirectory(initialPath || '').catch((error) => console.error('Failed to load initial directory:', error));
+     }
+-  }, [visible, loadDirectory]);
++  }, [visible, loadDirectory, initialPath]);
+
+   const handleItemClick = (item: DirectoryItem) => {
+     if (item.isDirectory) {
+diff --git a/src/renderer/hooks/file/useDirectorySelection.tsx b/src/renderer/hooks/file/useDirectorySelection.tsx
+index 267fd8679..fe547ec02 100644
+--- a/src/renderer/hooks/file/useDirectorySelection.tsx
++++ b/src/renderer/hooks/file/useDirectorySelection.tsx
+@@ -11,6 +11,7 @@ import DirectorySelectionModal from '@renderer/components/settings/DirectorySele
+
+ interface DirectorySelectionRequest {
+   id: string;
++  defaultPath?: string;
+   isFileMode?: boolean;
+   properties?: string[];
+ }
+@@ -74,6 +75,7 @@ export const useDirectorySelection = () => {
+     <DirectorySelectionModal
+       visible={visible}
+       isFileMode={requestData?.isFileMode}
++      initialPath={requestData?.defaultPath}
+       onConfirm={handleConfirm}
+       onCancel={handleCancel}
+     />
+diff --git a/src/renderer/pages/guid/components/GuidActionRow.tsx b/src/renderer/pages/guid/components/GuidActionRow.tsx
+index 9224d36b5..3b6578e1e 100644
+--- a/src/renderer/pages/guid/components/GuidActionRow.tsx
++++ b/src/renderer/pages/guid/components/GuidActionRow.tsx
+@@ -200,14 +200,14 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+           )}
+         </div>
+
+-        {!isWebUI && (
++        {
+           <Button
+             className='sendbox-model-btn'
+             shape='round'
+             size='small'
+             onClick={() => {
+               ipcBridge.dialog.showOpen
+-                .invoke({ properties: ['openDirectory', 'createDirectory'] })
++                .invoke({ defaultPath: '/home/ubuntu/GitHub', properties: ['openDirectory', 'createDirectory'] })
+                 .then((dirs) => {
+                   if (dirs && dirs[0]) {
+                     onSelectWorkspace(dirs[0]);
+@@ -223,7 +223,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+               <span>{t('conversation.welcome.specifyWorkspace')}</span>
+             </span>
+           </Button>
+-        )}
++        }
+
+         <div
+           className={`${styles.actionConfigGroup} ${configOptionCount > 1 ? styles.actionConfigGroupWithDivider : ''}`}

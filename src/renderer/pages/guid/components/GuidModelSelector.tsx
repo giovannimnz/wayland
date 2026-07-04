@@ -92,6 +92,31 @@ export const firstSafeCuratedModel = (list: CuratedModel[]): CuratedModel | unde
   list.find((m) => m.enabled && !isExperimentalCurated(m)) ??
   list.find((m) => !isExperimentalCurated(m));
 
+export function resolveAcpSelectedLabel({
+  selectedAcpModel,
+  acpModels,
+  currentAcpCachedModelInfo,
+}: {
+  selectedAcpModel: string | null;
+  acpModels: AcpModelInfo['availableModels'];
+  currentAcpCachedModelInfo: AcpModelInfo | null;
+}): string {
+  if (isFluxModelId(selectedAcpModel)) return FLUX_MODEL_DISPLAY[selectedAcpModel as FluxModelId];
+
+  const selectedModelLabel = selectedAcpModel
+    ? acpModels.find((model) => model.id === selectedAcpModel)?.label
+    : undefined;
+
+  if (selectedModelLabel) return selectedModelLabel;
+  if (selectedAcpModel) return selectedAcpModel;
+
+  return (
+    currentAcpCachedModelInfo?.currentModelLabel ||
+    currentAcpCachedModelInfo?.currentModelId ||
+    ''
+  );
+}
+
 const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
   isGeminiMode,
   modelList,
@@ -423,19 +448,12 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
   }, [currentAcpCachedModelInfo?.availableModels, curated]);
 
   const acpSelectedLabel = React.useMemo(() => {
-    if (isFluxModelId(selectedAcpModel)) return FLUX_MODEL_DISPLAY[selectedAcpModel as FluxModelId];
-    return (
-      currentAcpCachedModelInfo?.availableModels?.find((m) => m.id === selectedAcpModel)?.label ||
-      currentAcpCachedModelInfo?.currentModelLabel ||
-      currentAcpCachedModelInfo?.currentModelId ||
-      ''
-    );
-  }, [
-    currentAcpCachedModelInfo?.availableModels,
-    currentAcpCachedModelInfo?.currentModelId,
-    currentAcpCachedModelInfo?.currentModelLabel,
-    selectedAcpModel,
-  ]);
+    return resolveAcpSelectedLabel({
+      selectedAcpModel,
+      acpModels,
+      currentAcpCachedModelInfo,
+    });
+  }, [acpModels, currentAcpCachedModelInfo, selectedAcpModel]);
 
   const acpButtonLabel = React.useMemo(() => {
     return getModelDisplayLabel({

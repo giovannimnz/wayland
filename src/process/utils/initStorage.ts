@@ -488,6 +488,8 @@ const initBuiltinAssistantRules = async (): Promise<void> => {
     mkdirSync(assistantsDir);
   }
 
+  const isRequiredAssistantLocale = (locale: string): boolean => locale === 'en' || locale === 'en-US';
+
   for (const preset of ASSISTANT_PRESETS) {
     const assistantId = `builtin-${preset.id}`;
 
@@ -507,7 +509,9 @@ const initBuiltinAssistantRules = async (): Promise<void> => {
 
           // Check if source file exists
           if (!existsSync(sourceRulesPath)) {
-            console.warn(`[Wayland] Source rule file not found: ${sourceRulesPath}`);
+            if (isRequiredAssistantLocale(locale)) {
+              console.warn(`[Wayland] Source rule file not found: ${sourceRulesPath}`);
+            }
             continue;
           }
 
@@ -548,7 +552,9 @@ const initBuiltinAssistantRules = async (): Promise<void> => {
 
           // Check if source file exists
           if (!existsSync(sourceSkillsPath)) {
-            console.warn(`[Wayland] Source skill file not found: ${sourceSkillsPath}`);
+            if (isRequiredAssistantLocale(locale)) {
+              console.warn(`[Wayland] Source skill file not found: ${sourceSkillsPath}`);
+            }
             continue;
           }
 

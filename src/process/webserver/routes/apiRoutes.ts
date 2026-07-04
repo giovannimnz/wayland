@@ -8,6 +8,7 @@ import { type Express, type NextFunction, type Request, type RequestHandler, typ
 import fs from 'fs';
 import fsPromises from 'fs/promises';
 import http from 'node:http';
+import { createRequire } from 'node:module';
 import os from 'os';
 import path from 'path';
 import multer from 'multer';
@@ -36,6 +37,8 @@ import { registerConstitutionRoutes } from './constitutionRoutes';
 import { registerUsernameRoutes } from './usernameRoutes';
 import { registerFluxConnectRoutes } from './fluxConnectRoutes';
 import { registerMcpOAuthRoutes } from './mcpOAuthRoutes';
+
+const nativeRequire = createRequire(import.meta.url);
 
 /** Temp directory used by multer disk storage - validated at runtime to prevent path traversal */
 const MULTER_TEMP_DIR = os.tmpdir();
@@ -222,9 +225,6 @@ function resolveMatchedStaticAsset(requestPath: string): MatchedStaticAsset | nu
 }
 
 function registerExtensionWebuiRoutes(app: Express, validateApiAccess: RequestHandler): void {
-  // eslint-disable-next-line no-eval
-  const nativeRequire = eval('require') as NodeRequire;
-
   app.use((req: Request, res: Response, next: NextFunction) => {
     const requestPath = normalizeMountPath(req.path || '/');
 
