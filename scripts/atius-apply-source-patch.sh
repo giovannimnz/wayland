@@ -2,19 +2,19 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PATCH="$ROOT/patches/atius-webui-workspace-visible.patch"
-GUID_FILE="$ROOT/src/renderer/pages/guid/components/GuidActionRow.tsx"
-PKG_FILE="$ROOT/package.json"
-INSTALL_FILE="$ROOT/scripts/install-ubuntu.sh"
-if grep -q '"atius:update": "bash scripts/atius-update.sh"' "$PKG_FILE" \
-  && grep -q 'postinstall_hook="${script_dir}/atius-postinstall-hook.sh"' "$INSTALL_FILE" \
-  && ! grep -q '!isWebUI && (' "$GUID_FILE"; then
-  echo "[atius-patch] source patch already applied"
-  exit 0
-fi
+cd "$ROOT"
 if [[ ! -f "$PATCH" ]]; then
   echo "[atius-patch] patch file not found: $PATCH" >&2
   exit 1
 fi
-cd "$ROOT"
-git apply "$PATCH"
-echo "[atius-patch] source patch applied"
+if git apply --reverse --check --recount "$PATCH" >/dev/null 2>&1; then
+  echo "[atius-patch] source patch already applied"
+  exit 0
+fi
+if git apply --check --recount "$PATCH" >/dev/null 2>&1; then
+  git apply --recount "$PATCH"
+  echo "[atius-patch] source patch applied"
+  exit 0
+fi
+echo "[atius-patch] patch no longer applies cleanly. Refresh it from the customized tree with scripts/atius-refresh-source-patch.sh" >&2
+exit 1

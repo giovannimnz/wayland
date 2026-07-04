@@ -6,5 +6,6 @@ if [[ "${1:-}" == "--pull" ]]; then
   git pull --ff-only
 fi
 bash scripts/atius-apply-source-patch.sh
+bash scripts/atius-refresh-source-patch.sh
 sudo bash scripts/atius-postinstall-hook.sh
-echo "[atius-update] standalone source runtime rebuilt and restarted"
+echo "[atius-update] source patch refreshed, standalone runtime rebuilt and restarted"

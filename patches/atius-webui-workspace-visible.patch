@@ -1,5 +1,5 @@
 diff --git a/package.json b/package.json
-index 34870164d..11ccdb5e8 100644
+index d86ca62b1..de1f5a04c 100644
 --- a/package.json
 +++ b/package.json
 @@ -83,7 +83,12 @@
@@ -17,25 +17,56 @@ index 34870164d..11ccdb5e8 100644
    "dependencies": {
      "@agentclientprotocol/sdk": "^0.18.2",
 diff --git a/scripts/install-ubuntu.sh b/scripts/install-ubuntu.sh
-index d9ba0071b..24ff259fe 100755
+index d9ba0071b..6fd211ce2 100755
 --- a/scripts/install-ubuntu.sh
 +++ b/scripts/install-ubuntu.sh
-@@ -460,6 +460,15 @@ main() {
+@@ -460,6 +460,18 @@ main() {
      # Step 7: 桌面捷徑（兩種模式都建立）
      create_desktop_entry
 
 +    # Step 8: optional local post-install hook (Atius overlay / service wiring)
 +    local script_dir
 +    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-+    local postinstall_hook="${script_dir}/atius-postinstall-hook.sh"
++    local postinstall_hook="/home/ubuntu/GitHub/omni-srv-admin/modules/fleet/scripts/wayland-srv3-postinstall-hook.sh"
++    if [[ ! -x "$postinstall_hook" ]]; then
++        postinstall_hook="${script_dir}/atius-postinstall-hook.sh"
++    fi
 +    if [[ -x "$postinstall_hook" ]]; then
-+        info "執行 Atius post-install hook..."
-+        "$postinstall_hook" || warn "Atius post-install hook failed"
++        info "執行 Atius/Omni post-install hook..."
++        "$postinstall_hook" || warn "Atius/Omni post-install hook failed"
 +    fi
 +
      # 完成！
      print_summary
  }
+diff --git a/src/process/webserver/websocket/WebSocketManager.ts b/src/process/webserver/websocket/WebSocketManager.ts
+index f3cc42413..ed3d2498f 100644
+--- a/src/process/webserver/websocket/WebSocketManager.ts
++++ b/src/process/webserver/websocket/WebSocketManager.ts
+@@ -213,16 +213,19 @@ export class WebSocketManager {
+   private handleFileSelection(ws: WebSocket, data: any): void {
+     // Extract properties from nested data structure
+     const actualData = data.data || data;
+-    const properties = actualData.properties;
++    const properties = Array.isArray(actualData?.properties) ? actualData.properties : [];
+
+     // Determine if this is file selection mode
+-    const isFileMode = properties && properties.includes('openFile') && !properties.includes('openDirectory');
++    const isFileMode = properties.includes('openFile') && !properties.includes('openDirectory');
+
+-    // Send file selection request to client with isFileMode flag
++    // Flatten the provider payload back to the shape the WebUI modal expects:
++    // { id, defaultPath, properties, filters?, isFileMode }. Earlier we forwarded
++    // the nested `{ data: {...} }` wrapper from the provider protocol verbatim,
++    // which left consumers without top-level `defaultPath/properties`.
+     ws.send(
+       JSON.stringify({
+         name: SHOW_OPEN_REQUEST_EVENT,
+-        data: { ...data, isFileMode },
++        data: { id: data.id, ...actualData, isFileMode },
+       })
+     );
+   }
 diff --git a/src/renderer/components/settings/DirectorySelectionModal.tsx b/src/renderer/components/settings/DirectorySelectionModal.tsx
 index e6711b8f9..dd662c5d4 100644
 --- a/src/renderer/components/settings/DirectorySelectionModal.tsx
@@ -89,10 +120,47 @@ index 267fd8679..fe547ec02 100644
        onCancel={handleCancel}
      />
 diff --git a/src/renderer/pages/guid/components/GuidActionRow.tsx b/src/renderer/pages/guid/components/GuidActionRow.tsx
-index 9224d36b5..3b6578e1e 100644
+index 9224d36b5..3145e3397 100644
 --- a/src/renderer/pages/guid/components/GuidActionRow.tsx
 +++ b/src/renderer/pages/guid/components/GuidActionRow.tsx
-@@ -200,14 +200,14 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -10,6 +10,7 @@ import ComposerAddMenu, { type ComposerUploadItem } from '@/renderer/pages/conve
+ import AgentModeSelector from '@/renderer/components/agent/AgentModeSelector';
+ import AcpConfigSelector from '@/renderer/components/agent/AcpConfigSelector';
+ import { supportsModeSwitch, type AgentModeOption } from '@/renderer/utils/model/agentModes';
++import DirectorySelectionModal from '@/renderer/components/settings/DirectorySelectionModal';
+ import type { AcpSessionConfigOption } from '@/common/types/acpTypes';
+ import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
+ import { getCleanFileNames, FileService } from '@/renderer/services/FileService';
+@@ -115,6 +116,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+   // Browser file picker ref (WebUI only)
+   const fileInputRef = useRef<HTMLInputElement>(null);
+   const [uploading, setUploading] = useState(false);
++  const [workspacePickerVisible, setWorkspacePickerVisible] = useState(false);
+
+   const handleLocalFileChange = useCallback(
+     async (e: React.ChangeEvent<HTMLInputElement>) => {
+@@ -165,6 +167,20 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+     return [{ key: 'file', label: t('conversation.welcome.uploadFile'), onClick: openHostFilePicker }];
+   }, [isWebUI, openHostFilePicker, t]);
+
++  const openWorkspacePicker = useCallback(() => {
++    if (isWebUI) {
++      setWorkspacePickerVisible(true);
++      return;
++    }
++
++    ipcBridge.dialog.showOpen
++      .invoke({ defaultPath: '/home/ubuntu/GitHub', properties: ['openDirectory', 'createDirectory'] })
++      .then((dirs) => {
++        if (dirs && dirs[0]) onSelectWorkspace(dirs[0]);
++      })
++      .catch((error) => console.error('Failed to open directory dialog:', error));
++  }, [isWebUI, onSelectWorkspace]);
++
+   return (
+     <div className={styles.actionRow}>
+       <div className={styles.actionTools}>
+@@ -200,30 +216,19 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
            )}
          </div>
 
@@ -102,14 +170,22 @@ index 9224d36b5..3b6578e1e 100644
              className='sendbox-model-btn'
              shape='round'
              size='small'
-             onClick={() => {
-               ipcBridge.dialog.showOpen
+-            onClick={() => {
+-              ipcBridge.dialog.showOpen
 -                .invoke({ properties: ['openDirectory', 'createDirectory'] })
-+                .invoke({ defaultPath: '/home/ubuntu/GitHub', properties: ['openDirectory', 'createDirectory'] })
-                 .then((dirs) => {
-                   if (dirs && dirs[0]) {
-                     onSelectWorkspace(dirs[0]);
-@@ -223,7 +223,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+-                .then((dirs) => {
+-                  if (dirs && dirs[0]) {
+-                    onSelectWorkspace(dirs[0]);
+-                  }
+-                })
+-                .catch((error) => {
+-                  console.error('Failed to open directory dialog:', error);
+-                });
+-            }}
++            onClick={openWorkspacePicker}
+           >
+             <span className='flex items-center gap-6px leading-none'>
+               <FolderOpen size={14} style={{ lineHeight: 0, flexShrink: 0 }} />
                <span>{t('conversation.welcome.specifyWorkspace')}</span>
              </span>
            </Button>
@@ -118,3 +194,108 @@ index 9224d36b5..3b6578e1e 100644
 
          <div
            className={`${styles.actionConfigGroup} ${configOptionCount > 1 ? styles.actionConfigGroupWithDivider : ''}`}
+@@ -291,6 +296,17 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+           </span>
+         </Tooltip>
+       </div>
++      {isWebUI && (
++        <DirectorySelectionModal
++          visible={workspacePickerVisible}
++          initialPath='/home/ubuntu/GitHub'
++          onConfirm={(dirs) => {
++            setWorkspacePickerVisible(false);
++            if (dirs && dirs[0]) onSelectWorkspace(dirs[0]);
++          }}
++          onCancel={() => setWorkspacePickerVisible(false)}
++        />
++      )}
+     </div>
+   );
+ };
+diff --git a/tests/unit/WebSocketManager.test.ts b/tests/unit/WebSocketManager.test.ts
+index a837db695..872d740a8 100644
+--- a/tests/unit/WebSocketManager.test.ts
++++ b/tests/unit/WebSocketManager.test.ts
+@@ -129,4 +129,31 @@ describe('WebSocketManager', () => {
+       expect(clients.has(ws)).toBe(false);
+     });
+   });
++
++  describe('handleFileSelection - payload shape', () => {
++    it('should flatten provider payload fields for the web directory modal', () => {
++      const ws = createMockWs(WebSocket.OPEN);
++
++      (manager as any).handleFileSelection(ws, {
++        id: 'show-openabc12345',
++        data: {
++          defaultPath: '/home/ubuntu/GitHub',
++          properties: ['openDirectory', 'createDirectory'],
++        },
++      });
++
++      expect(ws.send).toHaveBeenCalledWith(
++        JSON.stringify({
++          name: 'show-open-request',
++          data: {
++            id: 'show-openabc12345',
++            defaultPath: '/home/ubuntu/GitHub',
++            properties: ['openDirectory', 'createDirectory'],
++            isFileMode: false,
++          },
++        })
++      );
++    });
++  });
++
+ });
+diff --git a/tests/unit/renderer/GuidActionRow.dom.test.tsx b/tests/unit/renderer/GuidActionRow.dom.test.tsx
+index 6f2bb3023..c249c30bc 100644
+--- a/tests/unit/renderer/GuidActionRow.dom.test.tsx
++++ b/tests/unit/renderer/GuidActionRow.dom.test.tsx
+@@ -71,6 +71,15 @@ vi.mock('lucide-react', async (importOriginal) => ({
+   Upload: () => <span>UploadOne</span>,
+ }));
+
++vi.mock('@/renderer/components/settings/DirectorySelectionModal', () => ({
++  default: ({ visible, onConfirm }: { visible: boolean; onConfirm: (paths: string[] | undefined) => void }) =>
++    visible ? (
++      <button data-testid='web-workspace-modal' onClick={() => onConfirm(['/web/chosen/path'])}>
++        WebWorkspaceModal
++      </button>
++    ) : null,
++}));
++
+ vi.mock('@/renderer/components/agent/AgentModeSelector', () => ({
+   default: () => <div>AgentModeSelector</div>,
+ }));
+@@ -168,12 +177,30 @@ describe('GuidActionRow', () => {
+
+     await vi.waitFor(() => {
+       expect(ipcBridge.dialog.showOpen.invoke).toHaveBeenCalledWith({
++        defaultPath: '/home/ubuntu/GitHub',
+         properties: ['openDirectory', 'createDirectory'],
+       });
+       expect(onSelectWorkspace).toHaveBeenCalledWith('/chosen/path');
+     });
+   });
+
++
++  it('opens the web directory modal instead of invoking native dialog in WebUI mode', async () => {
++    mockIsElectronDesktop.mockReturnValue(false);
++    const { ipcBridge } = await import('@/common');
++    const onSelectWorkspace = vi.fn();
++    vi.mocked(ipcBridge.dialog.showOpen.invoke).mockClear();
++
++    render(<GuidActionRow {...defaultProps} onSelectWorkspace={onSelectWorkspace} />);
++
++    fireEvent.click(screen.getByText('conversation.welcome.specifyWorkspace'));
++
++    expect(ipcBridge.dialog.showOpen.invoke).not.toHaveBeenCalled();
++    fireEvent.click(screen.getByTestId('web-workspace-modal'));
++
++    expect(onSelectWorkspace).toHaveBeenCalledWith('/web/chosen/path');
++  });
++
+   it('shows generic error toast when file upload fails', async () => {
+     mockIsElectronDesktop.mockReturnValueOnce(false); // WebUI mode so file input is rendered
+     const { Message } = await import('@arco-design/web-react');
