@@ -149,11 +149,19 @@ export function getBundledBunDir(): string | null {
   if (needsBaseline) {
     const baselineDir = path.join(resourcesPath, 'bundled-bun', `${platform}-${arch}-baseline`);
     // No baseline → return null. Falling through to the standard build would SIGILL.
-    return hasBun(baselineDir) ? baselineDir : null;
+    return hasBun(baselineDir) ? baselineDir : getCurrentBunRuntimeDir(binName);
   }
 
   const bunDir = path.join(resourcesPath, 'bundled-bun', `${platform}-${arch}`);
-  return hasBun(bunDir) ? bunDir : null;
+  return hasBun(bunDir) ? bunDir : getCurrentBunRuntimeDir(binName);
+}
+
+function getCurrentBunRuntimeDir(binName: string): string | null {
+  const execPath = process.execPath;
+  if (!execPath || path.basename(execPath).toLowerCase() !== binName.toLowerCase()) return null;
+
+  const execDir = path.dirname(execPath);
+  return existsSync(path.join(execDir, binName)) ? execDir : null;
 }
 
 /**

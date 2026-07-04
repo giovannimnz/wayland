@@ -23,6 +23,7 @@ Environment=SERVER_BASE_URL=https://wayland.atius.com.br
 Environment=WAYLAND_ALLOWED_ORIGINS=https://wayland.atius.com.br
 Environment=WAYLAND_OPERATOR_CIDRS=10.1.1.1/32
 Environment=WAYLAND_DISABLE_AUTO_UPDATE=1
+Environment=PATH=/opt/Wayland/resources/bundled-bun/linux-arm64:/var/lib/wayland/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/snap/bin
 ExecStart=${BUN_BIN} ${ROOT}/dist-server/server.mjs
 TimeoutStartSec=180
 CONF

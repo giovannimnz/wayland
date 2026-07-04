@@ -613,6 +613,35 @@ describe('resolveNpxPath', () => {
 
     expect(resolveNpxPath({ PATH: '/tooling' })).toBe('bun.exe');
   });
+
+  it('uses the current Bun executable for standalone source builds without local resources', async () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+    const originalExecPath = Object.getOwnPropertyDescriptor(process, 'execPath');
+    const originalArch = Object.getOwnPropertyDescriptor(process, 'arch');
+    const runtimeBun = '/opt/Wayland/resources/bundled-bun/linux-arm64/bun';
+
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    Object.defineProperty(process, 'arch', { value: 'arm64', configurable: true });
+    Object.defineProperty(process, 'execPath', { value: runtimeBun, configurable: true });
+
+    vi.doMock('fs', async () => {
+      const actual = await vi.importActual<typeof import('fs')>('fs');
+      return {
+        ...actual,
+        existsSync: vi.fn((candidate: string) => candidate === runtimeBun),
+      };
+    });
+
+    try {
+      const { resolveNpxPath } = await import('@process/utils/shellEnv');
+
+      expect(resolveNpxPath({ PATH: '/tooling' })).toBe(runtimeBun);
+    } finally {
+      if (originalPlatform) Object.defineProperty(process, 'platform', originalPlatform);
+      if (originalExecPath) Object.defineProperty(process, 'execPath', originalExecPath);
+      if (originalArch) Object.defineProperty(process, 'arch', originalArch);
+    }
+  });
 });
 
 describe('resolveNpxDirect', () => {
