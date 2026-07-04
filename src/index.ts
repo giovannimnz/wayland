@@ -1141,6 +1141,10 @@ type CleanupModules = {
   // the graceful per-agent kill to force-kill any child left over (e.g. when the
   // per-step budget truncates a slow kill), so engine processes never orphan.
   agentChildren: typeof import('@process/agent/agentChildRegistry');
+  // #645: force-reap any live terminal PTY on quit so a PTY running the chat's
+  // agent CLI never orphans past the app (same no-orphan guarantee as engine
+  // children above, but for node-pty PTYs, which are not ChildProcesses).
+  terminals: typeof import('@process/terminal/terminalRegistry');
 };
 let _cleanupModulesPromise: Promise<CleanupModules> | undefined;
 
@@ -1157,6 +1161,7 @@ const prefetchCleanupModules = (): Promise<CleanupModules> => {
     import('@process/bridge/fileWatchBridge'),
     import('@process/channels/tunnel'),
     import('@process/agent/agentChildRegistry'),
+    import('@process/terminal/terminalRegistry'),
   ]).then(
     ([
       ambient,
@@ -1170,6 +1175,7 @@ const prefetchCleanupModules = (): Promise<CleanupModules> => {
       fileWatch,
       tunnel,
       agentChildren,
+      terminals,
     ]) => ({
       ambient,
       channels,
@@ -1182,6 +1188,7 @@ const prefetchCleanupModules = (): Promise<CleanupModules> => {
       fileWatch,
       tunnel,
       agentChildren,
+      terminals,
     })
   );
 };
@@ -1327,6 +1334,9 @@ app.on('before-quit', async () => {
       // on Windows - the platform this reaper targets), so omitting it here would
       // silently disable the reaper in the case it is most needed.
       safeImport('agentChildren', () => import('@process/agent/agentChildRegistry')),
+      // #645: like agentChildren, must be in the fallback list too so a rejected
+      // prefetch never silently disables the PTY reaper.
+      safeImport('terminals', () => import('@process/terminal/terminalRegistry')),
     ]);
     const out: Partial<CleanupModules> = {};
     for (const [k, v] of entries) {
@@ -1486,6 +1496,19 @@ app.on('before-quit', async () => {
       })(),
       PER_STEP_TIMEOUT_MS
     );
+
+    // #645: last-resort terminal-PTY reaper. Runs AFTER the graceful path
+    // (terminalBridge.close / tab unmount already killed live PTYs), so normally
+    // there is nothing left; it force-kills any PTY still alive so a chat's agent
+    // TUI never orphans past the app (acceptance §8.5).
+    await withTimeout(
+      'killAllPtys',
+      (async () => {
+        if (!mods.terminals) return;
+        mods.terminals.killAllPtys();
+      })(),
+      PER_STEP_TIMEOUT_MS
+    );
   };
 
   // Master ceiling: hard 10s upper bound on the entire cleanup phase.
@@ -1500,6 +1523,20 @@ app.on('before-quit', async () => {
   });
 
   await Promise.race([cleanup(), masterCeiling]);
+
+  // #651/#632: LAST step — apply a staged auto-update now that in-flight work is
+  // drained (workers cleared, cron silenced, agent children reaped above). This
+  // is why autoInstallOnAppQuit is disabled: instead of electron-updater
+  // installing at an uncoordinated moment, we install here, after cleanup, in a
+  // controlled order. No-op unless an update was downloaded AND it is safe to
+  // apply (installOnQuitIfReady honours the #575/#286 block). Non-force-exit so
+  // it can't race the cleanup we just awaited.
+  try {
+    const { autoUpdaterService } = await import('./process/services/autoUpdaterService');
+    autoUpdaterService.installOnQuitIfReady();
+  } catch (err) {
+    console.warn('[Wayland] on-quit update install step failed (ignored):', err);
+  }
 });
 
 app.on('will-quit', () => {
