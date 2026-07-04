@@ -10,6 +10,7 @@ import ComposerAddMenu, { type ComposerUploadItem } from '@/renderer/pages/conve
 import AgentModeSelector from '@/renderer/components/agent/AgentModeSelector';
 import AcpConfigSelector from '@/renderer/components/agent/AcpConfigSelector';
 import { supportsModeSwitch, type AgentModeOption } from '@/renderer/utils/model/agentModes';
+import DirectorySelectionModal from '@/renderer/components/settings/DirectorySelectionModal';
 import type { AcpSessionConfigOption } from '@/common/types/acpTypes';
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
 import { getCleanFileNames, FileService } from '@/renderer/services/FileService';
@@ -115,6 +116,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
   // Browser file picker ref (WebUI only)
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [workspacePickerVisible, setWorkspacePickerVisible] = useState(false);
 
   const handleLocalFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -165,6 +167,20 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
     return [{ key: 'file', label: t('conversation.welcome.uploadFile'), onClick: openHostFilePicker }];
   }, [isWebUI, openHostFilePicker, t]);
 
+  const openWorkspacePicker = useCallback(() => {
+    if (isWebUI) {
+      setWorkspacePickerVisible(true);
+      return;
+    }
+
+    ipcBridge.dialog.showOpen
+      .invoke({ defaultPath: '/home/ubuntu/GitHub', properties: ['openDirectory', 'createDirectory'] })
+      .then((dirs) => {
+        if (dirs && dirs[0]) onSelectWorkspace(dirs[0]);
+      })
+      .catch((error) => console.error('Failed to open directory dialog:', error));
+  }, [isWebUI, onSelectWorkspace]);
+
   return (
     <div className={styles.actionRow}>
       <div className={styles.actionTools}>
@@ -205,18 +221,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
             className='sendbox-model-btn'
             shape='round'
             size='small'
-            onClick={() => {
-              ipcBridge.dialog.showOpen
-                .invoke({ defaultPath: '/home/ubuntu/GitHub', properties: ['openDirectory', 'createDirectory'] })
-                .then((dirs) => {
-                  if (dirs && dirs[0]) {
-                    onSelectWorkspace(dirs[0]);
-                  }
-                })
-                .catch((error) => {
-                  console.error('Failed to open directory dialog:', error);
-                });
-            }}
+            onClick={openWorkspacePicker}
           >
             <span className='flex items-center gap-6px leading-none'>
               <FolderOpen size={14} style={{ lineHeight: 0, flexShrink: 0 }} />
@@ -291,6 +296,17 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
           </span>
         </Tooltip>
       </div>
+      {isWebUI && (
+        <DirectorySelectionModal
+          visible={workspacePickerVisible}
+          initialPath='/home/ubuntu/GitHub'
+          onConfirm={(dirs) => {
+            setWorkspacePickerVisible(false);
+            if (dirs && dirs[0]) onSelectWorkspace(dirs[0]);
+          }}
+          onCancel={() => setWorkspacePickerVisible(false)}
+        />
+      )}
     </div>
   );
 };

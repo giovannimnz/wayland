@@ -71,6 +71,15 @@ vi.mock('lucide-react', async (importOriginal) => ({
   Upload: () => <span>UploadOne</span>,
 }));
 
+vi.mock('@/renderer/components/settings/DirectorySelectionModal', () => ({
+  default: ({ visible, onConfirm }: { visible: boolean; onConfirm: (paths: string[] | undefined) => void }) =>
+    visible ? (
+      <button data-testid='web-workspace-modal' onClick={() => onConfirm(['/web/chosen/path'])}>
+        WebWorkspaceModal
+      </button>
+    ) : null,
+}));
+
 vi.mock('@/renderer/components/agent/AgentModeSelector', () => ({
   default: () => <div>AgentModeSelector</div>,
 }));
@@ -168,10 +177,28 @@ describe('GuidActionRow', () => {
 
     await vi.waitFor(() => {
       expect(ipcBridge.dialog.showOpen.invoke).toHaveBeenCalledWith({
+        defaultPath: '/home/ubuntu/GitHub',
         properties: ['openDirectory', 'createDirectory'],
       });
       expect(onSelectWorkspace).toHaveBeenCalledWith('/chosen/path');
     });
+  });
+
+
+  it('opens the web directory modal instead of invoking native dialog in WebUI mode', async () => {
+    mockIsElectronDesktop.mockReturnValue(false);
+    const { ipcBridge } = await import('@/common');
+    const onSelectWorkspace = vi.fn();
+    vi.mocked(ipcBridge.dialog.showOpen.invoke).mockClear();
+
+    render(<GuidActionRow {...defaultProps} onSelectWorkspace={onSelectWorkspace} />);
+
+    fireEvent.click(screen.getByText('conversation.welcome.specifyWorkspace'));
+
+    expect(ipcBridge.dialog.showOpen.invoke).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('web-workspace-modal'));
+
+    expect(onSelectWorkspace).toHaveBeenCalledWith('/web/chosen/path');
   });
 
   it('shows generic error toast when file upload fails', async () => {

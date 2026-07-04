@@ -213,16 +213,19 @@ export class WebSocketManager {
   private handleFileSelection(ws: WebSocket, data: any): void {
     // Extract properties from nested data structure
     const actualData = data.data || data;
-    const properties = actualData.properties;
+    const properties = Array.isArray(actualData?.properties) ? actualData.properties : [];
 
     // Determine if this is file selection mode
-    const isFileMode = properties && properties.includes('openFile') && !properties.includes('openDirectory');
+    const isFileMode = properties.includes('openFile') && !properties.includes('openDirectory');
 
-    // Send file selection request to client with isFileMode flag
+    // Flatten the provider payload back to the shape the WebUI modal expects:
+    // { id, defaultPath, properties, filters?, isFileMode }. Earlier we forwarded
+    // the nested `{ data: {...} }` wrapper from the provider protocol verbatim,
+    // which left consumers without top-level `defaultPath/properties`.
     ws.send(
       JSON.stringify({
         name: SHOW_OPEN_REQUEST_EVENT,
-        data: { ...data, isFileMode },
+        data: { id: data.id, ...actualData, isFileMode },
       })
     );
   }

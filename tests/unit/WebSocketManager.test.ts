@@ -129,4 +129,31 @@ describe('WebSocketManager', () => {
       expect(clients.has(ws)).toBe(false);
     });
   });
+
+  describe('handleFileSelection - payload shape', () => {
+    it('should flatten provider payload fields for the web directory modal', () => {
+      const ws = createMockWs(WebSocket.OPEN);
+
+      (manager as any).handleFileSelection(ws, {
+        id: 'show-openabc12345',
+        data: {
+          defaultPath: '/home/ubuntu/GitHub',
+          properties: ['openDirectory', 'createDirectory'],
+        },
+      });
+
+      expect(ws.send).toHaveBeenCalledWith(
+        JSON.stringify({
+          name: 'show-open-request',
+          data: {
+            id: 'show-openabc12345',
+            defaultPath: '/home/ubuntu/GitHub',
+            properties: ['openDirectory', 'createDirectory'],
+            isFileMode: false,
+          },
+        })
+      );
+    });
+  });
+
 });
