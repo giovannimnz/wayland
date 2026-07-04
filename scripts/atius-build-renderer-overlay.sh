@@ -14,9 +14,7 @@ if [[ -z "$BUN_BIN" ]]; then
 fi
 cd "$ROOT"
 bash scripts/atius-apply-source-patch.sh
-if [[ ! -d node_modules ]]; then
-  "$BUN_BIN" install --frozen-lockfile --ignore-scripts
-fi
+"$BUN_BIN" install --frozen-lockfile --ignore-scripts
 "$BUN_BIN" x vite build --config vite.renderer.config.ts
 node scripts/build-server.mjs
 python3 - <<'PY'
