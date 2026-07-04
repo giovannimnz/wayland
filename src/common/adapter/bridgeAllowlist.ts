@@ -178,12 +178,14 @@ const REMOTE_DENIED_KEYS: ReadonlySet<string> = new Set([
   'write-assistant-skill',
   'import-skill',
   'skills.build.draft',
+  'skills.confirm-import',
   'skills.import.folder',
   'skills.import.git',
   'skills.import.single-skill-md',
   'skills.import.zip',
   'skills.rescan-all',
   'skills.scan',
+  'skills.scan-library',
   'skills.set-pinned',
   // --- Model registry secret/write IPC. connect/rekey/detectKeys mutate or
   //     disclose stored credentials, so a paired WebUI must never reach them.
@@ -268,6 +270,12 @@ const REMOTE_DENIED_KEYS: ReadonlySet<string> = new Set([
   //     allowed. ---
   'channel.enable-plugin',
   'channel.disable-plugin',
+  // Discloses a channel's saved connection details (IMAP/SMTP hosts + the
+  // account address). Same disclosure threat class as the config mutators
+  // above, so a paired WebUI must not read it back. Secrets are already reduced
+  // to presence flags in the handler, but the non-secret host/address fields
+  // still warrant deny for remote callers.
+  'channel.get-plugin-config',
   'channel.rotate-webhook-token',
   'channel.sync-channel-settings',
   'channel.revoke-user',
@@ -353,8 +361,12 @@ const REMOTE_DENIED_KEYS: ReadonlySet<string> = new Set([
   //     provider connectivity verdicts, MCP server reachability, detected
   //     backends, workspace paths, and config posture. None of it is a raw
   //     secret, but disclosing the full diagnostic posture to a paired WebUI is
-  //     a reconnaissance aid — deny it to remote callers (defence-in-depth). ---
+  //     a reconnaissance aid — deny it to remote callers (defence-in-depth).
+  //     `doctor.copy-text` writes caller-supplied text to the host's OS
+  //     clipboard from MAIN (Electron `clipboard.writeText`); a remote caller
+  //     reaching it is a clipboard-injection primitive, so deny it too. ---
   'doctor.run',
+  'doctor.copy-text',
 ]);
 
 /**

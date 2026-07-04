@@ -36,6 +36,7 @@
 
 import { Modal, Radio } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { ipcBridge } from '@/common';
@@ -52,7 +53,11 @@ import { WorkflowHeader } from '@/renderer/pages/guid/components/workflow/Workfl
 import { WorkflowLaunchOverlay } from '@/renderer/pages/guid/components/workflow/WorkflowLaunchOverlay';
 import { WorkflowStatusBar } from '@/renderer/pages/guid/components/workflow/WorkflowStatusBar';
 import { WorkflowStepRail } from '@/renderer/pages/guid/components/workflow/WorkflowStepRail';
-import { WorkflowViewModeProvider, useWorkflowViewModeState } from '@/renderer/pages/guid/components/workflow/workflowViewMode';
+import { useWorkflowRailSlot } from '@/renderer/pages/guid/components/workflow/WorkflowRailSlot';
+import {
+  WorkflowViewModeProvider,
+  useWorkflowViewModeState,
+} from '@/renderer/pages/guid/components/workflow/workflowViewMode';
 
 import styles from './WorkflowSurface.module.css';
 
@@ -69,6 +74,13 @@ export type WorkflowSurfaceProps = {
    * the suggested slug. The caller (ChatConversation) routes to the launcher.
    */
   onLaunchWorkflow?: (workflowName: string) => void;
+  /**
+   * #587: right-aligned control shown in the workflow's top control row (next
+   * to the view-mode toggle). The caller passes the platform model selector so
+   * users can switch chat models mid-workflow, just like a normal chat header -
+   * the ChatLayout header itself stays hidden (`hideHeader`) in workflow mode.
+   */
+  headerAccessory?: React.ReactNode;
 };
 
 const isFreshLaunch = (session: WorkflowSession): boolean => {
@@ -97,9 +109,13 @@ export const WorkflowSurface: React.FC<WorkflowSurfaceProps> = ({
   children,
   suggestedNext,
   onLaunchWorkflow,
+  headerAccessory,
 }) => {
   const { t } = useTranslation();
   const session = useWorkflowSession(sessionId, initialSession);
+  // Build #116: when a tabbed sider is present, the step rail is portaled into
+  // its "Steps" tab instead of a second fixed rail beside the chat.
+  const railSlot = useWorkflowRailSlot();
   const [launched, setLaunched] = useState(false);
   const [clarified, setClarified] = useState(false);
   const contextNoteRef = useRef<string>('');
@@ -427,6 +443,21 @@ export const WorkflowSurface: React.FC<WorkflowSurfaceProps> = ({
   // have not yet been confirmed by the user. Resumed sessions bypass it.
   const showClarifyCard = data.begin_sent_at === null && !clarified;
 
+  // The step rail (or, on completion, the complete card). Built here so it can be
+  // rendered either into the tabbed sider (portal) or the legacy inline column.
+  const railContent = isComplete ? (
+    <WorkflowCompleteCard
+      session={data}
+      suggestedNext={suggestedNext}
+      onRunAgain={() => onLaunchWorkflow?.(data.workflow_name)}
+      onLaunchNext={(slug) => onLaunchWorkflow?.(slug)}
+    />
+  ) : (
+    <WorkflowStepRail session={data} needsInput={needsInput} onJumpToStep={handleJumpToStep}>
+      <WorkflowStatusBar session={data} />
+    </WorkflowStepRail>
+  );
+
   return (
     <WorkflowViewModeProvider value={viewModeProviderValue}>
       <div className={rootClass} data-testid='workflow-surface' data-launched='true' data-status={data.status}>
@@ -452,14 +483,19 @@ export const WorkflowSurface: React.FC<WorkflowSurfaceProps> = ({
                 <Radio value='workflow'>{t('workflow.view.workflow')}</Radio>
                 <Radio value='conversation'>{t('workflow.view.conversation')}</Radio>
               </Radio.Group>
+              {/* #587: model switcher lives here so it stays reachable in a
+                  workflow (the ChatLayout header is hidden in workflow mode). */}
+              {headerAccessory && <div className={styles.headerAccessory}>{headerAccessory}</div>}
             </div>
             {showClarifyCard ? (
               <WorkflowClarifyCard
                 workflowTitle={data.workflow_title}
                 mode={data.interactivity}
-                onSetMode={(m) => void session.setInteractivity(m).catch((err) => {
-                  console.warn('[WorkflowSurface] setInteractivity failed:', err);
-                })}
+                onSetMode={(m) =>
+                  void session.setInteractivity(m).catch((err) => {
+                    console.warn('[WorkflowSurface] setInteractivity failed:', err);
+                  })
+                }
                 onStart={handleClarifyStart}
               />
             ) : (
@@ -508,20 +544,16 @@ export const WorkflowSurface: React.FC<WorkflowSurfaceProps> = ({
             )}
           </div>
 
-          <div className={styles.right} data-testid='workflow-surface-right'>
-            {isComplete ? (
-              <WorkflowCompleteCard
-                session={data}
-                suggestedNext={suggestedNext}
-                onRunAgain={() => onLaunchWorkflow?.(data.workflow_name)}
-                onLaunchNext={(slug) => onLaunchWorkflow?.(slug)}
-              />
-            ) : (
-              <WorkflowStepRail session={data} needsInput={needsInput} onJumpToStep={handleJumpToStep}>
-                <WorkflowStatusBar session={data} />
-              </WorkflowStepRail>
-            )}
-          </div>
+          {/* Build #116: the rail is the same element whether it lands in the
+              tabbed sider's Steps tab (portal) or, for a standalone mount with no
+              sider bridge, the legacy inline 280px column. */}
+          {railSlot.hasSlotHost ? (
+            railSlot.slotEl && createPortal(railContent, railSlot.slotEl)
+          ) : (
+            <div className={styles.right} data-testid='workflow-surface-right'>
+              {railContent}
+            </div>
+          )}
         </div>
       </div>
     </WorkflowViewModeProvider>

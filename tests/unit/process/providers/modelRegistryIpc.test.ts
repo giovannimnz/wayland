@@ -99,6 +99,7 @@ class FakeRepo {
   providers = new Map<ProviderId, RegistryProvider & { creds: Record<string, unknown> }>();
   catalogs = new Map<ProviderId, CatalogModel[]>();
   overrides = new Map<ProviderId, RegistryOverride[]>();
+  customModels = new Map<ProviderId, string[]>();
 
   listRegistryProviders(): RegistryProvider[] {
     return [...this.providers.values()];
@@ -166,6 +167,7 @@ class FakeRepo {
     this.providers.delete(id);
     this.catalogs.delete(id);
     this.overrides.delete(id);
+    this.customModels.delete(id);
   }
 
   replaceRegistryCatalog(id: ProviderId, models: CatalogModel[]): void {
@@ -190,6 +192,23 @@ class FakeRepo {
 
   listRegistryOverrides(id: ProviderId): RegistryOverride[] {
     return this.overrides.get(id) ?? [];
+  }
+
+  addCustomModel(id: ProviderId, modelId: string): void {
+    const list = this.customModels.get(id) ?? [];
+    if (!list.includes(modelId)) list.push(modelId);
+    this.customModels.set(id, list);
+  }
+
+  removeCustomModel(id: ProviderId, modelId: string): void {
+    this.customModels.set(
+      id,
+      (this.customModels.get(id) ?? []).filter((m) => m !== modelId)
+    );
+  }
+
+  listCustomModels(id: ProviderId): string[] {
+    return this.customModels.get(id) ?? [];
   }
 }
 
@@ -322,6 +341,20 @@ describe('modelRegistry IPC - connect', () => {
     const call = test.mock.calls.find((c) => c[0] === 'opencode-go');
     expect(call).toBeDefined();
     expect(call?.[2]).toBe('https://opencode.ai/zen/go/v1');
+  });
+
+  it('threads the catalog baseUrl for Vultr on key-only connect (#556 - baseUrl the chat-start fix relies on)', async () => {
+    const { deps, test } = makeFakes();
+    const h = createModelRegistryHandlers(deps);
+
+    // vultr is likewise a bundled-catalog provider with no PROVIDER_ENDPOINTS
+    // entry; the #556 chat-start fix depends on this connect-time fallback
+    // persisting creds.baseUrl (CHAT_START_BASE_URL has no vultr entry).
+    await h.connect({ providerId: 'vultr' as ProviderId, creds: { key: 'sk-test' } });
+
+    const call = test.mock.calls.find((c) => c[0] === 'vultr');
+    expect(call).toBeDefined();
+    expect(call?.[2]).toBe('https://api.vultrinference.com/v1');
   });
 
   it('returns the ConnectError and does not persist when the test fails', async () => {
@@ -618,6 +651,131 @@ describe('modelRegistry IPC - getCatalog', () => {
     const { deps } = makeFakes();
     const h = createModelRegistryHandlers(deps);
     expect(await h.getCatalog({ providerId: 'openai' })).toEqual({ catalog: [], curated: [] });
+  });
+});
+
+describe('modelRegistry IPC - custom models (#617)', () => {
+  function connectedRepo(): Fakes {
+    const fakes = makeFakes();
+    fakes.repo.upsertRegistryProvider({
+      providerId: 'openrouter',
+      connectedVia: 'api-key',
+      state: 'connected',
+      creds: { key: 'k' },
+    });
+    return fakes;
+  }
+
+  it('addCustomModel persists a non-catalog id verbatim (preset with @ and /)', async () => {
+    const { deps, repo } = connectedRepo();
+    const h = createModelRegistryHandlers(deps);
+
+    const res = await h.addCustomModel({ providerId: 'openrouter', modelId: '  @preset/myfusion  ' });
+
+    expect(res).toEqual({ ok: true });
+    // Trimmed, but @ and / are preserved (a preset ref is meaningless without them).
+    expect(repo.listCustomModels('openrouter')).toEqual(['@preset/myfusion']);
+  });
+
+  it('rejects an empty id and a not-connected provider', async () => {
+    const { deps, repo } = connectedRepo();
+    const h = createModelRegistryHandlers(deps);
+
+    expect(await h.addCustomModel({ providerId: 'openrouter', modelId: '   ' })).toEqual({ ok: false });
+    expect(await h.addCustomModel({ providerId: 'openai', modelId: '@preset/x' })).toEqual({ ok: false });
+    expect(repo.listCustomModels('openrouter')).toEqual([]);
+  });
+
+  it('surfaces a custom model as an enabled row in getCatalog (catalog + curated)', async () => {
+    const { deps } = connectedRepo();
+    const h = createModelRegistryHandlers(deps);
+    await h.addCustomModel({ providerId: 'openrouter', modelId: '@preset/myfusion' });
+
+    const { catalog, curated } = await h.getCatalog({ providerId: 'openrouter' });
+
+    expect(catalog.map((m) => m.id)).toContain('@preset/myfusion');
+    const row = curated.find((m) => m.id === '@preset/myfusion');
+    expect(row?.enabled).toBe(true);
+    expect(row?.providerId).toBe('openrouter');
+  });
+
+  it('surfaces a custom model (enabled) in the wcore picker union; a disable override flips its flag', async () => {
+    const { deps, repo } = connectedRepo();
+    const h = createModelRegistryHandlers(deps);
+    await h.addCustomModel({ providerId: 'openrouter', modelId: '@preset/myfusion' });
+
+    const enabledRow = (await h.curatedForAgent({ agentKey: 'wcore' })).find((m) => m.id === '@preset/myfusion');
+    expect(enabledRow?.enabled).toBe(true);
+
+    // Toggling it off routes through the same override path a catalog model uses.
+    // curatedForAgent still returns the row (enabled:false) - the picker
+    // viewmodel is what hides disabled rows, exactly like any catalog model.
+    repo.setRegistryOverride('openrouter', '@preset/myfusion', false);
+    const disabledRow = (await h.curatedForAgent({ agentKey: 'wcore' })).find((m) => m.id === '@preset/myfusion');
+    expect(disabledRow?.enabled).toBe(false);
+  });
+
+  it('removeCustomModel drops it from the curated view', async () => {
+    const { deps } = connectedRepo();
+    const h = createModelRegistryHandlers(deps);
+    await h.addCustomModel({ providerId: 'openrouter', modelId: '@preset/myfusion' });
+
+    expect(await h.removeCustomModel({ providerId: 'openrouter', modelId: '@preset/myfusion' })).toEqual({ ok: true });
+
+    const { curated } = await h.getCatalog({ providerId: 'openrouter' });
+    expect(curated.find((m) => m.id === '@preset/myfusion')).toBeUndefined();
+  });
+
+  it('addCustomModel rejects an id already in the real catalog (server-authoritative, #617)', async () => {
+    const { deps, repo } = connectedRepo();
+    repo.replaceRegistryCatalog('openrouter', [
+      catalogModel({ id: 'anthropic/claude-3-5-sonnet', providerId: 'openrouter' }),
+    ]);
+    const h = createModelRegistryHandlers(deps);
+
+    const res = await h.addCustomModel({ providerId: 'openrouter', modelId: '  anthropic/claude-3-5-sonnet  ' });
+
+    // Rejected with a clear reason, and nothing was persisted - the real catalog
+    // entry stays canonical (no synthetic custom row to shadow it).
+    expect(res).toEqual({ ok: false, reason: 'duplicate' });
+    expect(repo.listCustomModels('openrouter')).toEqual([]);
+  });
+
+  it('does not double-emit when a stored custom id later collides with a catalog id (real row wins, #617)', async () => {
+    const { deps, repo } = connectedRepo();
+    // Custom id persisted while the id was NOT in the catalog (written straight
+    // to the repo to model the race - the handler guard would reject it now)...
+    repo.addCustomModel('openrouter', 'anthropic/claude-3-5-sonnet');
+    // ...then the provider's auto-refresh publishes that same id with real metadata.
+    repo.replaceRegistryCatalog('openrouter', [
+      catalogModel({
+        id: 'anthropic/claude-3-5-sonnet',
+        providerId: 'openrouter',
+        family: 'claude-3-5',
+        tags: ['recommended'],
+        enriched: true,
+      }),
+    ]);
+    const h = createModelRegistryHandlers(deps);
+
+    const { catalog, curated } = await h.getCatalog({ providerId: 'openrouter' });
+
+    // Appears exactly once in each list - the synthetic custom row is dropped.
+    expect(catalog.filter((m) => m.id === 'anthropic/claude-3-5-sonnet')).toHaveLength(1);
+    expect(curated.filter((m) => m.id === 'anthropic/claude-3-5-sonnet')).toHaveLength(1);
+    // The surviving row is the REAL catalog entry (metadata intact), not the
+    // synthetic custom row (which carries family:'custom', empty tags).
+    const row = catalog.find((m) => m.id === 'anthropic/claude-3-5-sonnet');
+    expect(row?.family).toBe('claude-3-5');
+    expect(row?.enriched).toBe(true);
+    expect(row?.tags).toContain('recommended');
+
+    // The wcore picker union is deduped too.
+    const picker = (await h.curatedForAgent({ agentKey: 'wcore' })).filter(
+      (m) => m.id === 'anthropic/claude-3-5-sonnet'
+    );
+    expect(picker).toHaveLength(1);
+    expect(picker[0]?.family).toBe('claude-3-5');
   });
 });
 
@@ -2107,5 +2265,150 @@ describe('modelRegistry IPC - resolveForChatStart (#243 ChatGPT subscription)', 
 
     const result = await h.resolveForChatStart({ providerId: 'azure', modelId: 'gpt-4o' });
     expect(result).toEqual({ ok: false, error: 'unsupported' });
+  });
+});
+
+describe('modelRegistry IPC - resolveForChatStart (#516 OpenCode Go, #556 Vultr)', () => {
+  // Both are openai_compatible bundled-catalog providers connected via API key,
+  // whose endpoint is persisted into creds.baseUrl at connect time (#63). Before
+  // the fix they were absent from CHAT_START_PLATFORM, so resolveForChatStart
+  // returned `unsupported` and the Guid picker bounced the user to Settings.
+  it('resolves a connected OpenCode Go model to openai-compatible with its catalog baseUrl, no bounce (#516)', async () => {
+    const { deps, repo } = makeFakes();
+    repo.upsertRegistryProvider({
+      providerId: 'opencode-go',
+      connectedVia: 'apiKey',
+      state: 'connected',
+      creds: { key: 'sk-oc', baseUrl: 'https://opencode.ai/zen/go/v1' },
+    });
+    const h = createModelRegistryHandlers(deps);
+
+    const result = await h.resolveForChatStart({ providerId: 'opencode-go', modelId: 'glm-5.2' });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.provider.platform).toBe('openai-compatible');
+      expect(result.provider.providerId).toBe('opencode-go');
+      expect(result.provider.modelId).toBe('glm-5.2');
+      expect(result.provider.baseUrl).toBe('https://opencode.ai/zen/go/v1');
+    }
+  });
+
+  it('resolves a connected Vultr model to openai-compatible with its catalog baseUrl, no bounce (#556)', async () => {
+    const { deps, repo } = makeFakes();
+    repo.upsertRegistryProvider({
+      providerId: 'vultr',
+      connectedVia: 'apiKey',
+      state: 'connected',
+      creds: { key: 'sk-vultr', baseUrl: 'https://api.vultrinference.com/v1' },
+    });
+    const h = createModelRegistryHandlers(deps);
+
+    const result = await h.resolveForChatStart({ providerId: 'vultr', modelId: 'llama-3.3-70b' });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.provider.platform).toBe('openai-compatible');
+      expect(result.provider.providerId).toBe('vultr');
+      expect(result.provider.baseUrl).toBe('https://api.vultrinference.com/v1');
+    }
+  });
+});
+
+describe('modelRegistry IPC - resolveForChatStart durable catalog fallback (#578)', () => {
+  // The hand-maintained CHAT_START_PLATFORM allowlist drifted from the bundled
+  // catalog: ~97 openai_compatible catalog providers were missing and each bounced
+  // the picker to Settings. buildChatStartPayload now defaults ANY bundled-catalog
+  // provider (guaranteed openai_compatible - anthropic-wire is excluded at generation)
+  // with a resolved creds.baseUrl to 'openai-compatible', retiring the allowlist drift.
+
+  it('resolves a catalog openai_compatible provider NOT in CHAT_START_PLATFORM to openai-compatible', async () => {
+    const { deps, repo } = makeFakes();
+    // baseten is in the bundled catalog but has NO explicit CHAT_START_PLATFORM entry.
+    repo.upsertRegistryProvider({
+      providerId: 'baseten',
+      connectedVia: 'apiKey',
+      state: 'connected',
+      creds: { key: 'sk-baseten', baseUrl: 'https://inference.baseten.co/v1' },
+    });
+    const h = createModelRegistryHandlers(deps);
+
+    const result = await h.resolveForChatStart({ providerId: 'baseten', modelId: 'llama-3.3-70b' });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.provider.platform).toBe('openai-compatible');
+      expect(result.provider.providerId).toBe('baseten');
+      expect(result.provider.baseUrl).toBe('https://inference.baseten.co/v1');
+    }
+  });
+
+  it('still returns unsupported for a catalog provider with NO resolved baseUrl (no host to dispatch to)', async () => {
+    const { deps, repo } = makeFakes();
+    // Connected catalog provider but creds carry no baseUrl - the fallback must NOT
+    // fire (defaulting to api.openai.com would be the #36 401 trap).
+    repo.upsertRegistryProvider({
+      providerId: 'baseten',
+      connectedVia: 'apiKey',
+      state: 'connected',
+      creds: { key: 'sk-baseten' },
+    });
+    const h = createModelRegistryHandlers(deps);
+
+    const result = await h.resolveForChatStart({ providerId: 'baseten', modelId: 'llama-3.3-70b' });
+    expect(result).toEqual({ ok: false, error: 'unsupported' });
+  });
+
+  it('still returns unsupported for a non-catalog provider even with a baseUrl (not openai_compatible)', async () => {
+    const { deps, repo } = makeFakes();
+    // A provider id that is NOT in the bundled catalog and NOT in CHAT_START_PLATFORM
+    // must never be defaulted to openai-compatible, even with a baseUrl.
+    repo.upsertRegistryProvider({
+      providerId: 'totally-unknown-provider' as ProviderId,
+      connectedVia: 'apiKey',
+      state: 'connected',
+      creds: { key: 'sk-x', baseUrl: 'https://example.com/v1' },
+    });
+    const h = createModelRegistryHandlers(deps);
+
+    const result = await h.resolveForChatStart({
+      providerId: 'totally-unknown-provider' as ProviderId,
+      modelId: 'm',
+    });
+    expect(result).toEqual({ ok: false, error: 'unsupported' });
+  });
+
+  it('does NOT default a native anthropic-wire provider to openai-compatible (over-fire guard)', async () => {
+    const { deps, repo } = makeFakes();
+    // azure is a native, NOT in the bundled catalog (native-collision excluded at
+    // generation) and intentionally absent from CHAT_START_PLATFORM. The fallback
+    // must not fire even though creds carry a baseUrl.
+    repo.upsertRegistryProvider({
+      providerId: 'azure',
+      connectedVia: 'apiKey',
+      state: 'connected',
+      creds: { key: 'sk-azure', baseUrl: 'https://my-azure.openai.azure.com' },
+    });
+    const h = createModelRegistryHandlers(deps);
+
+    const result = await h.resolveForChatStart({ providerId: 'azure', modelId: 'gpt-4o' });
+    expect(result).toEqual({ ok: false, error: 'unsupported' });
+  });
+
+  it('routes an empty-key catalog provider (fallback fires) to undecryptable, not unsupported', async () => {
+    const { deps, repo } = makeFakes();
+    // Fallback fires (baseten in catalog + baseUrl present) -> platform set ->
+    // standard API-key block sees an empty key on a non-local host -> undecryptable
+    // (a re-key prompt), NOT unsupported and NOT a silent openai.com dispatch.
+    repo.upsertRegistryProvider({
+      providerId: 'baseten',
+      connectedVia: 'apiKey',
+      state: 'connected',
+      creds: { key: '', baseUrl: 'https://inference.baseten.co/v1' },
+    });
+    const h = createModelRegistryHandlers(deps);
+
+    const result = await h.resolveForChatStart({ providerId: 'baseten', modelId: 'llama-3.3-70b' });
+    expect(result).toEqual({ ok: false, error: 'undecryptable' });
   });
 });

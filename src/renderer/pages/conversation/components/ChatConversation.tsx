@@ -37,6 +37,8 @@ import { usePreviewContext } from '../Preview';
 import StarOfficeMonitorCard from '../platforms/openclaw/StarOfficeMonitorCard.tsx';
 import ConversationSkillsIndicator from './ConversationSkillsIndicator';
 import { WorkflowSurface } from '@/renderer/pages/guid/components/workflow/WorkflowSurface';
+import { WorkflowRailSlotProvider } from '@/renderer/pages/guid/components/workflow/WorkflowRailSlot';
+import { WorkflowTabbedSider } from '@/renderer/pages/guid/components/workflow/WorkflowTabbedSider';
 // import SkillRuleGenerator from './components/SkillRuleGenerator'; // Temporarily hidden
 
 // Shared props for the wcore/gemini panels rendered inside WorkflowSurface.
@@ -266,13 +268,12 @@ const WCoreConversationPanel: React.FC<{ conversation: WCoreConversation; slider
   );
 };
 
-// #132: wcore/gemini conversations wrapped in WorkflowSurface previously got a
-// null-object model selection (currentModel: undefined), so typing in the
-// composer threw "No model selected for current session" - the send box gate
-// requires currentModel?.useModel. These panels own the real selection hook
-// seeded from conversation.model (identical to the non-workflow panels above).
-// The surface still hides the header (hideHeader), so no in-workflow model
-// switcher is shown; the selection exists purely so the composer can send.
+// #132: wcore/gemini conversations wrapped in WorkflowSurface own the real
+// selection hook seeded from conversation.model (identical to the non-workflow
+// panels above), so the composer can send and - since #587 - the user can
+// switch models mid-workflow. The ChatLayout header stays hidden (hideHeader)
+// in workflow mode; the model switcher is surfaced inside WorkflowSurface's
+// top control row via `headerAccessory` instead.
 const WCoreWorkflowPanel: React.FC<{ conversation: WCoreConversation } & WorkflowPanelExtras> = ({
   conversation,
   sliderTitle,
@@ -294,36 +295,45 @@ const WCoreWorkflowPanel: React.FC<{ conversation: WCoreConversation } & Workflo
   );
   const modelSelection = useWCoreModelSelection({ initialModel: conversation.model, onSelectModel });
   return (
-    <ChatLayout
-      title={conversation.name}
-      sider={<ChatSider conversation={conversation} />}
-      siderTitle={sliderTitle}
-      workspaceEnabled={workspaceEnabled}
-      workspacePath={conversation.extra.workspace}
-      conversationId={conversation.id}
-      hideHeader={true}
-    >
-      <WorkflowSurface
-        sessionId={workflowSessionId}
-        initialSession={initialWorkflowSession}
-        onLaunchWorkflow={onLaunchWorkflow}
+    // Build #116: one right sider - the WorkflowSurface step rail portals into the
+    // "Steps" tab beside "Workspace", instead of a second fixed 280px rail. Force
+    // the sider on so a workspace-less workflow still shows its Steps tab.
+    <WorkflowRailSlotProvider>
+      <ChatLayout
+        title={conversation.name}
+        sider={<WorkflowTabbedSider workspace={workspaceEnabled ? <ChatSider conversation={conversation} /> : null} />}
+        siderTitle={sliderTitle}
+        workspaceEnabled={true}
+        workspacePath={conversation.extra.workspace}
+        conversationId={conversation.id}
+        hideHeader={true}
+        stepsRailSider={true}
       >
-        <WCoreChat
-          key={conversation.id}
-          conversation_id={conversation.id}
-          workspace={conversation.extra.workspace}
-          modelSelection={modelSelection}
-          sessionMode={conversation.extra?.sessionMode}
-          workflowSessionId={workflowSessionId}
-          workflowTotalSteps={workflowTotalSteps}
-          workflowApplyStepMarker={workflowApplyStepMarker}
-        />
-      </WorkflowSurface>
-    </ChatLayout>
+        <WorkflowSurface
+          sessionId={workflowSessionId}
+          initialSession={initialWorkflowSession}
+          onLaunchWorkflow={onLaunchWorkflow}
+          headerAccessory={<WCoreModelSelector selection={modelSelection} conversationId={conversation.id} />}
+        >
+          <WCoreChat
+            key={conversation.id}
+            conversation_id={conversation.id}
+            workspace={conversation.extra.workspace}
+            modelSelection={modelSelection}
+            sessionMode={conversation.extra?.sessionMode}
+            workflowSessionId={workflowSessionId}
+            workflowTotalSteps={workflowTotalSteps}
+            workflowApplyStepMarker={workflowApplyStepMarker}
+          />
+        </WorkflowSurface>
+      </ChatLayout>
+    </WorkflowRailSlotProvider>
   );
 };
 
-const GeminiWorkflowPanel: React.FC<{ conversation: GeminiConversation; hideSendBox?: boolean } & WorkflowPanelExtras> = ({
+const GeminiWorkflowPanel: React.FC<
+  { conversation: GeminiConversation; hideSendBox?: boolean } & WorkflowPanelExtras
+> = ({
   conversation,
   sliderTitle,
   workspaceEnabled,
@@ -344,34 +354,39 @@ const GeminiWorkflowPanel: React.FC<{ conversation: GeminiConversation; hideSend
   );
   const modelSelection = useGeminiModelSelection({ initialModel: conversation.model, onSelectModel });
   return (
-    <ChatLayout
-      title={conversation.name}
-      sider={<ChatSider conversation={conversation} />}
-      siderTitle={sliderTitle}
-      workspaceEnabled={workspaceEnabled}
-      workspacePath={conversation.extra.workspace}
-      conversationId={conversation.id}
-      hideHeader={true}
-    >
-      <WorkflowSurface
-        sessionId={workflowSessionId}
-        initialSession={initialWorkflowSession}
-        onLaunchWorkflow={onLaunchWorkflow}
+    // Build #116: single sider - step rail portals into the "Steps" tab.
+    <WorkflowRailSlotProvider>
+      <ChatLayout
+        title={conversation.name}
+        sider={<WorkflowTabbedSider workspace={workspaceEnabled ? <ChatSider conversation={conversation} /> : null} />}
+        siderTitle={sliderTitle}
+        workspaceEnabled={true}
+        workspacePath={conversation.extra.workspace}
+        conversationId={conversation.id}
+        hideHeader={true}
+        stepsRailSider={true}
       >
-        <GeminiChat
-          key={conversation.id}
-          conversation_id={conversation.id}
-          workspace={conversation.extra.workspace}
-          modelSelection={modelSelection}
-          cronJobId={conversation.extra?.cronJobId as string | undefined}
-          hideSendBox={hideSendBox}
-          sessionMode={conversation.extra?.sessionMode}
-          workflowSessionId={workflowSessionId}
-          workflowTotalSteps={workflowTotalSteps}
-          workflowApplyStepMarker={workflowApplyStepMarker}
-        />
-      </WorkflowSurface>
-    </ChatLayout>
+        <WorkflowSurface
+          sessionId={workflowSessionId}
+          initialSession={initialWorkflowSession}
+          onLaunchWorkflow={onLaunchWorkflow}
+          headerAccessory={<GeminiModelSelector selection={modelSelection} />}
+        >
+          <GeminiChat
+            key={conversation.id}
+            conversation_id={conversation.id}
+            workspace={conversation.extra.workspace}
+            modelSelection={modelSelection}
+            cronJobId={conversation.extra?.cronJobId as string | undefined}
+            hideSendBox={hideSendBox}
+            sessionMode={conversation.extra?.sessionMode}
+            workflowSessionId={workflowSessionId}
+            workflowTotalSteps={workflowTotalSteps}
+            workflowApplyStepMarker={workflowApplyStepMarker}
+          />
+        </WorkflowSurface>
+      </ChatLayout>
+    </WorkflowRailSlotProvider>
   );
 };
 
@@ -600,21 +615,32 @@ const ChatConversation: React.FC<{
     }
 
     // ACP / codex / openclaw / nanobot / remote workflow conversations:
-    // conversationNode was already built above via useMemo.
+    // conversationNode was already built above via useMemo. Build #116: same
+    // single-sider treatment - rail portals into the "Steps" tab, no double rail.
     return (
-      <ChatLayout
-        title={conversation?.name}
-        sider={<ChatSider conversation={conversation} />}
-        siderTitle={sliderTitle}
-        workspaceEnabled={workspaceEnabled}
-        workspacePath={conversation?.extra?.workspace}
-        conversationId={conversation?.id}
-        hideHeader={true}
-      >
-        <WorkflowSurface sessionId={workflowSessionId} initialSession={initialWorkflowSession} onLaunchWorkflow={handleLaunchWorkflow}>
-          {conversationNode}
-        </WorkflowSurface>
-      </ChatLayout>
+      <WorkflowRailSlotProvider>
+        <ChatLayout
+          title={conversation?.name}
+          sider={
+            <WorkflowTabbedSider workspace={workspaceEnabled ? <ChatSider conversation={conversation} /> : null} />
+          }
+          siderTitle={sliderTitle}
+          workspaceEnabled={true}
+          workspacePath={conversation?.extra?.workspace}
+          conversationId={conversation?.id}
+          hideHeader={true}
+          stepsRailSider={true}
+        >
+          <WorkflowSurface
+            sessionId={workflowSessionId}
+            initialSession={initialWorkflowSession}
+            onLaunchWorkflow={handleLaunchWorkflow}
+            headerAccessory={modelSelector}
+          >
+            {conversationNode}
+          </WorkflowSurface>
+        </ChatLayout>
+      </WorkflowRailSlotProvider>
     );
   }
 

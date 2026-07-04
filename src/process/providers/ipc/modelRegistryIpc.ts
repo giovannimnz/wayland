@@ -57,7 +57,7 @@ import { isLocalBaseUrl } from '@/common/utils/urlValidation';
 import { autoRegisterOllamaInRepo } from '@process/onboarding/autoRegisterOllama';
 import type { OllamaProbe, OllamaRegistryRepo } from '@process/onboarding/autoRegisterOllama';
 import { getDatabase } from '@process/services/database';
-import type { ConnectError, CuratedModel, ProviderId, RawModel } from '../types';
+import type { CatalogModel, ConnectError, CuratedModel, ProviderId, RawModel } from '../types';
 import type { CatalogSource } from '../sources/CatalogSource';
 import { ApiProviderSource } from '../sources/ApiProviderSource';
 import { validateProviderBaseUrl } from '../sources/validateBaseUrl';
@@ -216,6 +216,9 @@ export type ModelRegistryRepo = Pick<
   | 'countRegistryCatalog'
   | 'setRegistryOverride'
   | 'listRegistryOverrides'
+  | 'addCustomModel'
+  | 'removeCustomModel'
+  | 'listCustomModels'
 >;
 
 /** Every backend collaborator the handlers need - all injectable for tests. */
@@ -296,6 +299,11 @@ export type ModelRegistryHandlers = {
   list: () => Promise<IModelRegistryProviderView[]>;
   getCatalog: (p: { providerId: ProviderId }) => Promise<IModelRegistryCatalogView>;
   toggleModel: (p: { providerId: ProviderId; modelId: string; enabled: boolean }) => Promise<{ ok: boolean }>;
+  /** Persist a user-typed model id that isn't in the provider's catalog (#617).
+   *  Rejects with `reason: 'duplicate'` if the id already exists in the catalog. */
+  addCustomModel: (p: { providerId: ProviderId; modelId: string }) => Promise<{ ok: boolean; reason?: 'duplicate' }>;
+  /** Remove a previously added custom model id. */
+  removeCustomModel: (p: { providerId: ProviderId; modelId: string }) => Promise<{ ok: boolean }>;
   refresh: (p: { providerId: ProviderId }) => Promise<{ ok: boolean }>;
   disconnect: (p: { providerId: ProviderId }) => Promise<{ ok: boolean }>;
   rekey: (p: { providerId: ProviderId; creds: IModelRegistryCreds }) => Promise<IModelRegistryConnectResult>;
@@ -569,6 +577,51 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
   }
 
   /**
+   * Synthesize `CuratedModel` rows for a provider's user-typed custom model ids
+   * (#617). These never appear in the fetched catalog (e.g. an OpenRouter preset
+   * `@preset/<slug>`), so they are stored separately and merged in on read.
+   * Enabled by default so a freshly-added id is immediately pickable; the normal
+   * enable/disable override still applies on top (see `curatedWithCustom`). The
+   * id is used verbatim as the display name - a custom id is its own label.
+   */
+  function customCuratedModels(providerId: ProviderId, catalog: CatalogModel[]): CuratedModel[] {
+    // #617 collision guard: a custom id that also exists in the real catalog is
+    // NOT synthesized here. Otherwise the custom row (spread after the catalog)
+    // would render twice under the same key and shadow the catalog row's
+    // metadata (tags/cost/context). The real catalog entry always wins - even
+    // for a custom id added before the provider later published that same id.
+    const catalogIds = new Set(catalog.map((m) => m.id));
+    return repo
+      .listCustomModels(providerId)
+      .filter((id) => !catalogIds.has(id))
+      .map(
+        (id): CuratedModel => ({
+          id,
+          providerId,
+          displayName: id,
+          family: 'custom',
+          kind: 'text',
+          enriched: false,
+          tags: [],
+          recommended: false,
+          enabled: true,
+        })
+      );
+  }
+
+  /**
+   * A provider's curated text catalog, with custom models appended and the
+   * user's enable/disable overrides applied. The single read path both the
+   * Manage page (`getCatalog`) and every picker (`curatedForAgent`) share so a
+   * custom id flows exactly like a catalog model.
+   */
+  function curatedWithCustom(providerId: ProviderId): CuratedModel[] {
+    const catalog = repo.getRegistryCatalog(providerId);
+    const base = curator.curate(catalog);
+    return applyOverrides(providerId, [...base, ...customCuratedModels(providerId, catalog)]);
+  }
+
+  /**
    * A short human label for how a provider was connected. `useDiscovered` is
    * checked before the cloud branch: an auto-discovered key is the most
    * specific signal regardless of provider kind, so it must win.
@@ -815,8 +868,14 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
 
     async getCatalog({ providerId }): Promise<IModelRegistryCatalogView> {
       try {
-        const catalog = repo.getRegistryCatalog(providerId);
-        const curated = applyOverrides(providerId, curator.curate(catalog));
+        const stored = repo.getRegistryCatalog(providerId);
+        const customs = customCuratedModels(providerId, stored);
+        // Custom models join BOTH lists: the full `catalog` (so the Manage page's
+        // `mergeCatalogRows`, which iterates the catalog, renders a row) and the
+        // `curated` view (so the row carries the enable/override flag). A
+        // `CuratedModel` is a superset of `CatalogModel`, so it slots into either.
+        const catalog: CatalogModel[] = [...stored, ...customs];
+        const curated = applyOverrides(providerId, [...curator.curate(stored), ...customs]);
         return { catalog, curated };
       } catch {
         return { catalog: [], curated: [] };
@@ -826,6 +885,37 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
     async toggleModel({ providerId, modelId, enabled }): Promise<{ ok: boolean }> {
       try {
         repo.setRegistryOverride(providerId, modelId, enabled);
+        return { ok: true };
+      } catch {
+        return { ok: false };
+      }
+    },
+
+    async addCustomModel({ providerId, modelId }): Promise<{ ok: boolean; reason?: 'duplicate' }> {
+      try {
+        // Trim only - a custom id may legitimately contain `@` and `/` (an
+        // OpenRouter preset is `@preset/<slug>`), so never sanitize those out.
+        const id = modelId.trim();
+        if (!id) return { ok: false };
+        if (!repo.getRegistryProvider(providerId)) return { ok: false };
+        // #617 collision guard (server-authoritative): reject an id that already
+        // exists in the real catalog. The client checks its rendered list too,
+        // but only the server can win the race against the auto-refresh scheduler
+        // (or a provider that later publishes this id) - persisting it would let
+        // the synthetic custom row double-render and shadow the catalog metadata.
+        if (repo.getRegistryCatalog(providerId).some((m) => m.id === id)) {
+          return { ok: false, reason: 'duplicate' };
+        }
+        repo.addCustomModel(providerId, id);
+        return { ok: true };
+      } catch {
+        return { ok: false };
+      }
+    },
+
+    async removeCustomModel({ providerId, modelId }): Promise<{ ok: boolean }> {
+      try {
+        repo.removeCustomModel(providerId, modelId.trim());
         return { ok: true };
       } catch {
         return { ok: false };
@@ -1053,10 +1143,7 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
           const all: CuratedModel[] = [];
           const seen = new Set<string>();
           for (const provider of repo.listRegistryProviders()) {
-            const curated = applyOverrides(
-              provider.providerId,
-              curator.curate(repo.getRegistryCatalog(provider.providerId))
-            );
+            const curated = curatedWithCustom(provider.providerId);
             for (const model of curated) {
               const dedupKey = `${model.providerId} ${model.id}`;
               if (seen.has(dedupKey)) continue;
@@ -1074,7 +1161,7 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
         // picker (#125 for Claude, #374 for Codex/Grok/…).
         const synthesizeProvider = async (underlying: ProviderId): Promise<CuratedModel[]> => {
           if (repo.getRegistryProvider(underlying)) {
-            return applyOverrides(underlying, curator.curate(repo.getRegistryCatalog(underlying)));
+            return curatedWithCustom(underlying);
           }
           const registry = await modelsDevClient.getRegistry().catch(() => ({}) as ModelsDevRegistry);
           const { models } = await assembler.assemble([new CloudRegistrySource(underlying, registry)], registry);
@@ -1094,7 +1181,7 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
           // picker fell to Flux-only (#374 reopen).
           for (const providerId of CLI_OAUTH_PROVIDERS[cliKey]) {
             if (!repo.getRegistryProvider(providerId)) continue;
-            const connected = applyOverrides(providerId, curator.curate(repo.getRegistryCatalog(providerId)));
+            const connected = curatedWithCustom(providerId);
             if (connected.length > 0) return connected;
           }
 
@@ -1227,6 +1314,15 @@ const CHAT_START_PLATFORM: Partial<Record<ProviderId, string>> = {
   // and the picker bounced the user to Settings - the model could never be
   // selected and the #243 engine routing was never reached (live-E2E gap).
   'chatgpt-subscription': 'openai-compatible',
+  // OpenAI-compatible subscription/gateway providers from the bundled catalog
+  // ("100+ more"), connected via API key. Their endpoint is persisted into
+  // `creds.baseUrl` at connect time (catalog fallback, #63), so chat-start
+  // dispatches OpenAI-compatible against the right host. Without these entries
+  // buildChatStartPayload returned `unsupported`, resolveForChatStart failed, and
+  // the picker bounced the user to Settings -> Models with no error, so the model
+  // could never be selected. OpenCode Go = #516, Vultr = #556.
+  'opencode-go': 'openai-compatible',
+  vultr: 'openai-compatible',
   // Azure intentionally absent - the legacy dispatch has no Azure arm; a
   // future Azure chat-start will need its own dispatcher work.
 };
@@ -1332,6 +1428,17 @@ type ChatStartBuildResult =
   | { kind: 'unsupported' }
   | { kind: 'undecryptable' };
 
+/**
+ * Every bundled-catalog provider id (the "100+ more" OpenAI-compatible long tail).
+ * The catalog generator (`isCatalogEligible`) EXCLUDES every `openai_compatible
+ * === false` (anthropic-wire) entry, so membership here is a guaranteed proxy for
+ * "the bundled catalog marks this provider openai_compatible". Native providers
+ * (anthropic / gemini / bedrock / vertex / azure) are never in the catalog - they
+ * carry explicit `CHAT_START_PLATFORM` entries instead. Computed once from the
+ * static bundled JSON (sync, network-free). Powers the #578 chat-start fallback.
+ */
+const CATALOG_OPENAI_COMPATIBLE_IDS: ReadonlySet<string> = new Set(loadBaselineProviderCatalog().map((e) => e.id));
+
 function buildChatStartPayload(
   providerId: ProviderId,
   modelId: string,
@@ -1341,7 +1448,19 @@ function buildChatStartPayload(
   // `gemini-with-google-auth` platform string (Fix 6). No api-key check.
   const isGoogleAuthGemini = providerId === 'google-gemini' && creds.useGoogleAuth === true;
 
-  const platform = isGoogleAuthGemini ? 'gemini-with-google-auth' : CHAT_START_PLATFORM[providerId];
+  let platform = isGoogleAuthGemini ? 'gemini-with-google-auth' : CHAT_START_PLATFORM[providerId];
+  if (!platform && CATALOG_OPENAI_COMPATIBLE_IDS.has(providerId)) {
+    // Durable fallback (#578): the provider has no hand-maintained
+    // CHAT_START_PLATFORM entry, but the bundled catalog marks it
+    // openai_compatible and its endpoint was persisted into `creds.baseUrl` at
+    // connect time (catalog fallback, #63). Dispatch it OpenAI-compatible against
+    // that stored baseUrl instead of returning `unsupported` (which bounces the
+    // picker to Settings - #516 / #556). A resolved baseUrl is REQUIRED: without
+    // a host there is nothing to dispatch against, so keep it unsupported below
+    // rather than silently defaulting to api.openai.com (the #36 401 trap).
+    const catalogBaseUrl = typeof creds.baseUrl === 'string' ? creds.baseUrl.trim() : '';
+    if (catalogBaseUrl.length > 0) platform = 'openai-compatible';
+  }
   if (!platform) return { kind: 'unsupported' };
 
   const payload: IModelRegistryChatStartPayload = {
@@ -1761,6 +1880,20 @@ export async function initModelRegistryIpc(): Promise<void> {
     // must land first or they'd revalidate onto the stale row - the exact desync
     // this fix closes. mirrorConnectOrRekey is runSerial-guarded + best-effort.
     if (result.ok && _repo) await mirrorConnectOrRekey(_repo, payload.providerId).catch(() => {});
+    if (result.ok) ipcBridge.modelRegistry.listChanged.emit();
+    return result;
+  });
+  ipcBridge.modelRegistry.addCustomModel.provider(async (payload) => {
+    const result = await h.addCustomModel(payload);
+    // A custom id joins the curated view (curatedForAgent) the pickers read, so
+    // revalidate them exactly like a toggle does. No legacy `model.config`
+    // mirror needed: the flyout resolves the owning provider by its `v2:` bridge
+    // tag, so a custom id is never gated on the legacy `model[]` membership.
+    if (result.ok) ipcBridge.modelRegistry.listChanged.emit();
+    return result;
+  });
+  ipcBridge.modelRegistry.removeCustomModel.provider(async (payload) => {
+    const result = await h.removeCustomModel(payload);
     if (result.ok) ipcBridge.modelRegistry.listChanged.emit();
     return result;
   });

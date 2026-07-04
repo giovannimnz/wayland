@@ -11,13 +11,15 @@ import { createInterface } from 'node:readline';
 import { parse, stringify } from 'smol-toml';
 import type { TProviderWithModel } from '@/common/config/storage';
 import { resolveWCoreBinary } from './binaryResolver';
-import { buildEngineSpawnEnv, buildSpawnConfig } from './envBuilder';
+import { buildEngineSpawnEnv, buildSpawnConfig, engineInheritsShellKey, MissingApiKeyError } from './envBuilder';
 import { resolveActiveConfigDir } from './profilePaths';
 import { getToolKeyStore } from './toolKeyStore';
 import { hydrateModelForSpawn } from '@process/providers/ipc/modelRegistryIpc';
 import { killChild } from '@process/agent/acp/utils';
+import { trackAgentChild } from '@process/agent/agentChildRegistry';
 import type { WCoreEvent, WCoreCommand, WCoreCapabilities } from './protocol';
 import { parseQuestionTool } from './questionTool';
+import { handleHostSendMessageRequest, defaultHostSendDeps } from './hostSendMessage';
 
 const WCORE_PROJECT_CONFIG = '.wcore.toml';
 
@@ -159,6 +161,16 @@ export class WCoreAgent {
   private _onPong: WCoreAgentOptions['onPong'];
   private options: WCoreAgentOptions;
   private activeMsgId: string | null = null;
+  // #520 command visibility: the wire's `tool_running` / `tool_result` events
+  // carry only `call_id` + `tool_name` - not the command/description. The engine
+  // sends the humanized command (e.g. "Execute: ls") once, on the preceding
+  // `tool_request` (ToolInfo.description). The renderer merges tool_group frames
+  // by callId with a plain `{...existing, ...incoming}` spread, so an incoming
+  // empty `description` OVERWRITES the command shown at request time - which is
+  // why the running/finished card lost the command after 0.11.2. We stash the
+  // request-time description per callId and re-attach it to the running/result
+  // frames so the command stays visible for the whole tool lifecycle.
+  private toolDescriptionByCallId = new Map<string, string>();
   private configBackup: { path: string; content: string | null; written: string | null } | null = null;
   private mcpReadyPromise: Promise<void>;
   private mcpReadyResolve!: () => void;
@@ -231,15 +243,34 @@ export class WCoreAgent {
     // (it uses the engine's own config.toml), so skip the lookup there.
     const spawnModel = this.options.rawEngineMode ? this.options.model : await hydrateModelForSpawn(this.options.model);
 
-    const { args, env, projectConfig, resolvedMaxTokens } = buildSpawnConfig(spawnModel, {
-      workspace: this.options.workspace,
-      maxTokens: this.options.maxTokens,
-      maxTurns: this.options.maxTurns,
-      autoApprove: this.options.yoloMode,
-      sessionId: this.options.sessionId,
-      resume: this.options.resume,
-      rawEngine: this.options.rawEngineMode,
-    });
+    const { args, env, projectConfig, resolvedMaxTokens, missingRequiredApiKey, requiredKeyEnvVar } = buildSpawnConfig(
+      spawnModel,
+      {
+        workspace: this.options.workspace,
+        maxTokens: this.options.maxTokens,
+        maxTurns: this.options.maxTurns,
+        autoApprove: this.options.yoloMode,
+        sessionId: this.options.sessionId,
+        resume: this.options.resume,
+        rawEngine: this.options.rawEngineMode,
+      }
+    );
+
+    // #629: refuse to spawn a doomed keyless engine. When the chosen provider
+    // needs an API key but `model.apiKey` resolved empty (e.g. a Flux/BYO key
+    // that was never persisted came back blank after a credit top-up), spawning
+    // would burn a 30s ready-timeout and then surface a raw "No API key found"
+    // with no recovery path. Fail fast with a classifiable error so the desktop
+    // routes the user to the credential-recovery card (re-enter key / reconnect
+    // Flux) instead. ChatGPT-OAuth, keyless-local openai, and raw-engine mode
+    // never set this flag. Skip the guard when the engine would still inherit a
+    // matching provider key from the user's SHELL (buildEngineSpawnEnv passes
+    // allowlisted keys through) - that spawn is authenticated, so blocking it
+    // would wrongly push a shell-key user to re-enter a key they already have.
+    if (missingRequiredApiKey && !engineInheritsShellKey(requiredKeyEnvVar)) {
+      throw new MissingApiKeyError(spawnModel.useModel);
+    }
+
     this.resolvedMaxTokens = resolvedMaxTokens;
 
     // Write temporary .wcore.toml for provider compat overrides
@@ -267,6 +298,10 @@ export class WCoreAgent {
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: this.options.workspace,
     });
+    // #443: register with the last-resort reaper so a quit that truncates the
+    // graceful per-agent kill still force-kills this engine child (auto-removed
+    // on exit / graceful kill).
+    trackAgentChild(this.childProcess);
 
     // Parse stdout JSON Lines
     const rl = createInterface({ input: this.childProcess.stdout! });
@@ -418,6 +453,9 @@ export class WCoreAgent {
         break;
 
       case 'tool_request':
+        // #520: remember the request-time command so the later running/result
+        // frames (which the wire sends without it) can re-surface it.
+        this.toolDescriptionByCallId.set(event.call_id, event.tool.description);
         this.onStreamEvent({
           type: 'tool_group',
           data: [
@@ -441,7 +479,8 @@ export class WCoreAgent {
             {
               callId: event.call_id,
               name: event.tool_name,
-              description: '',
+              // #520: carry the command forward (empty string would clobber it).
+              description: this.toolDescriptionByCallId.get(event.call_id) ?? '',
               status: 'Executing',
               renderOutputAsMarkdown: false,
             },
@@ -457,7 +496,9 @@ export class WCoreAgent {
             {
               callId: event.call_id,
               name: event.tool_name,
-              description: '',
+              // #520: keep the command on the finished card too (the result frame
+              // omits it, and the merge would otherwise blank it out).
+              description: this.toolDescriptionByCallId.get(event.call_id) ?? '',
               status: event.status === 'success' ? 'Success' : 'Error',
               resultDisplay:
                 event.output_type === 'diff'
@@ -468,6 +509,8 @@ export class WCoreAgent {
           ],
           msg_id: event.msg_id,
         });
+        // #520: the tool is terminal - drop its cached command.
+        this.toolDescriptionByCallId.delete(event.call_id);
         break;
 
       case 'tool_cancelled':
@@ -484,6 +527,8 @@ export class WCoreAgent {
           ],
           msg_id: event.msg_id,
         });
+        // #520: terminal - drop its cached command.
+        this.toolDescriptionByCallId.delete(event.call_id);
         break;
 
       case 'stream_end': {
@@ -785,6 +830,15 @@ export class WCoreAgent {
         });
         break;
 
+      // ── #537 host-delegated send_message ──────────────────────────
+      // The engine (spawned with WAYLAND_SEND_MESSAGE_HOST_DELEGATE=1) routes an
+      // agent `send_message` here instead of failing on its empty channel table.
+      // We fulfil it through the desktop's own outbound channel plugins and reply
+      // with the result, correlated by call_id.
+      case 'host_send_message_request':
+        void this.handleHostSendMessage(event);
+        break;
+
       // ── Forward-compat default arm ────────────────────────────────
       // The W0 Host Decoder Contract (docs/json-stream-protocol.md
       // §"Host Decoder Contract") says hosts MUST drop unknown event
@@ -805,6 +859,23 @@ export class WCoreAgent {
         break;
       }
     }
+  }
+
+  /**
+   * #537: fulfil a host-delegated `send_message` via the desktop's outbound
+   * channel plugins and reply with `host_send_message_result`. Always replies
+   * (even on failure) so the engine's tool call never hangs; the handler itself
+   * never throws.
+   */
+  private async handleHostSendMessage(event: WCoreEvent & { type: 'host_send_message_request' }): Promise<void> {
+    const result = await handleHostSendMessageRequest(event, defaultHostSendDeps());
+    this.sendCommand({
+      type: 'host_send_message_result',
+      call_id: event.call_id,
+      ok: result.ok,
+      ...(result.message_id ? { message_id: result.message_id } : {}),
+      ...(result.error ? { error: result.error } : {}),
+    });
   }
 
   /**

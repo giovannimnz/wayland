@@ -49,7 +49,7 @@ import type {
 } from '../types/onboarding';
 import type { ProtocolDetectionRequest, ProtocolDetectionResponse } from '../utils/protocolDetector';
 import type { SpeechToTextRequest, SpeechToTextResult } from '../types/speech';
-import type { DownloadResult, VoiceAsset } from '../types/voiceAsset';
+import type { DownloadProgress, DownloadResult, VoiceAsset } from '../types/voiceAsset';
 import type { SkillSecurityReport, SkillIndexEntry, SkillSource, SkillVerdict } from '../types/skillTypes';
 import type { ImportResult } from '../../process/services/skills/SkillImport';
 import type { KickoffGridResult, KickoffResult, KickoffTelemetryEvent } from '../../process/services/kickoff/types';
@@ -81,9 +81,18 @@ export type SkillStats = {
   verified: number;
 };
 
+/**
+ * Result of a shell open/reveal operation. The IPC bridge's `invoke` has no
+ * rejection channel (a throwing provider leaves the caller's promise pending
+ * forever), so open/reveal report success or failure through this value instead
+ * of throwing - letting the renderer surface a real error instead of a silent
+ * no-op when the OS handler (e.g. `xdg-open` on Linux) is missing or fails.
+ */
+export type ShellOpenResult = { ok: boolean; error?: string };
+
 export const shell = {
-  openFile: buildProvider<void, string>('open-file'), // Open file with the system default program
-  showItemInFolder: buildProvider<void, string>('show-item-in-folder'), // Open folder
+  openFile: buildProvider<ShellOpenResult, string>('open-file'), // Open file with the system default program
+  showItemInFolder: buildProvider<ShellOpenResult, string>('show-item-in-folder'), // Open folder
   openExternal: buildProvider<void, string>('open-external'), // Open external link with the system default program
   checkToolInstalled: buildProvider<boolean, { tool: string }>('shell.check-tool-installed'), // Check whether a tool is installed
   openFolderWith: buildProvider<void, { folderPath: string; tool: 'vscode' | 'terminal' | 'explorer' }>(
@@ -244,6 +253,21 @@ export interface IStartOnBootStatus {
   platform: string;
 }
 
+/**
+ * One-click bug-report payload (#464): app-window screenshot is placed on the OS
+ * clipboard by the main process; the rest pre-fills a GitHub issue. `diagnostics`
+ * is the already secret-masked `wayland_concierge_diag` overview.
+ */
+export type IBugReportData = {
+  appVersion: string;
+  engineVersion: string | null;
+  platform: string;
+  arch: string;
+  osRelease: string;
+  diagnostics: string;
+  screenshotCopied: boolean;
+};
+
 export const application = {
   restart: buildProvider<void, void>('restart-app'), // Restart app
   openDevTools: buildProvider<boolean, void>('open-dev-tools'), // Open/close DevTools, returns the resulting state
@@ -253,6 +277,10 @@ export const application = {
     void
   >('system.info'), // Get system info
   getPath: buildProvider<string, { name: 'desktop' | 'home' | 'downloads' }>('app.get-path'), // Get system path
+  // One-click bug report (#464): capture the app window (needs no OS Screen-Recording
+  // permission), copy it to the clipboard, and return diagnostics + versions to
+  // pre-fill a GitHub issue. Returned diagnostics are already secret-masked.
+  captureBugReport: buildProvider<IBridgeResponse<IBugReportData>, void>('app.capture-bug-report'),
   updateSystemInfo: buildProvider<IBridgeResponse, { cacheDir: string; workDir: string }>('system.update-info'), // Update system info
   getZoomFactor: buildProvider<number, void>('app.get-zoom-factor'),
   setZoomFactor: buildProvider<number, { factor: number }>('app.set-zoom-factor'),
@@ -454,6 +482,12 @@ export const skills = {
   scan: buildProvider<SkillSecurityReport | null, { name: string }>('skills.scan'),
   getReport: buildProvider<SkillSecurityReport | null, { name: string }>('skills.get-report'),
   rescanAll: buildProvider<{ rescanned: number }, void>('skills.rescan-all'),
+  /**
+   * Manual "Scan library" action (C4). Runs the same regex-only,
+   * scannerVersion-gated sweep as the app-start trigger and returns how many
+   * entries were (re)scanned. Never spends a model call — first-party content.
+   */
+  scanLibrary: buildProvider<{ rescanned: number }, void>('skills.scan-library'),
   import: {
     /** Import a skill from a local folder path. */
     folder: buildProvider<ImportResult, { srcPath: string }>('skills.import.folder'),
@@ -464,6 +498,17 @@ export const skills = {
     /** Import a single SKILL.md file. */
     singleSkillMd: buildProvider<ImportResult, { srcPath: string }>('skills.import.single-skill-md'),
   },
+  /**
+   * Register a previously-swept, user-approved `review` skill (C3 consent
+   * gate). Idempotent and replay-safe: the approval is keyed by the imported
+   * on-disk path + the `contentHash` the user actually saw, so an approval
+   * can't be replayed against a different body. Returns `{ ok: false }` with a
+   * reason when the on-disk content changed, is now blocked, or is missing.
+   */
+  confirmImport: buildProvider<
+    { ok: true } | { ok: false; error: 'content-changed' | 'blocked' | 'not-found' },
+    { name: string; destPath: string; contentHash: string }
+  >('skills.confirm-import'),
   /**
    * Return entries from the SkillLibrary index. Defaults to `type: 'skill'`
    * so the Skills page contract is preserved; pass `{ type: 'workflow' }`
@@ -577,6 +622,11 @@ export const imports = {
 export const voiceAsset = {
   download: buildProvider<DownloadResult, VoiceAsset>('voice-asset.download'),
   cancel: buildProvider<{ cancelled: boolean }, { assetId: string }>('voice-asset.cancel'),
+  // Streamed per-chunk download progress. voiceAssetBridge feeds this from the
+  // onProgress callback it hands to VoiceAssetManager.download; the renderer's
+  // download controls subscribe to drive <Progress/> (replaces the old
+  // hardcoded 0% + "progress reporting coming soon" stub).
+  downloadProgress: buildEmitter<DownloadProgress>('voice-asset.download-progress'),
   // Resolve the install state for a known asset. The renderer uses this to
   // suppress the Download button when the model is already on disk (no more
   // "Download Model" alongside an already-installed model).
@@ -1690,6 +1740,7 @@ export const extensions = {
 
 import type {
   IChannelPairingRequest,
+  IChannelPluginConfigView,
   IChannelPluginStatus,
   IChannelSession,
   IChannelUser,
@@ -1698,6 +1749,13 @@ import type {
 export const channel = {
   // Plugin Management
   getPluginStatus: buildProvider<IBridgeResponse<IChannelPluginStatus[]>, void>('channel.get-plugin-status'),
+  // Read back a plugin's SAVED non-secret config so the Settings form can
+  // rehydrate on reopen (fixes #548: form was always blank). Secrets are never
+  // returned - only presence flags in `secretPresence`. Remote-denied (see
+  // bridgeAllowlist) because it discloses saved connection details.
+  getPluginConfig: buildProvider<IBridgeResponse<IChannelPluginConfigView | null>, { pluginId: string }>(
+    'channel.get-plugin-config'
+  ),
   enablePlugin: buildProvider<IBridgeResponse, { pluginId: string; config: Record<string, unknown> }>(
     'channel.enable-plugin'
   ),
@@ -2051,6 +2109,16 @@ export const modelRegistry = {
   // Enable / disable a single model within a provider's catalog.
   toggleModel: buildProvider<{ ok: boolean }, { providerId: ProviderId; modelId: string; enabled: boolean }>(
     'modelRegistry.toggleModel'
+  ),
+  // Add a user-typed model id that isn't in the provider's public catalog
+  // (e.g. an OpenRouter preset `@preset/<slug>`, #617). Persisted separately so
+  // it survives catalog refreshes and merges into the curated picker view.
+  addCustomModel: buildProvider<{ ok: boolean; reason?: 'duplicate' }, { providerId: ProviderId; modelId: string }>(
+    'modelRegistry.addCustomModel'
+  ),
+  // Remove a previously added custom model id.
+  removeCustomModel: buildProvider<{ ok: boolean }, { providerId: ProviderId; modelId: string }>(
+    'modelRegistry.removeCustomModel'
   ),
   // Re-fetch a provider's model list + re-enrich.
   refresh: buildProvider<{ ok: boolean }, { providerId: ProviderId }>('modelRegistry.refresh'),
@@ -2654,6 +2722,10 @@ export const memory = {
   /** Import verbs - stubs until W1a wires the actual importers. */
   import: {
     claudeMem: buildProvider<{ count: number; errors: string[] }, void>('memory.import.claude-mem'),
+    /** Scan ~/Documents (max depth 4) for Obsidian vaults (dirs containing .obsidian/). */
+    obsidianDetectVaults: buildProvider<Array<{ path: string; name: string; mdFileCount: number }>, void>(
+      'memory.import.obsidian-detect-vaults'
+    ),
     obsidianVault: buildProvider<{ count: number; errors: string[] }, { vaultPath: string }>(
       'memory.import.obsidian-vault'
     ),
