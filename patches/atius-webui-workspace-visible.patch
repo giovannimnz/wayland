@@ -1,5 +1,5 @@
 diff --git a/package.json b/package.json
-index d86ca62b1..de1f5a04c 100644
+index 321ffaef7..de1f5a04c 100644
 --- a/package.json
 +++ b/package.json
 @@ -83,7 +83,12 @@
@@ -16,6 +16,23 @@ index d86ca62b1..de1f5a04c 100644
    },
    "dependencies": {
      "@agentclientprotocol/sdk": "^0.18.2",
+@@ -107,7 +112,6 @@
+     "@icon-park/react": "^1.4.2",
+     "@larksuiteoapi/node-sdk": "^1.58.0",
+     "@line/bot-sdk": "^11.0.0",
+-    "@lydell/node-pty": "^1.2.0-beta.12",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@monaco-editor/react": "^4.7.0",
+     "@noble/hashes": "^2.2.0",
+@@ -137,8 +141,6 @@
+     "@uiw/react-codemirror": "^4.25.2",
+     "@wecom/aibot-node-sdk": "^1.0.6",
+     "@whiskeysockets/baileys": "github:WhiskeySockets/Baileys#01047debd81beb20da7b7779b08edcb06aa03770",
+-    "@xterm/addon-fit": "^0.11.0",
+-    "@xterm/xterm": "^6.0.0",
+     "bcryptjs": "^3.0.3",
+     "better-sqlite3": "^12.4.1",
+     "buffer": "^6.0.3",
 diff --git a/scripts/install-ubuntu.sh b/scripts/install-ubuntu.sh
 index d9ba0071b..6fd211ce2 100755
 --- a/scripts/install-ubuntu.sh
@@ -23,7 +40,7 @@ index d9ba0071b..6fd211ce2 100755
 @@ -460,6 +460,18 @@ main() {
      # Step 7: 桌面捷徑（兩種模式都建立）
      create_desktop_entry
-
+ 
 +    # Step 8: optional local post-install hook (Atius overlay / service wiring)
 +    local script_dir
 +    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,11 +66,11 @@ index f3cc42413..ed3d2498f 100644
      const actualData = data.data || data;
 -    const properties = actualData.properties;
 +    const properties = Array.isArray(actualData?.properties) ? actualData.properties : [];
-
+ 
      // Determine if this is file selection mode
 -    const isFileMode = properties && properties.includes('openFile') && !properties.includes('openDirectory');
 +    const isFileMode = properties.includes('openFile') && !properties.includes('openDirectory');
-
+ 
 -    // Send file selection request to client with isFileMode flag
 +    // Flatten the provider payload back to the shape the WebUI modal expects:
 +    // { id, defaultPath, properties, filters?, isFileMode }. Earlier we forwarded
@@ -96,7 +113,7 @@ index e6711b8f9..dd662c5d4 100644
      }
 -  }, [visible, loadDirectory]);
 +  }, [visible, loadDirectory, initialPath]);
-
+ 
    const handleItemClick = (item: DirectoryItem) => {
      if (item.isDirectory) {
 diff --git a/src/renderer/hooks/file/useDirectorySelection.tsx b/src/renderer/hooks/file/useDirectorySelection.tsx
@@ -104,7 +121,7 @@ index 267fd8679..fe547ec02 100644
 --- a/src/renderer/hooks/file/useDirectorySelection.tsx
 +++ b/src/renderer/hooks/file/useDirectorySelection.tsx
 @@ -11,6 +11,7 @@ import DirectorySelectionModal from '@renderer/components/settings/DirectorySele
-
+ 
  interface DirectorySelectionRequest {
    id: string;
 +  defaultPath?: string;
@@ -136,13 +153,13 @@ index 9224d36b5..3145e3397 100644
    const fileInputRef = useRef<HTMLInputElement>(null);
    const [uploading, setUploading] = useState(false);
 +  const [workspacePickerVisible, setWorkspacePickerVisible] = useState(false);
-
+ 
    const handleLocalFileChange = useCallback(
      async (e: React.ChangeEvent<HTMLInputElement>) => {
 @@ -165,6 +167,20 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
      return [{ key: 'file', label: t('conversation.welcome.uploadFile'), onClick: openHostFilePicker }];
    }, [isWebUI, openHostFilePicker, t]);
-
+ 
 +  const openWorkspacePicker = useCallback(() => {
 +    if (isWebUI) {
 +      setWorkspacePickerVisible(true);
@@ -163,7 +180,7 @@ index 9224d36b5..3145e3397 100644
 @@ -200,30 +216,19 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
            )}
          </div>
-
+ 
 -        {!isWebUI && (
 +        {
            <Button
@@ -191,7 +208,7 @@ index 9224d36b5..3145e3397 100644
            </Button>
 -        )}
 +        }
-
+ 
          <div
            className={`${styles.actionConfigGroup} ${configOptionCount > 1 ? styles.actionConfigGroupWithDivider : ''}`}
 @@ -291,6 +296,17 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
@@ -255,7 +272,7 @@ index 6f2bb3023..c249c30bc 100644
 @@ -71,6 +71,15 @@ vi.mock('lucide-react', async (importOriginal) => ({
    Upload: () => <span>UploadOne</span>,
  }));
-
+ 
 +vi.mock('@/renderer/components/settings/DirectorySelectionModal', () => ({
 +  default: ({ visible, onConfirm }: { visible: boolean; onConfirm: (paths: string[] | undefined) => void }) =>
 +    visible ? (
@@ -269,7 +286,7 @@ index 6f2bb3023..c249c30bc 100644
    default: () => <div>AgentModeSelector</div>,
  }));
 @@ -168,12 +177,30 @@ describe('GuidActionRow', () => {
-
+ 
      await vi.waitFor(() => {
        expect(ipcBridge.dialog.showOpen.invoke).toHaveBeenCalledWith({
 +        defaultPath: '/home/ubuntu/GitHub',
@@ -278,7 +295,7 @@ index 6f2bb3023..c249c30bc 100644
        expect(onSelectWorkspace).toHaveBeenCalledWith('/chosen/path');
      });
    });
-
+ 
 +
 +  it('opens the web directory modal instead of invoking native dialog in WebUI mode', async () => {
 +    mockIsElectronDesktop.mockReturnValue(false);
