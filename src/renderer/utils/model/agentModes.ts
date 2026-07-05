@@ -6,6 +6,7 @@
 
 import {
   CODEX_MODE_AUTO_EDIT,
+  CODEX_MODE_CONFIG_TOML,
   CODEX_MODE_FULL_AUTO,
   CODEX_MODE_FULL_AUTO_NO_SANDBOX,
 } from '@/common/types/codex/codexModes';
@@ -75,6 +76,7 @@ export const AGENT_MODES: Record<string, AgentModeOption[]> = {
     { value: CODEX_MODE_AUTO_EDIT, label: 'Auto Edit' },
     { value: CODEX_MODE_FULL_AUTO, label: 'Full Auto' },
     { value: CODEX_MODE_FULL_AUTO_NO_SANDBOX, label: 'Full Auto (No Sandbox)' },
+    { value: CODEX_MODE_CONFIG_TOML, label: 'Custom (config.toml)' },
   ],
   cursor: [
     { value: 'agent', label: 'Agent', description: 'Full agent capabilities with tool access' },

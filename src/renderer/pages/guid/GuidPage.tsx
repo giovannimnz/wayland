@@ -239,6 +239,7 @@ const GuidPage: React.FC = () => {
     isPresetAgent: agentSelection.isPresetAgent,
     selectedMode: agentSelection.selectedMode,
     selectedAcpModel: agentSelection.selectedAcpModel,
+    selectedAcpEffort: agentSelection.selectedAcpEffort,
     pendingConfigOptions: agentSelection.pendingConfigOptions,
     cachedConfigOptions: agentSelection.cachedConfigOptions,
     currentModel: modelSelection.currentModel,
@@ -869,6 +870,10 @@ const GuidPage: React.FC = () => {
       currentAcpCachedModelInfo={agentSelection.currentAcpCachedModelInfo}
       selectedAcpModel={agentSelection.selectedAcpModel}
       setSelectedAcpModel={agentSelection.setSelectedAcpModel}
+      selectedAcpEffort={agentSelection.selectedAcpEffort}
+      setSelectedAcpEffort={agentSelection.setSelectedAcpEffort}
+      cachedConfigOptions={agentSelection.cachedConfigOptions}
+      onConfigOptionSelect={agentSelection.setPendingConfigOption}
     />
   );
 

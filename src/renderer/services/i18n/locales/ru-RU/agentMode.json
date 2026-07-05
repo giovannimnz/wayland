@@ -15,5 +15,6 @@
   "permission": "Разрешение",
   "switchMode": "Сменить режим",
   "switchSuccess": "Режим успешно сменён",
-  "switchFailed": "Не удалось сменить режим"
+  "switchFailed": "Не удалось сменить режим",
+  "configToml": "Custom (config.toml)"
 }

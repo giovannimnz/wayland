@@ -20,7 +20,11 @@
   font-weight: 500;
   letter-spacing: 0.01em;
   cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, transform 120ms ease;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
 }
 
 .pill:hover {
@@ -44,26 +48,19 @@
   color: #ffffff;
 }
 
-/* Narrow / mobile: a single horizontal scroll row instead of wrapping the
-   intent pills into 2-3 ragged rows (the #2 mobile-layout complaint). */
+/* Narrow / mobile: wrap visible intent pills instead of hiding later actions
+   behind horizontal scroll. */
 @media (max-width: 768px) {
   .pillBar {
-    flex-wrap: nowrap;
-    justify-content: flex-start;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scroll-snap-type: x proximity;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
+    flex-wrap: wrap;
+    justify-content: center;
+    overflow: visible;
     padding-bottom: 2px;
   }
 
-  .pillBar::-webkit-scrollbar {
-    display: none;
-  }
-
   .pill {
-    flex-shrink: 0;
-    scroll-snap-align: start;
+    flex: 1 1 104px;
+    min-width: min(104px, 100%);
+    justify-content: center;
   }
 }

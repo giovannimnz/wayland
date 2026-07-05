@@ -15,5 +15,6 @@
   "permission": "Permission",
   "switchMode": "Switch Mode",
   "switchSuccess": "Mode switched successfully",
-  "switchFailed": "Failed to switch mode"
+  "switchFailed": "Failed to switch mode",
+  "configToml": "Custom (config.toml)"
 }

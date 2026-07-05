@@ -215,6 +215,10 @@ const baseProps = {
   currentAcpCachedModelInfo: null,
   selectedAcpModel: null,
   setSelectedAcpModel: vi.fn(),
+  selectedAcpEffort: null,
+  setSelectedAcpEffort: vi.fn(),
+  cachedConfigOptions: [],
+  onConfigOptionSelect: vi.fn(),
 };
 
 beforeEach(() => {
@@ -226,6 +230,9 @@ beforeEach(() => {
   // resolves cleanly and stays silent in tests that don't exercise it.
   mockResolveForChatStart.mockResolvedValue({ ok: false, error: 'not-connected' });
   baseProps.setCurrentModel.mockClear();
+  baseProps.setSelectedAcpModel.mockClear();
+  baseProps.setSelectedAcpEffort.mockClear();
+  baseProps.onConfigOptionSelect.mockClear();
 });
 
 afterEach(() => {
@@ -516,6 +523,67 @@ describe('GuidModelSelector home picker', () => {
     await screen.findByText('Sonnet');
     expect(screen.getAllByText('$$').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('$')).toBeInTheDocument();
+  });
+
+  it('collapses Codex ACP model/effort variants into one model row plus a separate effort selector', async () => {
+    mockCuratedForAgent.mockResolvedValue([]);
+    const fireEventClick = (await import('@testing-library/react')).fireEvent.click;
+    const setSelectedAcpModel = vi.fn();
+    const setSelectedAcpEffort = vi.fn();
+    const onConfigOptionSelect = vi.fn();
+    const acpInfo = {
+      currentModelId: 'gpt-5.5/xhigh',
+      currentModelLabel: 'GPT-5.5 (xhigh)',
+      availableModels: [
+        { id: 'gpt-5.5/low', label: 'GPT-5.5 (low)' },
+        { id: 'gpt-5.5/medium', label: 'GPT-5.5 (medium)' },
+        { id: 'gpt-5.5/high', label: 'GPT-5.5 (high)' },
+        { id: 'gpt-5.5/xhigh', label: 'GPT-5.5 (xhigh)' },
+        { id: 'gpt-5.4/high', label: 'GPT-5.4 (high)' },
+      ],
+      canSwitch: true,
+      source: 'models' as const,
+      sourceDetail: 'codex-stream' as const,
+    };
+
+    render(
+      <GuidModelSelector
+        {...baseProps}
+        isGeminiMode={false}
+        agentKey='codex'
+        currentAcpCachedModelInfo={acpInfo}
+        selectedAcpModel='gpt-5.5/xhigh'
+        selectedAcpEffort='xhigh'
+        setSelectedAcpModel={setSelectedAcpModel}
+        setSelectedAcpEffort={setSelectedAcpEffort}
+        cachedConfigOptions={[
+          {
+            id: 'reasoning_effort',
+            category: 'thought_level',
+            type: 'select',
+            currentValue: 'xhigh',
+            options: [
+              { value: 'low', name: 'Low' },
+              { value: 'medium', name: 'Medium' },
+              { value: 'high', name: 'High' },
+              { value: 'xhigh', name: 'XHigh' },
+            ],
+          },
+        ]}
+        onConfigOptionSelect={onConfigOptionSelect}
+      />
+    );
+
+    expect(await screen.findByText('GPT-5.5')).toBeInTheDocument();
+    expect(screen.getByText('GPT-5.4')).toBeInTheDocument();
+    expect(screen.queryByText('GPT-5.5 (xhigh)')).not.toBeInTheDocument();
+
+    fireEventClick(screen.getByText('GPT-5.4'));
+    expect(setSelectedAcpModel).toHaveBeenCalledWith('gpt-5.4');
+
+    fireEventClick(screen.getByText('conversation.modelSelector.effortLow'));
+    expect(setSelectedAcpEffort).toHaveBeenCalledWith('low');
+    expect(onConfigOptionSelect).toHaveBeenCalledWith('reasoning_effort', 'low');
   });
 
   it('passes the non-secret chat-start handle through to setCurrentModel (audit C4)', async () => {

@@ -61,6 +61,11 @@ describe('getCodexSandboxModeForSessionMode (#536)', () => {
     expect(getCodexSandboxModeForSessionMode('autoEdit')).toBe('workspace-write');
   });
 
+  it('keeps configToml mode on the configured fallback instead of forcing a Wayland override', () => {
+    expect(getCodexSandboxModeForSessionMode('configToml')).toBe('read-only');
+    expect(getCodexSandboxModeForSessionMode('configToml', 'danger-full-access')).toBe('danger-full-access');
+  });
+
   it('maps an explicit no-sandbox (yolo) session mode to danger-full-access', () => {
     expect(getCodexSandboxModeForSessionMode('yoloNoSandbox')).toBe('danger-full-access');
   });

@@ -37,7 +37,8 @@ import { join } from 'path';
 export async function materializeFluxHermesHome(
   userDataDir: string,
   fluxKey: string,
-  baseURL: string = FLUX_SURFACE.openai
+  baseURL: string = FLUX_SURFACE.openai,
+  effort?: 'low' | 'medium' | 'high' | 'xhigh'
 ): Promise<string> {
   const hermesHomeDir = join(userDataDir, 'flux-hermes-home');
   const configPath = join(hermesHomeDir, 'config.yaml');
@@ -52,6 +53,7 @@ export async function materializeFluxHermesHome(
     `  base_url: ${baseURL}`,
     '  api_mode: chat_completions',
     `  api_key: '${fluxKey.replace(/'/g, "''")}'`,
+    ...(effort ? ['agent:', `  reasoning_effort: ${effort}`] : []),
     'providers: {}',
     '',
   ].join('\n');

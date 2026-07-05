@@ -15,5 +15,6 @@
   "permission": "Дозвіл",
   "switchMode": "Змінити режим",
   "switchSuccess": "Режим успішно змінено",
-  "switchFailed": "Не вдалося змінити режим"
+  "switchFailed": "Не вдалося змінити режим",
+  "configToml": "Custom (config.toml)"
 }

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { isCodexNoSandboxMode } from '@/common/types/codex/codexModes';
+import { isCodexConfigTomlMode, isCodexNoSandboxMode } from '@/common/types/codex/codexModes';
 import { FLUX_AUTO_MODEL, FLUX_MODEL_DISPLAY, FLUX_MODEL_IDS, FLUX_SURFACE } from '@/common/config/flux';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { access, copyFile, mkdir, readFile, rm, symlink, writeFile } from 'fs/promises';
@@ -54,6 +54,10 @@ export function getCodexSandboxModeForSessionMode(
   mode?: string | null,
   fallbackMode?: CodexSandboxMode | null
 ): CodexSandboxMode {
+  if (isCodexConfigTomlMode(mode)) {
+    return normalizeCodexSandboxMode(fallbackMode);
+  }
+
   if (mode) {
     return isCodexNoSandboxMode(mode) ? 'danger-full-access' : 'workspace-write';
   }
@@ -292,7 +296,7 @@ export async function materializeFluxCodexHome(
   baseURL: string = FLUX_SURFACE.responses,
   userConfigPath: string = getCodexConfigPath(),
   /** Per-conversation reasoning effort. When set, written as `model_reasoning_effort`. */
-  effort?: 'low' | 'medium' | 'high'
+  effort?: 'low' | 'medium' | 'high' | 'xhigh'
 ): Promise<string> {
   const codexHomeDir = join(userDataDir, 'flux-codex-home');
   const configPath = join(codexHomeDir, 'config.toml');

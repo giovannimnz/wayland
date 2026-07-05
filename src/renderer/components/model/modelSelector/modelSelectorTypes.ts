@@ -10,7 +10,7 @@ import type { CuratedModel } from '@/process/providers/types';
 export type { CuratedModel };
 
 /** Backend-gated effort levels (Codex / WCore / Claude-ACP). */
-export type EffortLevel = 'low' | 'medium' | 'high';
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh';
 
 /** A single selectable row in the flyout. */
 export type ModelRow = {

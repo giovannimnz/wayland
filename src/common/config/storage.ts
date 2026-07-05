@@ -531,7 +531,7 @@ export type TChatConversation =
           /** Project ID this conversation belongs to (umbrella scoping). Mirrors cronJobId - read via json_extract(extra,'$.projectId'). */
           projectId?: string;
           /** Per-conversation reasoning effort (Claude-ACP `effortLevel`). Absent => backend default. */
-          effort?: 'low' | 'medium' | 'high';
+          effort?: 'low' | 'medium' | 'high' | 'xhigh';
         }
       >,
       'model'
@@ -568,7 +568,7 @@ export type TChatConversation =
           /** Project ID this conversation belongs to (umbrella scoping). Mirrors cronJobId - read via json_extract(extra,'$.projectId'). */
           projectId?: string;
           /** Per-conversation reasoning effort (Codex `model_reasoning_effort`). Absent => backend default. */
-          effort?: 'low' | 'medium' | 'high';
+          effort?: 'low' | 'medium' | 'high' | 'xhigh';
         }
       >,
       'model'
@@ -720,7 +720,7 @@ export type TChatConversation =
         /** Project ID this conversation belongs to (umbrella scoping). Mirrors cronJobId - read via json_extract(extra,'$.projectId'). */
         projectId?: string;
         /** Per-conversation reasoning effort (WCore `set_config.effort`). Absent => backend default. */
-        effort?: 'low' | 'medium' | 'high';
+        effort?: 'low' | 'medium' | 'high' | 'xhigh';
       }
     >;
 

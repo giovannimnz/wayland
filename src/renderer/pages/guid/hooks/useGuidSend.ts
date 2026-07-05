@@ -17,6 +17,8 @@ import { type TFunction } from 'i18next';
 import type { NavigateFunction } from 'react-router-dom';
 import type { AcpBackend, AvailableAgent, EffectiveAgentInfo } from '../types';
 
+type GuidReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+
 export type GuidSendDeps = {
   // Input state
   input: string;
@@ -35,6 +37,7 @@ export type GuidSendDeps = {
   isPresetAgent: boolean;
   selectedMode: string;
   selectedAcpModel: string | null;
+  selectedAcpEffort: GuidReasoningEffort | null;
   pendingConfigOptions: Record<string, string>;
   cachedConfigOptions: import('@/common/types/acpTypes').AcpSessionConfigOption[];
   currentModel: TProviderWithModel | undefined;
@@ -138,6 +141,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     isPresetAgent,
     selectedMode,
     selectedAcpModel,
+    selectedAcpEffort,
     pendingConfigOptions,
     cachedConfigOptions,
     currentModel,
@@ -458,6 +462,9 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
         console.warn(`${acpBackend} CLI not found, but proceeding to let conversation panel handle it.`);
       }
       const agentBackend = acpBackend || selectedAgent;
+      const effectivePendingConfigOptions = selectedAcpEffort
+        ? { ...pendingConfigOptions, reasoning_effort: selectedAcpEffort }
+        : pendingConfigOptions;
       const agentConversationParams = buildAgentConversationParams({
         backend: agentBackend,
         name: input,
@@ -484,6 +491,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
           ...projectExtra,
           ...sessionSkillsExtra,
           excludeBuiltinSkills,
+          ...(selectedAcpEffort ? { effort: selectedAcpEffort } : {}),
         },
       });
 
@@ -491,9 +499,9 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
         // Merge pending selections into cached options so the UI shows the user's choice immediately
         const mergedCachedConfigOptions =
           cachedConfigOptions.length > 0
-            ? Object.keys(pendingConfigOptions).length > 0
+            ? Object.keys(effectivePendingConfigOptions).length > 0
               ? cachedConfigOptions.map((opt) => {
-                  const pending = opt.id ? pendingConfigOptions[opt.id] : undefined;
+                  const pending = opt.id ? effectivePendingConfigOptions[opt.id] : undefined;
                   return pending ? { ...opt, currentValue: pending, selectedValue: pending } : opt;
                 })
               : cachedConfigOptions
@@ -506,8 +514,11 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
             cachedConfigOptions: mergedCachedConfigOptions,
           };
         }
-        if (Object.keys(pendingConfigOptions).length > 0) {
-          agentConversationParams.extra = { ...agentConversationParams.extra, pendingConfigOptions };
+        if (Object.keys(effectivePendingConfigOptions).length > 0) {
+          agentConversationParams.extra = {
+            ...agentConversationParams.extra,
+            pendingConfigOptions: effectivePendingConfigOptions,
+          };
         }
 
         const conversation = await ipcBridge.conversation.create.invoke(agentConversationParams);
@@ -547,6 +558,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     isPresetAgent,
     selectedMode,
     selectedAcpModel,
+    selectedAcpEffort,
     pendingConfigOptions,
     cachedConfigOptions,
     currentModel,
@@ -565,42 +577,45 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     projectWorkspace,
   ]);
 
-  const sendMessageHandler = useCallback((opts?: { onSent?: () => void }) => {
-    if (loading || sendingRef.current) return;
-    sendingRef.current = true;
-    setLoading(true);
-    handleSend()
-      .then((ok) => {
-        setInput('');
-        setMentionOpen(false);
-        setMentionQuery(null);
-        setMentionSelectorOpen(false);
-        setMentionActiveIndex(0);
-        setFiles([]);
-        setDir('');
-        // Cross-audit MED-3: only fire onSent (telemetry) when the send
-        // actually succeeded - validation early-returns resolve to false.
-        if (ok) opts?.onSent?.();
-      })
-      .catch((error) => {
-        console.error('Failed to send message:', error);
-      })
-      .finally(() => {
-        sendingRef.current = false;
-        setLoading(false);
-      });
-  }, [
-    loading,
-    handleSend,
-    setLoading,
-    setInput,
-    setMentionOpen,
-    setMentionQuery,
-    setMentionSelectorOpen,
-    setMentionActiveIndex,
-    setFiles,
-    setDir,
-  ]);
+  const sendMessageHandler = useCallback(
+    (opts?: { onSent?: () => void }) => {
+      if (loading || sendingRef.current) return;
+      sendingRef.current = true;
+      setLoading(true);
+      handleSend()
+        .then((ok) => {
+          setInput('');
+          setMentionOpen(false);
+          setMentionQuery(null);
+          setMentionSelectorOpen(false);
+          setMentionActiveIndex(0);
+          setFiles([]);
+          setDir('');
+          // Cross-audit MED-3: only fire onSent (telemetry) when the send
+          // actually succeeded - validation early-returns resolve to false.
+          if (ok) opts?.onSent?.();
+        })
+        .catch((error) => {
+          console.error('Failed to send message:', error);
+        })
+        .finally(() => {
+          sendingRef.current = false;
+          setLoading(false);
+        });
+    },
+    [
+      loading,
+      handleSend,
+      setLoading,
+      setInput,
+      setMentionOpen,
+      setMentionQuery,
+      setMentionSelectorOpen,
+      setMentionActiveIndex,
+      setFiles,
+      setDir,
+    ]
+  );
 
   // No usable model configured. Mirrors the send-time validation: only the
   // model-backed backends actually reject on a missing model - the Gemini path

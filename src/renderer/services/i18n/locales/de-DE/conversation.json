@@ -438,6 +438,8 @@
     "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
     "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
     "connectProvider": "Connect a provider",
-    "manageModels": "Manage models"
+    "manageModels": "Manage models",
+    "effortXhigh": "XHigh",
+    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
   }
 }

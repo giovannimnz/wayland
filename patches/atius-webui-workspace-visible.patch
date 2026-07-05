@@ -1,3 +1,184 @@
+diff --git a/atius-overlay.json b/atius-overlay.json
+new file mode 100644
+index 000000000..e111a3a73
+--- /dev/null
++++ b/atius-overlay.json
+@@ -0,0 +1,9 @@
++{
++  "overlay_name": "atius-webui-workspace-visible",
++  "runtime_mode": "standalone-source-managed",
++  "owner": "atius-srv-3",
++  "patch_file": "patches/atius-webui-workspace-visible.patch",
++  "update_entrypoint": "scripts/atius-update.sh",
++  "postinstall_entrypoint": "scripts/atius-postinstall-hook.sh",
++  "doc": "docs/guides/atius-fork-runtime.md"
++}
+diff --git a/docs/README.md b/docs/README.md
+index a85d779cb..36b229afd 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -17,6 +17,7 @@ Documentation is organized by reader intent, not by document type.
+ - New to the project? Start with [`architecture/overview.md`](architecture/overview.md).
+ - Setting up a dev environment? See [`contributing/development.md`](contributing/development.md).
+ - Writing code? The entry point for code-style, linting, formatting, and commit rules is [`AGENTS.md`](../AGENTS.md) at the repo root.
++- Operating the ATIUS srv-3 runtime/fork? See [`guides/atius-fork-runtime.md`](guides/atius-fork-runtime.md).
+ - Deploying a server? [`guides/deploy-server.md`](guides/deploy-server.md).
+
+ ## Where to put new docs
+diff --git a/docs/guides/atius-fork-runtime.md b/docs/guides/atius-fork-runtime.md
+new file mode 100644
+index 000000000..b1a24c05a
+--- /dev/null
++++ b/docs/guides/atius-fork-runtime.md
+@@ -0,0 +1,148 @@
++# Atius srv-3 fork/runtime guide
++
++This guide documents the ATIUS-managed source runtime served at
++`https://wayland.atius.com.br/` from the `atius-srv-3` checkout.
++
++## What is different from upstream
++
++The upstream project ships a packaged desktop/server workflow. The ATIUS host
++runs the source checkout directly:
++
++- repo: `/home/ubuntu/GitHub/wayland`
++- service: `wayland.service`
++- runtime entrypoint: `/home/ubuntu/GitHub/wayland/dist-server/server.mjs`
++- port: `25808`
++- service user: `wayland`
++
++The deployment is rebuilt from source after custom patch application instead of
++using the stock packaged auto-update flow.
++
++## Source-of-truth files
++
++Tracked ATIUS source customizations live in these files:
++
++- `patches/atius-webui-workspace-visible.patch`
++- `scripts/atius-apply-source-patch.sh`
++- `scripts/atius-build-renderer-overlay.sh`
++- `scripts/atius-postinstall-hook.sh`
++- `scripts/atius-refresh-source-patch.sh`
++- `scripts/atius-reapply-renderer-overlay.sh`
++- `scripts/atius-update.sh`
++- `scripts/install-ubuntu.sh`
++- `scripts/build-server.mjs`
++- `scripts/build-mcp-servers.js`
++- `src/process/agent/acp/AcpDetector.ts`
++- `src/process/extensions/data/bundle-vendored/agentProfileMerge.ts`
++- `src/process/extensions/resolvers/ChannelPluginResolver.ts`
++- `src/process/utils/initStorage.ts`
++- `src/process/utils/shellEnv.ts`
++- `src/process/webserver/routes/apiRoutes.ts`
++- `src/process/webserver/websocket/WebSocketManager.ts`
++- `src/common/adapter/ipcBridge.ts`
++- `src/common/config/storage.ts`
++- `src/common/types/codex/codexModes.ts`
++- `src/common/types/codex/types/eventData.ts`
++- `src/process/task/AcpAgentManager.ts`
++- `src/process/task/WCoreManager.ts`
++- `src/process/task/claudeConfig.ts`
++- `src/process/task/codexConfig.ts`
++- `src/process/task/hermesConfig.ts`
++- `src/renderer/components/agent/AgentModeSelector.tsx`
++- `src/renderer/components/model/modelSelector/EffortSubRow.tsx`
++- `src/renderer/components/model/modelSelector/modelSelectorTypes.ts`
++- `src/renderer/components/settings/DirectorySelectionModal.tsx`
++- `src/renderer/hooks/file/useDirectorySelection.tsx`
++- `src/renderer/pages/guid/GuidPage.tsx`
++- `src/renderer/pages/guid/index.module.css`
++- `src/renderer/pages/guid/components/AgentPillBar.tsx`
++- `src/renderer/pages/guid/components/GuidActionRow.tsx`
++- `src/renderer/pages/guid/components/GuidModelSelector.tsx`
++- `src/renderer/pages/guid/components/newChatStarter/IntentPillBar.module.css`
++- `src/renderer/pages/guid/hooks/useGuidAgentSelection.ts`
++- `src/renderer/pages/guid/hooks/useGuidSend.ts`
++- `src/renderer/services/i18n/i18n-keys.d.ts`
++- `src/renderer/services/i18n/index.ts`
++- `src/renderer/services/i18n/locales/*/agentMode.json`
++- `src/renderer/services/i18n/locales/*/conversation.json`
++- `src/renderer/utils/model/agentModes.ts`
++
++Generated artifacts are intentionally not tracked:
++
++- `.atius-overlay/`
++- `out/renderer/`
++- `dist-server/`
++
++## Current ATIUS behaviors to preserve
++
++- `Conversar na pasta` stays visible on the WebUI, defaults to `/home/ubuntu/GitHub`, and opens the browser directory picker.
++- The login screen defaults to `pt-BR` when no saved language exists.
++- Standalone build output includes the MCP stdio scripts required by the server startup canary.
++- Service-shell env loading skips non-interactive login shells like `/usr/sbin/nologin`.
++- ACP detection stays quiet for missing optional CLIs while detecting Codex and Hermes Agent.
++- The GUID model picker keeps the selected Codex label even before `acp.cachedModels` exists.
++- Codex and Hermes display model and reasoning effort as separate adjacent controls; model menus do not duplicate effort variants.
++- Codex permission mode includes `Custom (config.toml)` / `Personalizado(config.toml)` to delegate sandbox defaults back to the service user's Codex config.
++- The GUID agent pill bar exposes collapsed agents by accessible name so Hermes/Codex can be selected by keyboard and automation.
++- Mobile GUID controls wrap visibly instead of hiding later model/effort/permission or intent options behind horizontal overflow.
++
++## Rebuild/update flow
++
++Apply the tracked source patch and rebuild the source runtime:
++
++```bash
++bash scripts/atius-build-renderer-overlay.sh
++```
++
++Rebuild and restart the live service with the canonical ATIUS hook:
++
++```bash
++bash scripts/atius-update.sh
++```
++
++`scripts/atius-postinstall-hook.sh` is the authoritative systemd/runtime wiring hook. It:
++
++- grants the `wayland` service user access to the checkout,
++- writes `/etc/systemd/system/wayland.service.d/atius-overlay.conf`,
++- rebuilds the source runtime,
++- restarts `wayland.service`.
++
++## Validation
++
++```bash
++NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/renderer/guid/firstSafeCuratedModel.test.ts
++NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/AgentPillBar.dom.test.tsx tests/unit/renderer/guidModelSelector.dom.test.tsx tests/unit/useGuidSend.dom.test.ts tests/unit/process/task/codexNativeSandbox.test.ts tests/unit/process/task/codexConfigEffort.test.ts
++npm run typecheck
++bash scripts/atius-build-renderer-overlay.sh
++sudo systemctl restart wayland.service
++systemctl is-active wayland.service
++curl -fsS -o /dev/null -w "http=%{http_code}\n" http://127.0.0.1:25808/
++journalctl -u wayland.service --since "5 minutes ago" --no-pager | grep -E "AgentRegistry|found 4 agents|Serving renderer|WebUI running"
++```
++
++Expected runtime signals:
++
++- `wayland.service` is `active`
++- local HTTP on `127.0.0.1:25808` returns `200`
++- startup logs include `found 4 agents: Wayland Core, Gemini CLI, Codex, Hermes Agent`
++
++## Git/GitHub note
++
++This checkout is intended to become the ATIUS fork lane for upstream sync. Do
++not push ATIUS changes to `FerroxLabs/wayland`. Reserve upstream for fetch/merge
++and publish ATIUS history to the Giovanni fork once that remote exists.
++
++
++## 2026-07-05 GUID UI QA
++
++Validated on `https://wayland.atius.com.br/#/guid` with Playwright/Chromium at
++`1980x1080`, `1440x900`, `1024x768`, and `390x844`.
++
++Confirmed behaviors:
++
++- no horizontal page overflow at any tested viewport;
++- `Conversar na pasta` opens the WebUI directory picker at `/home/ubuntu/GitHub`;
++- Codex model menu shows base models only, while effort is selected separately;
++- Hermes Agent shows the same separate effort selector;
++- Codex permission menu includes `Custom (config.toml)`;
++- Hermes/Codex agent pills are accessible by name for keyboard/automation;
++- mobile composer controls and intent pills wrap visibly.
 diff --git a/package.json b/package.json
 index 321ffaef7..6a3832ab5 100644
 --- a/package.json
@@ -16,6 +197,401 @@ index 321ffaef7..6a3832ab5 100644
    },
    "dependencies": {
      "@agentclientprotocol/sdk": "^0.18.2",
+diff --git a/scripts/atius-apply-source-patch.sh b/scripts/atius-apply-source-patch.sh
+new file mode 100755
+index 000000000..9bd37b712
+--- /dev/null
++++ b/scripts/atius-apply-source-patch.sh
+@@ -0,0 +1,20 @@
++#!/usr/bin/env bash
++set -euo pipefail
++ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
++PATCH="$ROOT/patches/atius-webui-workspace-visible.patch"
++cd "$ROOT"
++if [[ ! -f "$PATCH" ]]; then
++  echo "[atius-patch] patch file not found: $PATCH" >&2
++  exit 1
++fi
++if git apply --reverse --check --recount "$PATCH" >/dev/null 2>&1; then
++  echo "[atius-patch] source patch already applied"
++  exit 0
++fi
++if git apply --check --recount "$PATCH" >/dev/null 2>&1; then
++  git apply --recount "$PATCH"
++  echo "[atius-patch] source patch applied"
++  exit 0
++fi
++echo "[atius-patch] patch no longer applies cleanly. Refresh it from the customized tree with scripts/atius-refresh-source-patch.sh" >&2
++exit 1
+diff --git a/scripts/atius-build-renderer-overlay.sh b/scripts/atius-build-renderer-overlay.sh
+new file mode 100755
+index 000000000..8c9904dda
+--- /dev/null
++++ b/scripts/atius-build-renderer-overlay.sh
+@@ -0,0 +1,72 @@
++#!/usr/bin/env bash
++set -euo pipefail
++ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
++
++limit_build_cpu() {
++  if [[ "${ATIUS_BUILD_CPU_LIMITED:-0}" == "1" ]]; then
++    return
++  fi
++  local cpu_total cpu_limit cpu_end cpuset
++  cpu_total="$(nproc 2>/dev/null || echo 1)"
++  if ! [[ "$cpu_total" =~ ^[0-9]+$ ]] || [[ "$cpu_total" -lt 1 ]]; then
++    cpu_total=1
++  fi
++  cpu_limit=$((cpu_total / 2))
++  if [[ "$cpu_limit" -lt 1 ]]; then
++    cpu_limit=1
++  fi
++  export MAKEFLAGS="-j${cpu_limit}"
++  export npm_config_jobs="${cpu_limit}"
++  export GOMAXPROCS="${cpu_limit}"
++  export UV_THREADPOOL_SIZE="${cpu_limit}"
++  if command -v taskset >/dev/null 2>&1; then
++    cpu_end=$((cpu_limit - 1))
++    cpuset="0-${cpu_end}"
++    export ATIUS_BUILD_CPU_LIMITED=1
++    echo "[atius-build] limiting build to CPU set ${cpuset} (${cpu_limit}/${cpu_total} cores)"
++    local runner=(taskset -c "$cpuset")
++    if command -v nice >/dev/null 2>&1; then
++      runner+=(nice -n 10)
++    fi
++    if command -v ionice >/dev/null 2>&1; then
++      runner+=(ionice -c2 -n7)
++    fi
++    runner+=(bash "$0" "$@")
++    exec "${runner[@]}"
++  fi
++}
++limit_build_cpu "$@"
++BUN_BIN="${BUN_BIN:-}"
++if [[ -z "$BUN_BIN" ]]; then
++  if command -v bun >/dev/null 2>&1; then
++    BUN_BIN="$(command -v bun)"
++  elif [[ -x /opt/Wayland/resources/bundled-bun/linux-arm64/bun ]]; then
++    BUN_BIN="/opt/Wayland/resources/bundled-bun/linux-arm64/bun"
++  else
++    echo "[atius-build] bun not found" >&2
++    exit 1
++  fi
++fi
++cd "$ROOT"
++bash scripts/atius-apply-source-patch.sh
++"$BUN_BIN" install --frozen-lockfile --ignore-scripts
++"$BUN_BIN" x vite build --config vite.renderer.config.ts
++node scripts/build-server.mjs
++python3 - <<'PY'
++import json, pathlib, subprocess, time
++root = pathlib.Path('.').resolve()
++version = json.load(open(root / 'package.json'))['version']
++try:
++    git_sha = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'], cwd=root, text=True).strip()
++except Exception:
++    git_sha = 'nogit'
++meta = {
++    'mode': 'standalone-source',
++    'version': version,
++    'git_sha': git_sha,
++    'built_at_epoch': int(time.time()),
++}
++(pathlib.Path(root / '.atius-overlay')).mkdir(exist_ok=True)
++(pathlib.Path(root / '.atius-overlay' / 'meta.json')).write_text(json.dumps(meta, indent=2) + '\n')
++print('[atius-build] built', json.dumps(meta))
++PY
+diff --git a/scripts/atius-postinstall-hook.sh b/scripts/atius-postinstall-hook.sh
+new file mode 100755
+index 000000000..b1b94032e
+--- /dev/null
++++ b/scripts/atius-postinstall-hook.sh
+@@ -0,0 +1,33 @@
++#!/usr/bin/env bash
++set -euo pipefail
++ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
++BUN_BIN="/opt/Wayland/resources/bundled-bun/linux-arm64/bun"
++sudo setfacl -m u:wayland:rx /home/ubuntu
++sudo setfacl -m u:wayland:rx /home/ubuntu/GitHub
++sudo setfacl -R -m u:wayland:rx "$ROOT"
++sudo setfacl -R -m u:wayland:rX "$ROOT/node_modules" 2>/dev/null || true
++sudo mkdir -p /etc/systemd/system/wayland.service.d
++sudo tee /etc/systemd/system/wayland.service.d/atius-overlay.conf >/dev/null <<CONF
++[Service]
++ExecStart=
++ExecStartPre=
++WorkingDirectory=${ROOT}
++Environment=HOME=/var/lib/wayland
++Environment=WAYLAND_WORKDIR=/var/lib/wayland
++Environment=DATA_DIR=/var/lib/wayland/.config/Wayland
++Environment=LOGS_DIR=/var/lib/wayland/.config/Wayland/logs
++Environment=NODE_ENV=production
++Environment=ALLOW_REMOTE=true
++Environment=PORT=25808
++Environment=SERVER_BASE_URL=https://wayland.atius.com.br
++Environment=WAYLAND_ALLOWED_ORIGINS=https://wayland.atius.com.br
++Environment=WAYLAND_OPERATOR_CIDRS=10.1.1.1/32
++Environment=WAYLAND_DISABLE_AUTO_UPDATE=1
++Environment=PATH=/opt/Wayland/resources/bundled-bun/linux-arm64:/var/lib/wayland/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/snap/bin
++ExecStart=${BUN_BIN} ${ROOT}/dist-server/server.mjs
++TimeoutStartSec=180
++CONF
++sudo systemctl disable --now wayland-atius-overlay.path wayland-atius-overlay.service >/dev/null 2>&1 || true
++sudo systemctl daemon-reload
++bash "$ROOT/scripts/atius-build-renderer-overlay.sh"
++sudo systemctl restart wayland.service
+diff --git a/scripts/atius-reapply-renderer-overlay.sh b/scripts/atius-reapply-renderer-overlay.sh
+new file mode 100755
+index 000000000..171b72c4f
+--- /dev/null
++++ b/scripts/atius-reapply-renderer-overlay.sh
+@@ -0,0 +1,5 @@
++#!/usr/bin/env bash
++set -euo pipefail
++ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
++bash "$ROOT/scripts/atius-refresh-source-patch.sh"
++bash "$ROOT/scripts/atius-build-renderer-overlay.sh"
+diff --git a/scripts/atius-refresh-source-patch.sh b/scripts/atius-refresh-source-patch.sh
+new file mode 100755
+index 000000000..b647f763c
+--- /dev/null
++++ b/scripts/atius-refresh-source-patch.sh
+@@ -0,0 +1,141 @@
++#!/usr/bin/env bash
++set -euo pipefail
++ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
++PATCH="${PATCH:-$ROOT/patches/atius-webui-workspace-visible.patch}"
++BASE_REF="${BASE_REF:-upstream/main}"
++COMMIT_IF_CHANGED=0
++if [[ "${1:-}" == "--commit-if-changed" ]]; then
++  COMMIT_IF_CHANGED=1
++  shift
++fi
++if [[ $# -gt 0 ]]; then
++  BASE_REF="$1"
++fi
++FILES=(
++  package.json
++  atius-overlay.json
++  scripts/install-ubuntu.sh
++  scripts/build-server.mjs
++  scripts/build-mcp-servers.js
++  scripts/atius-apply-source-patch.sh
++  scripts/atius-build-renderer-overlay.sh
++  scripts/atius-postinstall-hook.sh
++  scripts/atius-refresh-source-patch.sh
++  scripts/atius-reapply-renderer-overlay.sh
++  scripts/atius-update.sh
++  src/common/adapter/ipcBridge.ts
++  src/common/config/storage.ts
++  src/common/types/codex/codexModes.ts
++  src/common/types/codex/types/eventData.ts
++  src/process/agent/acp/AcpDetector.ts
++  src/process/extensions/data/bundle-vendored/agentProfileMerge.ts
++  src/process/extensions/resolvers/ChannelPluginResolver.ts
++  src/process/task/AcpAgentManager.ts
++  src/process/task/WCoreManager.ts
++  src/process/task/claudeConfig.ts
++  src/process/task/codexConfig.ts
++  src/process/task/hermesConfig.ts
++  src/process/utils/initStorage.ts
++  src/process/utils/shellEnv.ts
++  src/process/webserver/routes/apiRoutes.ts
++  src/process/webserver/websocket/WebSocketManager.ts
++  src/renderer/components/agent/AgentModeSelector.tsx
++  src/renderer/components/model/modelSelector/EffortSubRow.tsx
++  src/renderer/components/model/modelSelector/modelSelectorTypes.ts
++  src/renderer/components/settings/DirectorySelectionModal.tsx
++  src/renderer/hooks/file/useDirectorySelection.tsx
++  src/renderer/pages/guid/GuidPage.tsx
++  src/renderer/pages/guid/index.module.css
++  src/renderer/pages/guid/components/AgentPillBar.tsx
++  src/renderer/pages/guid/components/GuidActionRow.tsx
++  src/renderer/pages/guid/components/GuidModelSelector.tsx
++  src/renderer/pages/guid/components/newChatStarter/IntentPillBar.module.css
++  src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
++  src/renderer/pages/guid/hooks/useGuidSend.ts
++  src/renderer/services/i18n/i18n-keys.d.ts
++  src/renderer/services/i18n/index.ts
++  src/renderer/utils/model/agentModes.ts
++  src/renderer/services/i18n/locales/de-DE/agentMode.json
++  src/renderer/services/i18n/locales/en-US/agentMode.json
++  src/renderer/services/i18n/locales/es-ES/agentMode.json
++  src/renderer/services/i18n/locales/fr-FR/agentMode.json
++  src/renderer/services/i18n/locales/ja-JP/agentMode.json
++  src/renderer/services/i18n/locales/ko-KR/agentMode.json
++  src/renderer/services/i18n/locales/pt-BR/agentMode.json
++  src/renderer/services/i18n/locales/ru-RU/agentMode.json
++  src/renderer/services/i18n/locales/tr-TR/agentMode.json
++  src/renderer/services/i18n/locales/uk-UA/agentMode.json
++  src/renderer/services/i18n/locales/zh-CN/agentMode.json
++  src/renderer/services/i18n/locales/zh-TW/agentMode.json
++  src/renderer/services/i18n/locales/de-DE/conversation.json
++  src/renderer/services/i18n/locales/en-US/conversation.json
++  src/renderer/services/i18n/locales/es-ES/conversation.json
++  src/renderer/services/i18n/locales/fr-FR/conversation.json
++  src/renderer/services/i18n/locales/ja-JP/conversation.json
++  src/renderer/services/i18n/locales/ko-KR/conversation.json
++  src/renderer/services/i18n/locales/pt-BR/conversation.json
++  src/renderer/services/i18n/locales/ru-RU/conversation.json
++  src/renderer/services/i18n/locales/tr-TR/conversation.json
++  src/renderer/services/i18n/locales/uk-UA/conversation.json
++  src/renderer/services/i18n/locales/zh-CN/conversation.json
++  src/renderer/services/i18n/locales/zh-TW/conversation.json
++  tests/unit/WebSocketManager.test.ts
++  tests/unit/AgentPillBar.dom.test.tsx
++  tests/unit/process/task/codexConfigEffort.test.ts
++  tests/unit/process/task/codexNativeSandbox.test.ts
++  tests/unit/renderer/AcpConfigSelector.dom.test.tsx
++  tests/unit/renderer/GuidActionRow.dom.test.tsx
++  tests/unit/renderer/guid/firstSafeCuratedModel.test.ts
++  tests/unit/renderer/guidModelSelector.dom.test.tsx
++  tests/unit/useGuidSend.dom.test.ts
++  docs/README.md
++  docs/guides/atius-fork-runtime.md
++)
++cd "$ROOT"
++git rev-parse --verify "$BASE_REF" >/dev/null 2>&1 || {
++  echo "[atius-refresh] base ref not found: $BASE_REF" >&2
++  exit 1
++}
++
++# Re-apply ATIUS package.json customizations on top of the exact upstream file,
++# so dependency and version bumps from upstream are never frozen by our fork.
++upstream_pkg_tmp="$(mktemp)"
++patch_tmp="$(mktemp)"
++cleanup() { rm -f "$upstream_pkg_tmp" "$patch_tmp"; }
++trap cleanup EXIT
++git show "$BASE_REF:package.json" > "$upstream_pkg_tmp"
++node - "$upstream_pkg_tmp" "$ROOT/package.json" <<'NODE'
++const fs = require('fs');
++const upstreamPath = process.argv[2];
++const currentPath = process.argv[3];
++const upstream = JSON.parse(fs.readFileSync(upstreamPath, 'utf8'));
++upstream.scripts = {
++  ...(upstream.scripts || {}),
++  'atius:apply-patch': 'bash scripts/atius-apply-source-patch.sh',
++  'atius:build-overlay': 'bash scripts/atius-build-renderer-overlay.sh',
++  'atius:reapply-overlay': 'bash scripts/atius-reapply-renderer-overlay.sh',
++  'atius:postinstall-hook': 'bash scripts/atius-postinstall-hook.sh',
++  'atius:update': 'bash scripts/atius-update.sh',
++};
++fs.writeFileSync(currentPath, JSON.stringify(upstream, null, 2) + '\n');
++NODE
++
++mkdir -p "$(dirname "$PATCH")"
++git diff --no-ext-diff --binary "$BASE_REF" -- "${FILES[@]}" > "$patch_tmp"
++perl -pi -e 's/[ \t]+$//' "$patch_tmp"
++if [[ -f "$PATCH" ]] && cmp -s "$patch_tmp" "$PATCH"; then
++  echo "[atius-refresh] patch already up to date"
++  exit 0
++fi
++mv "$patch_tmp" "$PATCH"
++trap - EXIT
++chmod 0644 "$PATCH"
++echo "[atius-refresh] patch updated: $PATCH"
++if [[ $COMMIT_IF_CHANGED -eq 1 ]]; then
++  git add package.json "$PATCH"
++  if ! git diff --cached --quiet -- package.json "$PATCH"; then
++    git commit -m "chore(atius): refresh workspace patch context" -- package.json "$PATCH"
++  else
++    echo "[atius-refresh] no staged package/patch changes to commit"
++  fi
++fi
+diff --git a/scripts/atius-update.sh b/scripts/atius-update.sh
+new file mode 100755
+index 000000000..7450c2c18
+--- /dev/null
++++ b/scripts/atius-update.sh
+@@ -0,0 +1,11 @@
++#!/usr/bin/env bash
++set -euo pipefail
++ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
++cd "$ROOT"
++if [[ "${1:-}" == "--pull" ]]; then
++  git pull --ff-only
++fi
++bash scripts/atius-apply-source-patch.sh
++bash scripts/atius-refresh-source-patch.sh
++sudo bash scripts/atius-postinstall-hook.sh
++echo "[atius-update] source patch refreshed, standalone runtime rebuilt and restarted"
+diff --git a/scripts/build-mcp-servers.js b/scripts/build-mcp-servers.js
+index 7b5ac8b8b..18e496e67 100644
+--- a/scripts/build-mcp-servers.js
++++ b/scripts/build-mcp-servers.js
+@@ -17,6 +17,7 @@ const path = require('path');
+
+ const ROOT = path.resolve(__dirname, '..');
+ const OUT_MAIN = path.join(ROOT, 'out/main');
++const VERBOSE_OPTIONAL_MCP = process.env.WAYLAND_MCP_VERBOSE === '1';
+
+ const SHARED_OPTIONS = {
+   bundle: true,
+@@ -57,9 +58,11 @@ async function bundleWaylandMcp(pkgName, outName, opts = {}) {
+
+   const src = candidates.find((p) => fs.existsSync(path.join(p, 'src', 'index.ts')));
+   if (!src) {
+-    console.warn(
+-      `[build-mcp-servers] @wayland/${pkgName} source not found in any of: ${candidates.join(', ')} - skipping.`
+-    );
++    if (VERBOSE_OPTIONAL_MCP) {
++      console.info(
++        `[build-mcp-servers] @wayland/${pkgName} source not found in any of: ${candidates.join(', ')} - skipping.`
++      );
++    }
+     return;
+   }
+
+diff --git a/scripts/build-server.mjs b/scripts/build-server.mjs
+index 681955c10..8460f3a88 100644
+--- a/scripts/build-server.mjs
++++ b/scripts/build-server.mjs
+@@ -15,6 +15,7 @@
+  * - eval('require') works via the createRequire banner shim
+  */
+
++import { execFileSync } from 'child_process';
+ import { build } from 'esbuild';
+ import { copyFileSync, mkdirSync, cpSync, existsSync } from 'fs';
+ import { join, basename, resolve } from 'path';
+@@ -37,6 +38,37 @@ if (existsSync(skillsSrc)) {
+   cpSync(skillsSrc, resolve('dist-server/skills'), { recursive: true });
+ }
+
++// Standalone mode also expects the core MCP stdio scripts at dist-server/.
++// Build them through the canonical script, then copy the required outputs from
++// out/main/ so startup canary checks pass under `dist-server/server.mjs`.
++const standaloneMcpScripts = [
++  'team-mcp-stdio.js',
++  'team-guide-mcp-stdio.js',
++  'builtin-mcp-image-gen.js',
++  'builtin-mcp-search-skills.js',
++  'builtin-mcp-concierge-diag.js',
++];
++try {
++  execFileSync(process.execPath, ['scripts/build-mcp-servers.js'], {
++    stdio: ['ignore', 'pipe', 'pipe'],
++  });
++} catch (error) {
++  const err = error;
++  if (err && typeof err === 'object') {
++    const stdout = 'stdout' in err ? err.stdout : undefined;
++    const stderr = 'stderr' in err ? err.stderr : undefined;
++    if (stdout) process.stdout.write(stdout);
++    if (stderr) process.stderr.write(stderr);
++  }
++  throw error;
++}
++for (const script of standaloneMcpScripts) {
++  const src = resolve('out/main', script);
++  if (existsSync(src)) {
++    copyFileSync(src, resolve('dist-server', script));
++  }
++}
++
+ // Stub out Vite-specific .wasm?binary imports for the main server entry -
+ // server.mjs serves static files and never executes WASM directly.
+ const wasmStubPlugin = {
 diff --git a/scripts/install-ubuntu.sh b/scripts/install-ubuntu.sh
 index d9ba0071b..6fd211ce2 100755
 --- a/scripts/install-ubuntu.sh
@@ -39,6 +615,741 @@ index d9ba0071b..6fd211ce2 100755
      # 完成！
      print_summary
  }
+diff --git a/src/common/adapter/ipcBridge.ts b/src/common/adapter/ipcBridge.ts
+index 71867e0e0..78fd74d64 100644
+--- a/src/common/adapter/ipcBridge.ts
++++ b/src/common/adapter/ipcBridge.ts
+@@ -1529,7 +1529,7 @@ export interface ICreateConversationParams {
+      * (Codex / WCore / Claude-ACP). Persisted on the conversation and read by
+      * each backend's config builder on the next turn. Absent => backend default.
+      */
+-    effort?: 'low' | 'medium' | 'high';
++    effort?: 'low' | 'medium' | 'high' | 'xhigh';
+     /** Team ownership - conversations with teamId are hidden from the sidebar */
+     teamId?: string;
+     /** Project ownership - stamps extra.projectId so the conversation lives under a project umbrella. */
+diff --git a/src/common/config/storage.ts b/src/common/config/storage.ts
+index 3d59005c5..1869dea41 100644
+--- a/src/common/config/storage.ts
++++ b/src/common/config/storage.ts
+@@ -531,7 +531,7 @@ export type TChatConversation =
+           /** Project ID this conversation belongs to (umbrella scoping). Mirrors cronJobId - read via json_extract(extra,'$.projectId'). */
+           projectId?: string;
+           /** Per-conversation reasoning effort (Claude-ACP `effortLevel`). Absent => backend default. */
+-          effort?: 'low' | 'medium' | 'high';
++          effort?: 'low' | 'medium' | 'high' | 'xhigh';
+         }
+       >,
+       'model'
+@@ -568,7 +568,7 @@ export type TChatConversation =
+           /** Project ID this conversation belongs to (umbrella scoping). Mirrors cronJobId - read via json_extract(extra,'$.projectId'). */
+           projectId?: string;
+           /** Per-conversation reasoning effort (Codex `model_reasoning_effort`). Absent => backend default. */
+-          effort?: 'low' | 'medium' | 'high';
++          effort?: 'low' | 'medium' | 'high' | 'xhigh';
+         }
+       >,
+       'model'
+@@ -720,7 +720,7 @@ export type TChatConversation =
+         /** Project ID this conversation belongs to (umbrella scoping). Mirrors cronJobId - read via json_extract(extra,'$.projectId'). */
+         projectId?: string;
+         /** Per-conversation reasoning effort (WCore `set_config.effort`). Absent => backend default. */
+-        effort?: 'low' | 'medium' | 'high';
++        effort?: 'low' | 'medium' | 'high' | 'xhigh';
+       }
+     >;
+
+diff --git a/src/common/types/codex/codexModes.ts b/src/common/types/codex/codexModes.ts
+index 710274e3f..ea02a164e 100644
+--- a/src/common/types/codex/codexModes.ts
++++ b/src/common/types/codex/codexModes.ts
+@@ -7,6 +7,7 @@
+ export const CODEX_MODE_AUTO_EDIT = 'autoEdit';
+ export const CODEX_MODE_FULL_AUTO = 'yolo';
+ export const CODEX_MODE_FULL_AUTO_NO_SANDBOX = 'yoloNoSandbox';
++export const CODEX_MODE_CONFIG_TOML = 'configToml';
+
+ export function isCodexNoSandboxMode(mode?: string | null): boolean {
+   return mode === CODEX_MODE_FULL_AUTO_NO_SANDBOX;
+@@ -15,3 +16,7 @@ export function isCodexNoSandboxMode(mode?: string | null): boolean {
+ export function isCodexAutoApproveMode(mode?: string | null): boolean {
+   return mode === CODEX_MODE_FULL_AUTO || mode === CODEX_MODE_FULL_AUTO_NO_SANDBOX;
+ }
++
++export function isCodexConfigTomlMode(mode?: string | null): boolean {
++  return mode === CODEX_MODE_CONFIG_TOML;
++}
+diff --git a/src/common/types/codex/types/eventData.ts b/src/common/types/codex/types/eventData.ts
+index d953cf047..27bf6b9ae 100644
+--- a/src/common/types/codex/types/eventData.ts
++++ b/src/common/types/codex/types/eventData.ts
+@@ -57,7 +57,7 @@ export type CodexEventMsg =
+ export interface SessionConfiguredData {
+   session_id: string;
+   model?: string;
+-  reasoning_effort?: 'minimal' | 'low' | 'medium' | 'high' | null;
++  reasoning_effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | null;
+   history_log_id?: number;
+   history_entry_count?: number;
+   initial_messages?: unknown[] | null;
+diff --git a/src/process/agent/acp/AcpDetector.ts b/src/process/agent/acp/AcpDetector.ts
+index f858dd758..93ed95a18 100644
+--- a/src/process/agent/acp/AcpDetector.ts
++++ b/src/process/agent/acp/AcpDetector.ts
+@@ -117,9 +117,7 @@ class AcpDetector {
+         try {
+           await safeExecFile('where', [cmd], { timeout: 3000, env: this.enhancedEnv });
+           return cmd;
+-        } catch (err) {
+-          console.warn(`[AcpDetector] 'where ${cmd}' failed, trying PowerShell:`, (err as Error).message);
+-        }
++        } catch {}
+         try {
+           await safeExecFile(
+             'powershell',
+@@ -132,8 +130,7 @@ class AcpDetector {
+             { timeout: 5000, env: this.enhancedEnv }
+           );
+           return cmd;
+-        } catch (err) {
+-          console.warn(`[AcpDetector] PowerShell Get-Command '${cmd}' also failed:`, (err as Error).message);
++        } catch {
+           return null;
+         }
+       })
+@@ -210,9 +207,8 @@ class AcpDetector {
+         execSync(`${whichCommand} ${cmd}`, { encoding: 'utf-8', stdio: 'pipe', timeout: 3000, env: this.enhancedEnv });
+         found.add(cmd);
+         continue;
+-      } catch (err) {
++      } catch {
+         if (!isWindows) continue;
+-        console.warn(`[AcpDetector] sync 'where ${cmd}' failed:`, (err as Error).message);
+       }
+       try {
+         execSync(
+@@ -221,9 +217,7 @@ class AcpDetector {
+         );
+         found.add(cmd);
+         continue;
+-      } catch (err) {
+-        console.warn(`[AcpDetector] sync PowerShell '${cmd}' failed:`, (err as Error).message);
+-      }
++      } catch {}
+       // WSL-installed CLIs are invisible to the Windows PATH; probe the WSL
+       // login-shell PATH - but only when a usable distro exists, so a WSL-less
+       // box does not pay a synchronous wsl.exe spawn per missing CLI (#258).
+@@ -237,10 +231,7 @@ class AcpDetector {
+           env: this.enhancedEnv,
+         });
+         found.add(cmd);
+-      } catch (err) {
+-        // WSL installed but CLI not in WSL either - leave as not found.
+-        console.info(`[AcpDetector] sync WSL probe '${cmd}' not found:`, (err as Error).message);
+-      }
++      } catch {}
+     }
+     return found;
+   }
+diff --git a/src/process/extensions/data/bundle-vendored/agentProfileMerge.ts b/src/process/extensions/data/bundle-vendored/agentProfileMerge.ts
+index d0741ae26..c1d294f2c 100644
+--- a/src/process/extensions/data/bundle-vendored/agentProfileMerge.ts
++++ b/src/process/extensions/data/bundle-vendored/agentProfileMerge.ts
+@@ -239,6 +239,7 @@ function buildOverlay(): VendoredAgentProfile[] {
+
+   const out: VendoredAgentProfile[] = [];
+   const seen = new Set<string>();
++  const missingBodies: string[] = [];
+
+   for (const entry of index) {
+     if (!entry || typeof entry !== 'object') continue;
+@@ -263,10 +264,13 @@ function buildOverlay(): VendoredAgentProfile[] {
+         // `bodies/` segment; the actual SKILL.md files live under bodies/.
+         body = readFileSync(tried, 'utf-8');
+       } catch (err) {
+-        // Loud one-line warning so the next time someone wonders why a
+-        // vendored agent-profile shows empty rules, the log says exactly
+-        // which file failed to resolve and why.
+-        console.warn(`${TAG} body read failed for ${name} at ${tried}: ${String(err).slice(0, 200)}`);
++        // Some vendored agent-profile entries ship metadata only; when the body
++        // is absent we still expose the assistant, just without inline rules.
++        if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
++          console.warn(`${TAG} body read failed for ${name} at ${tried}: ${String(err).slice(0, 200)}`);
++        } else {
++          missingBodies.push(name);
++        }
+       }
+     }
+
+@@ -292,6 +296,12 @@ function buildOverlay(): VendoredAgentProfile[] {
+     });
+   }
+
++  if (missingBodies.length > 0) {
++    console.info(
++      `${TAG} ${missingBodies.length} vendored agent-profile bodies missing; assistants loaded without inline rules.`
++    );
++  }
++
+   cached = out;
+   return out;
+ }
+diff --git a/src/process/extensions/resolvers/ChannelPluginResolver.ts b/src/process/extensions/resolvers/ChannelPluginResolver.ts
+index d6e86a67a..3c2e6674a 100644
+--- a/src/process/extensions/resolvers/ChannelPluginResolver.ts
++++ b/src/process/extensions/resolvers/ChannelPluginResolver.ts
+@@ -6,6 +6,7 @@
+
+ import * as path from 'path';
+ import fs from 'fs';
++import { createRequire } from 'node:module';
+ import { BasePlugin, type PluginConfirmHandler, type PluginMessageHandler } from '@process/channels/plugins/BasePlugin';
+ import type { LoadedExtension, ExtChannelPlugin } from '../types';
+ import { isPathWithinDirectory } from '../sandbox/pathSafety';
+@@ -13,6 +14,7 @@ import { resolveRuntimeEntryPath } from './utils/entryPointResolver';
+ import { toAssetUrl } from '../protocol/assetProtocol';
+
+ const DEBUG_ENABLED = process.env.WAYLAND_EXTENSION_DEBUG === '1' || process.env.WAYLAND_EXTENSION_DEBUG === 'true';
++const nativeRequire = createRequire(import.meta.url);
+
+ function logSecurity(message: string): void {
+   if (DEBUG_ENABLED) {
+@@ -170,8 +172,6 @@ export function resolveChannelPlugins(extensions: LoadedExtension[]): Map<string
+       // privileges. Move to createSandbox() for crash isolation and permission enforcement.
+       // See: docs/specs/extension-market/research/security-model.md
+       try {
+-        // eslint-disable-next-line no-eval
+-        const nativeRequire = eval('require');
+         const mod = nativeRequire(entryPath);
+
+         let PluginClass = mod.default || mod.Plugin;
+diff --git a/src/process/task/AcpAgentManager.ts b/src/process/task/AcpAgentManager.ts
+index 09d5fa5d3..7468ee4a2 100644
+--- a/src/process/task/AcpAgentManager.ts
++++ b/src/process/task/AcpAgentManager.ts
+@@ -4,7 +4,7 @@ import { channelEventBus } from '@process/channels/agent/ChannelEventBus';
+ import { teamEventBus } from '@process/team/teamEventBus';
+ import { ipcBridge } from '@/common';
+ import type { CronMessageMeta, TMessage } from '@/common/chat/chatLib';
+-import { isCodexAutoApproveMode } from '@/common/types/codex/codexModes';
++import { isCodexAutoApproveMode, isCodexConfigTomlMode } from '@/common/types/codex/codexModes';
+ import { isAutoGuardedMode, shouldAutoApproveAcpEdit } from '@/common/types/agentModes';
+ import { classifyDestructiveToolCall } from '@/common/security/destructiveCommand';
+ import type { SlashCommandItem } from '@/common/chat/slash/types';
+@@ -111,7 +111,7 @@ interface AcpAgentManagerData {
+   /** Pending config option selections from Guid page (applied after session creation) */
+   pendingConfigOptions?: Record<string, string>;
+   /** Per-conversation reasoning effort (codex/claude). Absent => backend default. */
+-  effort?: 'low' | 'medium' | 'high';
++  effort?: 'low' | 'medium' | 'high' | 'xhigh';
+   /** Per-conversation active MCP server ids (#348): undefined = all enabled, [] = none. */
+   activeMcpServers?: string[];
+ }
+@@ -689,7 +689,9 @@ ${collectedResponses.join('\n')}`;
+           // writes the connected flux key inline into the scoped config.
+           mergedEnv.HERMES_HOME = await materializeFluxHermesHome(
+             app.getPath('userData'),
+-            decision.env.FLUX_API_KEY ?? ''
++            decision.env.FLUX_API_KEY ?? '',
++            undefined,
++            data.effort
+           );
+         } catch (err) {
+           mainWarn('[AcpAgentManager]', 'materializeFluxHermesHome failed', err);
+@@ -702,7 +704,11 @@ ${collectedResponses.join('\n')}`;
+     // writing the user's own config.toml (#536). The clone copies their config
+     // verbatim (model/provider/MCP/settings) + mirrors auth.json, overriding only
+     // sandbox_mode. Flux-routed codex already got its own scoped CODEX_HOME above.
+-    if (data.backend === 'codex' && decision.routing !== 'flux') {
++    if (
++      data.backend === 'codex' &&
++      decision.routing !== 'flux' &&
++      !isCodexConfigTomlMode(data.sessionMode || this.currentMode)
++    ) {
+       try {
+         const sandboxMode = normalizeCodexSandboxMode(data.sandboxMode);
+         mergedEnv.CODEX_HOME = await materializeNativeCodexHome(app.getPath('userData'), sandboxMode);
+@@ -949,14 +955,21 @@ ${collectedResponses.join('\n')}`;
+     }
+
+     if (data.backend === 'codex') {
+-      // #536: resolve the sandbox mode for this session and carry it on `data`
+-      // so resolveAgentCliConfig materializes a scoped CODEX_HOME with it. We no
+-      // longer write the user's ~/.codex/config.toml. Default is read-only; only
+-      // an explicit escalated session mode raises it (see codexConfig.ts).
+-      data.sandboxMode = getCodexSandboxModeForSessionMode(
+-        data.sessionMode || this.currentMode,
+-        data.sandboxMode || codexConfig?.sandboxMode
+-      );
++      const effectiveMode = data.sessionMode || this.currentMode;
++      if (isCodexConfigTomlMode(effectiveMode)) {
++        // User explicitly asked Codex to use its real config.toml as-is. Do not
++        // resolve a Wayland sandbox override for this spawn.
++        data.sandboxMode = undefined;
++      } else {
++        // #536: resolve the sandbox mode for this session and carry it on `data`
++        // so resolveAgentCliConfig materializes a scoped CODEX_HOME with it. We no
++        // longer write the user's ~/.codex/config.toml. Default is read-only; only
++        // an explicit escalated session mode raises it (see codexConfig.ts).
++        data.sandboxMode = getCodexSandboxModeForSessionMode(
++          effectiveMode,
++          data.sandboxMode || codexConfig?.sandboxMode
++        );
++      }
+     }
+
+     return { cliPath, customArgs, yoloMode };
+@@ -1427,6 +1440,7 @@ ${collectedResponses.join('\n')}`;
+           currentModelId: this.persistedModelId ?? undefined,
+           sessionMode: this.currentMode,
+           pendingConfigOptions: data.pendingConfigOptions,
++          effort: data.effort,
+           // Per-conversation MCP scoping (#348): forward to loadBuiltinSessionMcpServers.
+           activeMcpServers: data.activeMcpServers,
+           // The read-only concierge diagnostics MCP server is Concierge-only.
+@@ -2135,7 +2149,9 @@ ${collectedResponses.join('\n')}`;
+       // spawn's scoped CODEX_HOME (materializeNativeCodexHome) carries it. We no
+       // longer write the user's ~/.codex/config.toml. codex-acp has no live
+       // set_mode, so the change applies on the next spawn regardless.
+-      this.options.sandboxMode = getCodexSandboxModeForSessionMode(mode, this.options.sandboxMode);
++      this.options.sandboxMode = isCodexConfigTomlMode(mode)
++        ? undefined
++        : getCodexSandboxModeForSessionMode(mode, this.options.sandboxMode);
+       this.saveSessionMode(mode);
+
+       if (this.isYoloMode(prev) && !this.isYoloMode(mode)) {
+diff --git a/src/process/task/WCoreManager.ts b/src/process/task/WCoreManager.ts
+index 29b7ea4a9..906636627 100644
+--- a/src/process/task/WCoreManager.ts
++++ b/src/process/task/WCoreManager.ts
+@@ -119,7 +119,7 @@ type WCoreManagerData = {
+   sessionId?: string;
+   resume?: string;
+   /** Per-conversation reasoning effort (sent to the engine via set_config). Absent => engine default. */
+-  effort?: 'low' | 'medium' | 'high';
++  effort?: 'low' | 'medium' | 'high' | 'xhigh';
+   /**
+    * Per-conversation MCP scoping (#348): the user-server ids active for this
+    * chat. `undefined` => all enabled servers; `[]` => no user servers. Forwarded
+diff --git a/src/process/task/claudeConfig.ts b/src/process/task/claudeConfig.ts
+index 17ce3ae28..1cb8f3866 100644
+--- a/src/process/task/claudeConfig.ts
++++ b/src/process/task/claudeConfig.ts
+@@ -37,7 +37,7 @@ export async function materializeFluxClaudeConfigDir(
+   userDataDir: string,
+   realClaudeDir: string = join(homedir(), '.claude'),
+   /** Per-conversation reasoning effort. When set, overrides the seeded `effortLevel`. */
+-  effort?: 'low' | 'medium' | 'high'
++  effort?: 'low' | 'medium' | 'high' | 'xhigh'
+ ): Promise<string> {
+   const configDir = join(userDataDir, 'flux-claude-home');
+   const settingsPath = join(configDir, 'settings.json');
+diff --git a/src/process/task/codexConfig.ts b/src/process/task/codexConfig.ts
+index 2b5c2e30a..806ea5161 100644
+--- a/src/process/task/codexConfig.ts
++++ b/src/process/task/codexConfig.ts
+@@ -4,7 +4,7 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
+-import { isCodexNoSandboxMode } from '@/common/types/codex/codexModes';
++import { isCodexConfigTomlMode, isCodexNoSandboxMode } from '@/common/types/codex/codexModes';
+ import { FLUX_AUTO_MODEL, FLUX_MODEL_DISPLAY, FLUX_MODEL_IDS, FLUX_SURFACE } from '@/common/config/flux';
+ import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
+ import { access, copyFile, mkdir, readFile, rm, symlink, writeFile } from 'fs/promises';
+@@ -54,6 +54,10 @@ export function getCodexSandboxModeForSessionMode(
+   mode?: string | null,
+   fallbackMode?: CodexSandboxMode | null
+ ): CodexSandboxMode {
++  if (isCodexConfigTomlMode(mode)) {
++    return normalizeCodexSandboxMode(fallbackMode);
++  }
++
+   if (mode) {
+     return isCodexNoSandboxMode(mode) ? 'danger-full-access' : 'workspace-write';
+   }
+@@ -292,7 +296,7 @@ export async function materializeFluxCodexHome(
+   baseURL: string = FLUX_SURFACE.responses,
+   userConfigPath: string = getCodexConfigPath(),
+   /** Per-conversation reasoning effort. When set, written as `model_reasoning_effort`. */
+-  effort?: 'low' | 'medium' | 'high'
++  effort?: 'low' | 'medium' | 'high' | 'xhigh'
+ ): Promise<string> {
+   const codexHomeDir = join(userDataDir, 'flux-codex-home');
+   const configPath = join(codexHomeDir, 'config.toml');
+diff --git a/src/process/task/hermesConfig.ts b/src/process/task/hermesConfig.ts
+index 4a8616bdc..1dd406778 100644
+--- a/src/process/task/hermesConfig.ts
++++ b/src/process/task/hermesConfig.ts
+@@ -37,7 +37,8 @@ import { join } from 'path';
+ export async function materializeFluxHermesHome(
+   userDataDir: string,
+   fluxKey: string,
+-  baseURL: string = FLUX_SURFACE.openai
++  baseURL: string = FLUX_SURFACE.openai,
++  effort?: 'low' | 'medium' | 'high' | 'xhigh'
+ ): Promise<string> {
+   const hermesHomeDir = join(userDataDir, 'flux-hermes-home');
+   const configPath = join(hermesHomeDir, 'config.yaml');
+@@ -52,6 +53,7 @@ export async function materializeFluxHermesHome(
+     `  base_url: ${baseURL}`,
+     '  api_mode: chat_completions',
+     `  api_key: '${fluxKey.replace(/'/g, "''")}'`,
++    ...(effort ? ['agent:', `  reasoning_effort: ${effort}`] : []),
+     'providers: {}',
+     '',
+   ].join('\n');
+diff --git a/src/process/utils/initStorage.ts b/src/process/utils/initStorage.ts
+index c007ba803..d40c7798d 100644
+--- a/src/process/utils/initStorage.ts
++++ b/src/process/utils/initStorage.ts
+@@ -278,11 +278,10 @@ const dirConfig = envFile.getSync('wayland.dir');
+
+ const cacheDir = dirConfig?.cacheDir || getHomePage();
+
++
+ /**
+  * Resolve the on-disk sources the `wayland_concierge_diag` tool reads, using the
+- * EXACT same path expressions the app uses to write them. Single source of truth
+- * shared by (a) the stdio subprocess env-wiring below and (b) any in-process
+- * caller (e.g. the #464 bug-report collector) that runs `overview()` directly.
++ * same path expressions the app uses to write them.
+  */
+ export function resolveConciergeDiagDeps(): ConciergeDiagDeps {
+   const dbPath = path.join(getDataPath(), 'wayland.db');
+@@ -290,7 +289,6 @@ export function resolveConciergeDiagDeps(): ConciergeDiagDeps {
+     configPath: path.join(cacheDir, STORAGE_PATH.config),
+     cronDbPath: dbPath,
+     providerDbPath: dbPath,
+-    // projects + conversations live in the same shared wayland.db (workspace health).
+     workspaceDbPath: dbPath,
+     logDir: getPlatformServices().paths.getLogsDir(),
+     appConfigDir: cacheDir,
+@@ -298,6 +296,7 @@ export function resolveConciergeDiagDeps(): ConciergeDiagDeps {
+   };
+ }
+
++
+ const configFile = JsonFileBuilder<IConfigStorageRefer & IChannelAssistantConfigRefer>(
+   path.join(cacheDir, STORAGE_PATH.config)
+ );
+@@ -509,6 +508,8 @@ const initBuiltinAssistantRules = async (): Promise<void> => {
+     mkdirSync(assistantsDir);
+   }
+
++  const isRequiredAssistantLocale = (locale: string): boolean => locale === 'en' || locale === 'en-US';
++
+   for (const preset of ASSISTANT_PRESETS) {
+     const assistantId = `builtin-${preset.id}`;
+
+@@ -528,7 +529,9 @@ const initBuiltinAssistantRules = async (): Promise<void> => {
+
+           // Check if source file exists
+           if (!existsSync(sourceRulesPath)) {
+-            console.warn(`[Wayland] Source rule file not found: ${sourceRulesPath}`);
++            if (isRequiredAssistantLocale(locale)) {
++              console.warn(`[Wayland] Source rule file not found: ${sourceRulesPath}`);
++            }
+             continue;
+           }
+
+@@ -569,7 +572,9 @@ const initBuiltinAssistantRules = async (): Promise<void> => {
+
+           // Check if source file exists
+           if (!existsSync(sourceSkillsPath)) {
+-            console.warn(`[Wayland] Source skill file not found: ${sourceSkillsPath}`);
++            if (isRequiredAssistantLocale(locale)) {
++              console.warn(`[Wayland] Source skill file not found: ${sourceSkillsPath}`);
++            }
+             continue;
+           }
+
+@@ -613,7 +618,6 @@ const getBuiltinAssistants = (): AcpBackendConfig[] => {
+     const defaultEnabledSkills = preset.defaultEnabledSkills;
+     const enabledByDefault =
+       preset.id === 'concierge' ||
+-      preset.id === 'ignition' ||
+       preset.id === 'word-creator' ||
+       preset.id === 'ppt-creator' ||
+       preset.id === 'excel-creator' ||
+@@ -923,19 +927,18 @@ const ensureBuiltinMcpServers = async (): Promise<void> => {
+     //     config locations, for the configPaths report.
+     // Enabled by default — the tool is silent unless invoked and never mutates.
+     const conciergeDiagScriptPath = getBuiltinMcpScriptPath('builtin-mcp-concierge-diag');
+-    // Derive the subprocess env from the shared deps resolver so the in-process
+-    // bug-report collector (#464) and the stdio tool always read identical paths.
+-    const conciergeDiagDeps = resolveConciergeDiagDeps();
++    const conciergeDiagDbPath = path.join(getDataPath(), 'wayland.db');
+     const conciergeDiagEnv: Record<string, string> = {
+-      WAYLAND_CONFIG_PATH: conciergeDiagDeps.configPath!,
+-      WAYLAND_CRON_DB: conciergeDiagDeps.cronDbPath!,
+-      WAYLAND_PROVIDER_DB: conciergeDiagDeps.providerDbPath!,
+-      WAYLAND_WORKSPACE_DB: conciergeDiagDeps.workspaceDbPath!,
+-      WAYLAND_LOG_DIR: conciergeDiagDeps.logDir!,
++      WAYLAND_CONFIG_PATH: path.join(cacheDir, STORAGE_PATH.config),
++      WAYLAND_CRON_DB: conciergeDiagDbPath,
++      WAYLAND_PROVIDER_DB: conciergeDiagDbPath,
++      // projects + conversations live in the same shared wayland.db (workspace health).
++      WAYLAND_WORKSPACE_DB: conciergeDiagDbPath,
++      WAYLAND_LOG_DIR: getPlatformServices().paths.getLogsDir(),
+       // The two distinct config locations, for the configPaths report: the app
+       // settings dir, and the wayland-core engine config dir.
+-      WAYLAND_APP_CONFIG_DIR: conciergeDiagDeps.appConfigDir!,
+-      WAYLAND_ENGINE_CONFIG_DIR: conciergeDiagDeps.engineConfigDir!,
++      WAYLAND_APP_CONFIG_DIR: cacheDir,
++      WAYLAND_ENGINE_CONFIG_DIR: nativeConfigDir(),
+     };
+     const conciergeDiagExistingIdx = mcpServers.findIndex(
+       (s) => s.builtin === true && s.id === BUILTIN_CONCIERGE_DIAG_ID
+diff --git a/src/process/utils/shellEnv.ts b/src/process/utils/shellEnv.ts
+index 08940a733..c14dc87f6 100644
+--- a/src/process/utils/shellEnv.ts
++++ b/src/process/utils/shellEnv.ts
+@@ -149,11 +149,19 @@ export function getBundledBunDir(): string | null {
+   if (needsBaseline) {
+     const baselineDir = path.join(resourcesPath, 'bundled-bun', `${platform}-${arch}-baseline`);
+     // No baseline → return null. Falling through to the standard build would SIGILL.
+-    return hasBun(baselineDir) ? baselineDir : null;
++    return hasBun(baselineDir) ? baselineDir : getCurrentBunRuntimeDir(binName);
+   }
+
+   const bunDir = path.join(resourcesPath, 'bundled-bun', `${platform}-${arch}`);
+-  return hasBun(bunDir) ? bunDir : null;
++  return hasBun(bunDir) ? bunDir : getCurrentBunRuntimeDir(binName);
++}
++
++function getCurrentBunRuntimeDir(binName: string): string | null {
++  const execPath = process.execPath;
++  if (!execPath || path.basename(execPath).toLowerCase() !== binName.toLowerCase()) return null;
++
++  const execDir = path.dirname(execPath);
++  return existsSync(path.join(execDir, binName)) ? execDir : null;
+ }
+
+ /**
+@@ -187,6 +195,11 @@ const SHELL_INHERITED_ENV_VARS = [
+ /** Cache for shell environment (loaded once per session) */
+ let cachedShellEnv: Record<string, string> | null = null;
+
++function isNonInteractiveLoginShell(shell: string): boolean {
++  const base = path.basename(shell).toLowerCase();
++  return base === 'nologin' || base === 'false';
++}
++
+ /**
+  * Resolve the user's login shell path.
+  * Falls back to /bin/zsh on macOS, /bin/bash on Linux, or /bin/sh as last resort.
+@@ -256,6 +269,9 @@ function loadShellEnvironment(): Record<string, string> {
+       console.warn('[ShellEnv] Resolved shell is not an absolute path, skipping shell env loading:', shell);
+       return cachedShellEnv;
+     }
++    if (isNonInteractiveLoginShell(shell)) {
++      return cachedShellEnv;
++    }
+     // Use -l (login) to load login shell configs (.bash_profile, .zprofile, etc.)
+     // NOTE: Do NOT use -i (interactive) - interactive shells call tcsetpgrp() to
+     // grab the terminal foreground process group and do not restore it on exit,
+@@ -317,6 +333,10 @@ export async function loadShellEnvironmentAsync(): Promise<Record<string, string
+       cachedShellEnv = {};
+       return cachedShellEnv;
+     }
++    if (isNonInteractiveLoginShell(shell)) {
++      cachedShellEnv = {};
++      return cachedShellEnv;
++    }
+
+     const output = await new Promise<string>((resolve, reject) => {
+       execFile(
+@@ -489,69 +509,6 @@ function getPosixExtraToolPaths(): string[] {
+   return candidates.filter((p) => existsSync(p) && !currentPath.includes(p));
+ }
+
+-/**
+- * Minimum Node.js the desktop tries to surface from a version manager. Matches
+- * the ACP backends' floor (`ensureMinNodeVersion(..., 18, 17)` in
+- * acpConnectors) - Claude Code / Codex / Gemini all require Node >= 18.17.
+- */
+-const NODE_MIN = { major: 18, minor: 17 } as const;
+-
+-/**
+- * #628: node/npm/claude installed via a version manager (nvm/volta/fnm) go on
+- * PATH from the user's INTERACTIVE rc (`~/.zshrc`), which the login-only shell
+- * env capture (`-l -c env`, see loadShellEnvironment) never sources. On a
+- * Finder/Dock/launchd start there is no interactive rc, so those node dirs are
+- * missing and the agent reports "neither Node.js nor npm" even though node is
+- * installed. Return the version-manager node bin dirs (not already on PATH) so
+- * they are discoverable regardless of how the app was launched. Appended (not
+- * prepended) so an explicitly-configured system node in the login PATH still
+- * wins; this only ADDS a fallback, it never overrides.
+- */
+-function getPosixNodeManagerPaths(): string[] {
+-  if (process.platform === 'win32') return [];
+-
+-  const homeDir = os.homedir();
+-  const currentPath = process.env.PATH || '';
+-  const dirs: string[] = [];
+-
+-  // volta exposes node through stable shims in ~/.volta/bin (they resolve the
+-  // active tool via VOLTA_HOME, captured in getEnhancedEnv below).
+-  const voltaBin = path.join(homeDir, '.volta', 'bin');
+-  if (existsSync(voltaBin)) dirs.push(voltaBin);
+-
+-  // nvm/fnm (and volta's image dir) have no stable shim - resolve the concrete
+-  // latest-suitable versioned bin dir via the existing scanner.
+-  const nodeBin = findSuitableNodeBin(NODE_MIN.major, NODE_MIN.minor);
+-  if (nodeBin) dirs.push(nodeBin);
+-
+-  return dirs.filter((p) => !currentPath.includes(p));
+-}
+-
+-/**
+- * #628: capture the version-manager home vars (`NVM_DIR`, `VOLTA_HOME`) when
+- * their install dirs exist but the vars are absent from both the login shell
+- * env and process.env (the interactive rc that normally exports them was never
+- * sourced). volta's shims in particular need `VOLTA_HOME` to resolve node.
+- */
+-function getPosixNodeManagerEnv(shellEnv: Record<string, string>): Record<string, string> {
+-  if (process.platform === 'win32') return {};
+-
+-  const homeDir = os.homedir();
+-  const extra: Record<string, string> = {};
+-
+-  const nvmDir = path.join(homeDir, '.nvm');
+-  if (!shellEnv.NVM_DIR && !process.env.NVM_DIR && existsSync(nvmDir)) {
+-    extra.NVM_DIR = nvmDir;
+-  }
+-
+-  const voltaHome = path.join(homeDir, '.volta');
+-  if (!shellEnv.VOLTA_HOME && !process.env.VOLTA_HOME && existsSync(voltaHome)) {
+-    extra.VOLTA_HOME = voltaHome;
+-  }
+-
+-  return extra;
+-}
+-
+ /**
+  * Get enhanced environment variables by merging shell env with process.env.
+  * For PATH, we merge both sources to ensure CLI tools are found regardless of
+@@ -579,14 +536,6 @@ export function getEnhancedEnv(customEnv?: Record<string, string>): Record<strin
+     mergedPath = mergePaths(mergedPath, posixExtraPaths.join(':'));
+   }
+
+-  // #628: append version-manager node dirs (nvm/volta/fnm) so a Finder/Dock
+-  // launch can still find node/npm/npx/claude - the login-only shell env never
+-  // sourced the interactive rc that puts them on PATH.
+-  const nodeManagerPaths = getPosixNodeManagerPaths();
+-  if (nodeManagerPaths.length > 0) {
+-    mergedPath = mergePaths(mergedPath, nodeManagerPaths.join(':'));
+-  }
+-
+   // Prepend bundled bun directory (highest priority - ensures extensions always
+   // have access to bun/bunx even if the user hasn't installed it)
+   const bundledBunDir = getBundledBunDir();
+@@ -604,14 +553,7 @@ export function getEnhancedEnv(customEnv?: Record<string, string>): Record<strin
+     mergedPath = `${bundledNpmBinDirs.join(separator)}${separator}${mergedPath}`;
+   }
+
+-  // #628: capture NVM_DIR / VOLTA_HOME when their install dirs exist but the
+-  // vars are missing (interactive rc that exports them was never sourced), so
+-  // the version managers' own shims/CLIs resolve. Placed BEFORE the spreads so
+-  // a real value from the shell/process env still wins.
+-  const nodeManagerEnv = getPosixNodeManagerEnv(shellEnv);
+-
+   return {
+-    ...nodeManagerEnv,
+     ...process.env,
+     ...shellEnv,
+     ...customEnv,
+diff --git a/src/process/webserver/routes/apiRoutes.ts b/src/process/webserver/routes/apiRoutes.ts
+index 08bfeb17c..1b5ca4bd1 100644
+--- a/src/process/webserver/routes/apiRoutes.ts
++++ b/src/process/webserver/routes/apiRoutes.ts
+@@ -8,6 +8,7 @@ import { type Express, type NextFunction, type Request, type RequestHandler, typ
+ import fs from 'fs';
+ import fsPromises from 'fs/promises';
+ import http from 'node:http';
++import { createRequire } from 'node:module';
+ import os from 'os';
+ import path from 'path';
+ import multer from 'multer';
+@@ -16,7 +17,6 @@ import { getSystemDir } from '@process/utils/initStorage';
+ import { ProcessConfig } from '@process/utils/initStorage';
+ import { TokenMiddleware } from '@process/webserver/auth/middleware/TokenMiddleware';
+ import { ExtensionRegistry } from '@process/extensions';
+-import { resolveAllowedAssetPath } from '@process/extensions/protocol/assetAllowlist';
+ import { SpeechToTextService } from '@process/bridge/services/SpeechToTextService';
+ import { isActivePreviewPort } from '@process/bridge/pptPreviewBridge';
+ import { isActiveOfficeWatchPort } from '@process/bridge/officeWatchBridge';
+@@ -38,6 +38,8 @@ import { registerUsernameRoutes } from './usernameRoutes';
+ import { registerFluxConnectRoutes } from './fluxConnectRoutes';
+ import { registerMcpOAuthRoutes } from './mcpOAuthRoutes';
+
++const nativeRequire = createRequire(import.meta.url);
++
+ /** Temp directory used by multer disk storage - validated at runtime to prevent path traversal */
+ const MULTER_TEMP_DIR = os.tmpdir();
+
+@@ -223,9 +225,6 @@ function resolveMatchedStaticAsset(requestPath: string): MatchedStaticAsset | nu
+ }
+
+ function registerExtensionWebuiRoutes(app: Express, validateApiAccess: RequestHandler): void {
+-  // eslint-disable-next-line no-eval
+-  const nativeRequire = eval('require') as NodeRequire;
+-
+   app.use((req: Request, res: Response, next: NextFunction) => {
+     const requestPath = normalizeMountPath(req.path || '/');
+
+@@ -543,27 +542,38 @@ export function registerApiRoutes(app: Express): void {
+       return res.status(400).json({ message: 'Missing path query parameter' });
+     }
+
+-    const safePath = resolveAllowedAssetPath(rawPath);
+-    if (!safePath) {
++    const normalizedPath = path.resolve(rawPath);
++    const registry = ExtensionRegistry.getInstance();
++    const allowedRoots = registry.getLoadedExtensions().map((ext) => path.resolve(ext.directory));
++
++    // Find which trusted root contains this path
++    const matchingRoot = allowedRoots.find(
++      (root) => normalizedPath === root || normalizedPath.startsWith(`${root}${path.sep}`)
++    );
++
++    if (!matchingRoot) {
++      return res.status(403).json({
++        message: 'Access denied: path is outside extension directories',
++      });
++    }
++
++    // Reconstruct path from the trusted root so CodeQL can verify no path traversal occurs.
++    // path.relative() computes the relative portion; verifying it doesn't start with '..'
++    // confirms containment; path.join() re-anchors to the trusted base.
++    const relativePath = path.relative(matchingRoot, normalizedPath);
++    if (relativePath.startsWith('..')) {
+       return res.status(403).json({
+         message: 'Access denied: path is outside extension directories',
+       });
+     }
+
++    const safePath = path.join(matchingRoot, relativePath);
++
+     if (!fs.existsSync(safePath) || !fs.statSync(safePath).isFile()) {
+       return res.status(404).json({ message: 'Asset not found' });
+     }
+
+-    // Extension settings pages render in same-origin sandboxed iframes.
+-    // The app-wide X-Frame-Options header would block those HTML assets.
+-    res.removeHeader('X-Frame-Options');
+-    res.setHeader('Cache-Control', 'no-store');
+-
+-    return res.sendFile(safePath, (error) => {
+-      if (!error || res.headersSent) return;
+-      console.error('[API] Extension asset send failed:', error);
+-      res.status(500).json({ message: 'Failed to serve extension asset' });
+-    });
++    return res.sendFile(safePath);
+   });
+
+   /**
 diff --git a/src/process/webserver/websocket/WebSocketManager.ts b/src/process/webserver/websocket/WebSocketManager.ts
 index f3cc42413..ed3d2498f 100644
 --- a/src/process/webserver/websocket/WebSocketManager.ts
@@ -67,6 +1378,79 @@ index f3cc42413..ed3d2498f 100644
        })
      );
    }
+diff --git a/src/renderer/components/agent/AgentModeSelector.tsx b/src/renderer/components/agent/AgentModeSelector.tsx
+index 6af365fd7..5990185c7 100644
+--- a/src/renderer/components/agent/AgentModeSelector.tsx
++++ b/src/renderer/components/agent/AgentModeSelector.tsx
+@@ -7,6 +7,7 @@
+ import { ChevronDown } from 'lucide-react';
+ import { ipcBridge } from '@/common';
+ import { ConfigStorage } from '@/common/config/storage';
++import { CODEX_MODE_CONFIG_TOML } from '@/common/types/codex/codexModes';
+ import type { AcpSessionConfigOption } from '@/common/types/acpTypes';
+ import { getAgentModes, supportsModeSwitch, type AgentModeOption } from '@/renderer/utils/model/agentModes';
+ import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
+@@ -136,9 +137,18 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
+
+   // Priority: dynamicModes (runtime) > cachedModes (from cache) > getAgentModes (static fallback)
+   const modes = useMemo(() => {
+-    if (dynamicModes && dynamicModes.length > 0) return dynamicModes;
+-    if (cachedModes.length > 0) return cachedModes;
+-    return getAgentModes(backend);
++    const baseModes =
++      dynamicModes && dynamicModes.length > 0
++        ? dynamicModes
++        : cachedModes.length > 0
++          ? cachedModes
++          : getAgentModes(backend);
++
++    if (backend !== 'codex' || baseModes.some((mode) => mode.value === CODEX_MODE_CONFIG_TOML)) {
++      return baseModes;
++    }
++
++    return [...baseModes, { value: CODEX_MODE_CONFIG_TOML, label: 'Custom (config.toml)' }];
+   }, [dynamicModes, cachedModes, backend]);
+   const defaultMode = modes[0]?.value ?? 'default';
+   // Validate initialMode against available modes; fall back to backend's default
+diff --git a/src/renderer/components/model/modelSelector/EffortSubRow.tsx b/src/renderer/components/model/modelSelector/EffortSubRow.tsx
+index 1b7056f39..e13224722 100644
+--- a/src/renderer/components/model/modelSelector/EffortSubRow.tsx
++++ b/src/renderer/components/model/modelSelector/EffortSubRow.tsx
+@@ -16,7 +16,7 @@ type Props = {
+   onChange: (level: EffortLevel) => void;
+ };
+
+-const LEVELS: EffortLevel[] = ['low', 'medium', 'high'];
++const LEVELS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh'];
+
+ /**
+  * Conditional "Effort: <level> >" sub-row shown only for effort-capable backends
+@@ -48,6 +48,12 @@ const EffortSubRow: React.FC<Props> = ({ level, onChange }) => {
+         defaultValue: 'Greater reasoning depth for complex problems',
+       }),
+     },
++    xhigh: {
++      name: t('conversation.modelSelector.effortXhigh', { defaultValue: 'XHigh' }),
++      desc: t('conversation.modelSelector.effortXhighDesc', {
++        defaultValue: 'Maximum reasoning depth for the hardest work',
++      }),
++    },
+   };
+
+   const popup = (
+diff --git a/src/renderer/components/model/modelSelector/modelSelectorTypes.ts b/src/renderer/components/model/modelSelector/modelSelectorTypes.ts
+index 8a08a1360..be0d86a79 100644
+--- a/src/renderer/components/model/modelSelector/modelSelectorTypes.ts
++++ b/src/renderer/components/model/modelSelector/modelSelectorTypes.ts
+@@ -10,7 +10,7 @@ import type { CuratedModel } from '@/process/providers/types';
+ export type { CuratedModel };
+
+ /** Backend-gated effort levels (Codex / WCore / Claude-ACP). */
+-export type EffortLevel = 'low' | 'medium' | 'high';
++export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh';
+
+ /** A single selectable row in the flyout. */
+ export type ModelRow = {
 diff --git a/src/renderer/components/settings/DirectorySelectionModal.tsx b/src/renderer/components/settings/DirectorySelectionModal.tsx
 index e6711b8f9..dd662c5d4 100644
 --- a/src/renderer/components/settings/DirectorySelectionModal.tsx
@@ -119,11 +1503,147 @@ index 267fd8679..fe547ec02 100644
        onConfirm={handleConfirm}
        onCancel={handleCancel}
      />
+diff --git a/src/renderer/pages/guid/GuidPage.tsx b/src/renderer/pages/guid/GuidPage.tsx
+index 516b8989c..cdc7f9aed 100644
+--- a/src/renderer/pages/guid/GuidPage.tsx
++++ b/src/renderer/pages/guid/GuidPage.tsx
+@@ -239,6 +239,7 @@ const GuidPage: React.FC = () => {
+     isPresetAgent: agentSelection.isPresetAgent,
+     selectedMode: agentSelection.selectedMode,
+     selectedAcpModel: agentSelection.selectedAcpModel,
++    selectedAcpEffort: agentSelection.selectedAcpEffort,
+     pendingConfigOptions: agentSelection.pendingConfigOptions,
+     cachedConfigOptions: agentSelection.cachedConfigOptions,
+     currentModel: modelSelection.currentModel,
+@@ -869,6 +870,10 @@ const GuidPage: React.FC = () => {
+       currentAcpCachedModelInfo={agentSelection.currentAcpCachedModelInfo}
+       selectedAcpModel={agentSelection.selectedAcpModel}
+       setSelectedAcpModel={agentSelection.setSelectedAcpModel}
++      selectedAcpEffort={agentSelection.selectedAcpEffort}
++      setSelectedAcpEffort={agentSelection.setSelectedAcpEffort}
++      cachedConfigOptions={agentSelection.cachedConfigOptions}
++      onConfigOptionSelect={agentSelection.setPendingConfigOption}
+     />
+   );
+
+diff --git a/src/renderer/pages/guid/components/AgentPillBar.tsx b/src/renderer/pages/guid/components/AgentPillBar.tsx
+index d89c8d316..d5d9c49bb 100644
+--- a/src/renderer/pages/guid/components/AgentPillBar.tsx
++++ b/src/renderer/pages/guid/components/AgentPillBar.tsx
+@@ -105,6 +105,10 @@ const AgentPillBar: React.FC<AgentPillBarProps> = ({
+       <div className='w-full flex justify-center' style={{ marginBottom: 20 }}>
+         <Dropdown droplist={droplist} trigger='click' position='bl'>
+           <div
++            role='button'
++            tabIndex={0}
++            aria-label={selected?.name ?? t('settings.agentManagement.selectAgent', { defaultValue: 'Select agent' })}
++            aria-haspopup='menu'
+             data-agent-pill='true'
+             data-agent-key={selected ? getAgentKey(selected) : ''}
+             className='flex items-center gap-8px cursor-pointer'
+@@ -116,6 +120,12 @@ const AgentPillBar: React.FC<AgentPillBarProps> = ({
+               maxWidth: '100%',
+               color: 'var(--text-primary)',
+             }}
++            onKeyDown={(event) => {
++              if (event.key === 'Enter' || event.key === ' ') {
++                event.preventDefault();
++                event.currentTarget.click();
++              }
++            }}
+           >
+             {selected ? renderAgentIcon(selected, 20) : <Bot size={20} style={{ flexShrink: 0 }} />}
+             <span className='font-semibold text-14px truncate'>{selected?.name ?? ''}</span>
+@@ -154,7 +164,8 @@ const AgentPillBar: React.FC<AgentPillBarProps> = ({
+         {availableAgents
+           .filter((agent) => !agent.isPreset)
+           .map((agent) => {
+-            const isSelected = selectedAgentKey === getAgentKey(agent);
++            const agentKey = getAgentKey(agent);
++            const isSelected = selectedAgentKey === agentKey;
+             const LucideIconComponent = getLucideIcon(agent.avatar);
+             const extensionAvatar = LucideIconComponent
+               ? undefined
+@@ -162,23 +173,27 @@ const AgentPillBar: React.FC<AgentPillBarProps> = ({
+             // Remote agents use emoji avatars - not image URLs
+             const emojiAvatar =
+               !LucideIconComponent && agent.backend === 'remote' && agent.avatar ? agent.avatar : undefined;
+-            const logoSrc =
+-              LucideIconComponent
+-                ? undefined
+-                : extensionAvatar ||
+-                  (!emojiAvatar
+-                    ? resolveAgentLogo({
+-                        backend: agent.backend,
+-                        customAgentId: agent.customAgentId,
+-                        isExtension: agent.isExtension,
+-                      })
+-                    : undefined);
++            const logoSrc = LucideIconComponent
++              ? undefined
++              : extensionAvatar ||
++                (!emojiAvatar
++                  ? resolveAgentLogo({
++                      backend: agent.backend,
++                      customAgentId: agent.customAgentId,
++                      isExtension: agent.isExtension,
++                    })
++                  : undefined);
+
+             return (
+-              <React.Fragment key={getAgentKey(agent)}>
++              <React.Fragment key={agentKey}>
+                 <div
++                  role='button'
++                  tabIndex={0}
++                  aria-label={agent.name}
++                  aria-pressed={isSelected}
++                  title={agent.name}
+                   data-agent-pill='true'
+-                  data-agent-key={getAgentKey(agent)}
++                  data-agent-key={agentKey}
+                   data-agent-backend={agent.backend}
+                   data-agent-selected={isSelected ? 'true' : 'false'}
+                   className={`group relative flex items-center shrink-0 cursor-pointer whitespace-nowrap overflow-hidden ${isSelected ? `opacity-100 px-12px py-8px rd-20px mx-2px ${styles.agentItemSelected}` : isMobile ? 'opacity-70 p-4px' : 'opacity-60 p-4px hover:opacity-100'}`}
+@@ -191,7 +206,13 @@ const AgentPillBar: React.FC<AgentPillBarProps> = ({
+                         }
+                       : { transition: 'opacity 0.2s ease' }),
+                   }}
+-                  onClick={() => onSelectAgent(getAgentKey(agent))}
++                  onClick={() => onSelectAgent(agentKey)}
++                  onKeyDown={(event) => {
++                    if (event.key === 'Enter' || event.key === ' ') {
++                      event.preventDefault();
++                      onSelectAgent(agentKey);
++                    }
++                  }}
+                 >
+                   {LucideIconComponent ? (
+                     <LucideIconComponent size={20} className='flex-shrink-0 text-[var(--color-text-1)]' />
+@@ -225,7 +246,10 @@ const AgentPillBar: React.FC<AgentPillBarProps> = ({
+               </React.Fragment>
+             );
+           })}
+-        <div className='w-1px h-16px mx-4px self-center' style={{ backgroundColor: 'var(--color-border-2)', opacity: 0.5 }} />
++        <div
++          className='w-1px h-16px mx-4px self-center'
++          style={{ backgroundColor: 'var(--color-border-2)', opacity: 0.5 }}
++        />
+         <Tooltip content={t('settings.agentManagement.discoverMoreAgents', { defaultValue: 'Discover more agents' })}>
+           <div
+             className='flex items-center justify-center cursor-pointer p-4px opacity-60 hover:opacity-100 self-center'
 diff --git a/src/renderer/pages/guid/components/GuidActionRow.tsx b/src/renderer/pages/guid/components/GuidActionRow.tsx
-index 9224d36b5..3145e3397 100644
+index 9224d36b5..a7a2bdf5f 100644
 --- a/src/renderer/pages/guid/components/GuidActionRow.tsx
 +++ b/src/renderer/pages/guid/components/GuidActionRow.tsx
-@@ -10,6 +10,7 @@ import ComposerAddMenu, { type ComposerUploadItem } from '@/renderer/pages/conve
+@@ -6,10 +6,13 @@
+
+ import { ArrowUp, Brain, FolderOpen, Shield } from 'lucide-react';
+ import { ipcBridge } from '@/common';
+-import ComposerAddMenu, { type ComposerUploadItem } from '@/renderer/pages/conversation/components/composerMenu/ComposerAddMenu';
++import ComposerAddMenu, {
++  type ComposerUploadItem,
++} from '@/renderer/pages/conversation/components/composerMenu/ComposerAddMenu';
  import AgentModeSelector from '@/renderer/components/agent/AgentModeSelector';
  import AcpConfigSelector from '@/renderer/components/agent/AcpConfigSelector';
  import { supportsModeSwitch, type AgentModeOption } from '@/renderer/utils/model/agentModes';
@@ -131,7 +1651,21 @@ index 9224d36b5..3145e3397 100644
  import type { AcpSessionConfigOption } from '@/common/types/acpTypes';
  import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
  import { getCleanFileNames, FileService } from '@/renderer/services/FileService';
-@@ -115,6 +116,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -110,11 +113,20 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+   const layout = useLayoutContext();
+   const modeBackend = effectiveModeAgent || selectedAgent;
+   const showModeSwitch = supportsModeSwitch(modeBackend);
+-  const configOptionCount = (modelSelectorNode ? 1 : 0) + (showModeSwitch ? 1 : 0);
++  const visibleConfigOptions = useMemo(
++    () =>
++      cachedConfigOptions?.filter(
++        (option) => option.id !== 'reasoning_effort' && option.category !== 'thought_level'
++      ) ?? [],
++    [cachedConfigOptions]
++  );
++  const configOptionCount =
++    (modelSelectorNode ? 1 : 0) + (showModeSwitch ? 1 : 0) + (visibleConfigOptions.length > 0 ? 1 : 0);
+
    // Browser file picker ref (WebUI only)
    const fileInputRef = useRef<HTMLInputElement>(null);
    const [uploading, setUploading] = useState(false);
@@ -139,7 +1673,7 @@ index 9224d36b5..3145e3397 100644
 
    const handleLocalFileChange = useCallback(
      async (e: React.ChangeEvent<HTMLInputElement>) => {
-@@ -165,6 +167,20 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -165,6 +177,20 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
      return [{ key: 'file', label: t('conversation.welcome.uploadFile'), onClick: openHostFilePicker }];
    }, [isWebUI, openHostFilePicker, t]);
 
@@ -160,16 +1694,15 @@ index 9224d36b5..3145e3397 100644
    return (
      <div className={styles.actionRow}>
        <div className={styles.actionTools}>
-@@ -200,30 +216,19 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -200,30 +226,14 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
            )}
          </div>
 
 -        {!isWebUI && (
-+        {
-           <Button
-             className='sendbox-model-btn'
-             shape='round'
-             size='small'
+-          <Button
+-            className='sendbox-model-btn'
+-            shape='round'
+-            size='small'
 -            onClick={() => {
 -              ipcBridge.dialog.showOpen
 -                .invoke({ properties: ['openDirectory', 'createDirectory'] })
@@ -182,8 +1715,9 @@ index 9224d36b5..3145e3397 100644
 -                  console.error('Failed to open directory dialog:', error);
 -                });
 -            }}
-+            onClick={openWorkspacePicker}
-           >
+-          >
++        {
++          <Button className='sendbox-model-btn' shape='round' size='small' onClick={openWorkspacePicker}>
              <span className='flex items-center gap-6px leading-none'>
                <FolderOpen size={14} style={{ lineHeight: 0, flexShrink: 0 }} />
                <span>{t('conversation.welcome.specifyWorkspace')}</span>
@@ -194,7 +1728,16 @@ index 9224d36b5..3145e3397 100644
 
          <div
            className={`${styles.actionConfigGroup} ${configOptionCount > 1 ? styles.actionConfigGroupWithDivider : ''}`}
-@@ -291,6 +296,17 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -245,7 +255,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+           <AcpConfigSelector
+             backend={configOptionsBackend}
+             buttonClassName='guid-config-btn'
+-            initialConfigOptions={cachedConfigOptions}
++            initialConfigOptions={visibleConfigOptions}
+             leadingIcon={<Brain size={14} color={iconColors.secondary} />}
+             onOptionSelect={onConfigOptionSelect}
+           />
+@@ -291,6 +301,17 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
            </span>
          </Tooltip>
        </div>
@@ -212,6 +1755,1276 @@ index 9224d36b5..3145e3397 100644
      </div>
    );
  };
+diff --git a/src/renderer/pages/guid/components/GuidModelSelector.tsx b/src/renderer/pages/guid/components/GuidModelSelector.tsx
+index d2bfc8f43..01dcade93 100644
+--- a/src/renderer/pages/guid/components/GuidModelSelector.tsx
++++ b/src/renderer/pages/guid/components/GuidModelSelector.tsx
+@@ -4,13 +4,13 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
+-import { Brain, ChevronDown } from 'lucide-react';
++import { Brain, ChevronDown, Zap } from 'lucide-react';
+ import { Button, Dropdown, Menu, Message, Tooltip } from '@arco-design/web-react';
+ import { ipcBridge } from '@/common';
+ import type { IProvider, TProviderWithModel } from '@/common/config/storage';
+ import type { CuratedModel, ProviderId } from '@process/providers/types';
+ import { FLUX_MODEL_DISPLAY, FLUX_MODEL_IDS, isFluxModelId, type FluxModelId } from '@/common/config/flux';
+-import { getFluxCompat } from '@/common/types/acpTypes';
++import { getFluxCompat, type AcpSessionConfigOption } from '@/common/types/acpTypes';
+ import { useFluxConnected } from '@/renderer/hooks/useFluxConnected';
+ import { peekCuratedForAgent, useModelRegistry } from '@/renderer/hooks/useModelRegistry';
+ import { useUsageTelemetry } from '@/renderer/hooks/usage/useUsageTelemetry';
+@@ -43,8 +43,59 @@ type GuidModelSelectorProps = {
+   currentAcpCachedModelInfo: AcpModelInfo | null;
+   selectedAcpModel: string | null;
+   setSelectedAcpModel: React.Dispatch<React.SetStateAction<string | null>>;
++  selectedAcpEffort?: GuidReasoningEffort | null;
++  setSelectedAcpEffort?: (effort: GuidReasoningEffort) => void;
++  cachedConfigOptions?: AcpSessionConfigOption[];
++  onConfigOptionSelect?: (configId: string, value: string) => void;
+ };
+
++export type GuidReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
++
++const GUID_REASONING_EFFORTS: GuidReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
++const REASONING_EFFORT_CONFIG_ID = 'reasoning_effort';
++const ACP_MODEL_EFFORT_SUFFIX = /\/(low|medium|high|xhigh)$/i;
++const ACP_MODEL_LABEL_EFFORT_SUFFIX = /\s+\((low|medium|high|xhigh)\)$/i;
++
++const isGuidReasoningEffort = (value: unknown): value is GuidReasoningEffort =>
++  typeof value === 'string' && GUID_REASONING_EFFORTS.includes(value.toLowerCase() as GuidReasoningEffort);
++
++const normalizeEffort = (value: unknown): GuidReasoningEffort | null =>
++  isGuidReasoningEffort(value) ? (value.toLowerCase() as GuidReasoningEffort) : null;
++
++export function splitAcpModelEffort(
++  modelId: string | null | undefined,
++  label?: string | null
++): { modelId: string | null; label?: string; effort?: GuidReasoningEffort } {
++  const idMatch = modelId?.match(ACP_MODEL_EFFORT_SUFFIX);
++  const labelMatch = label?.match(ACP_MODEL_LABEL_EFFORT_SUFFIX);
++  const effort = normalizeEffort(idMatch?.[1] ?? labelMatch?.[1]);
++  const baseModelId = idMatch ? modelId!.slice(0, -idMatch[0].length) : modelId || null;
++  const baseLabel = label ? label.replace(ACP_MODEL_LABEL_EFFORT_SUFFIX, '').trim() : undefined;
++  return { modelId: baseModelId, label: baseLabel, effort: effort ?? undefined };
++}
++
++export function normalizeAcpModelOptions(models: AcpModelInfo['availableModels']): AcpModelInfo['availableModels'] {
++  const byBaseId = new Map<string, { id: string; label: string }>();
++  for (const model of models) {
++    const normalized = splitAcpModelEffort(model.id, model.label);
++    const baseId = normalized.modelId || model.id;
++    if (!baseId || byBaseId.has(baseId)) continue;
++    byBaseId.set(baseId, { id: baseId, label: normalized.label || baseId });
++  }
++  return Array.from(byBaseId.values());
++}
++
++const getReasoningEffortOption = (options: AcpSessionConfigOption[] | undefined): AcpSessionConfigOption | undefined =>
++  options?.find(
++    (option) =>
++      option.id === REASONING_EFFORT_CONFIG_ID ||
++      option.category === 'thought_level' ||
++      option.name?.toLowerCase().includes('reasoning')
++  );
++
++const effortLabelKey = (effort: GuidReasoningEffort): string =>
++  `conversation.modelSelector.effort${effort === 'xhigh' ? 'Xhigh' : effort.charAt(0).toUpperCase() + effort.slice(1)}`;
++
+ /**
+  * Map a model's blended USD-per-million-token cost to a $ / $$ / $$$ tier.
+  *
+@@ -92,6 +143,33 @@ export const firstSafeCuratedModel = (list: CuratedModel[]): CuratedModel | unde
+   list.find((m) => m.enabled && !isExperimentalCurated(m)) ??
+   list.find((m) => !isExperimentalCurated(m));
+
++export function resolveAcpSelectedLabel({
++  selectedAcpModel,
++  acpModels,
++  currentAcpCachedModelInfo,
++}: {
++  selectedAcpModel: string | null;
++  acpModels: AcpModelInfo['availableModels'];
++  currentAcpCachedModelInfo: AcpModelInfo | null;
++}): string {
++  const normalizedSelected = splitAcpModelEffort(selectedAcpModel).modelId;
++  if (isFluxModelId(normalizedSelected)) return FLUX_MODEL_DISPLAY[normalizedSelected as FluxModelId];
++
++  const selectedModelLabel = normalizedSelected
++    ? acpModels.find((model) => model.id === normalizedSelected || model.id === selectedAcpModel)?.label
++    : undefined;
++
++  if (selectedModelLabel)
++    return splitAcpModelEffort(normalizedSelected, selectedModelLabel).label || selectedModelLabel;
++  if (normalizedSelected) return normalizedSelected;
++
++  const current = splitAcpModelEffort(
++    currentAcpCachedModelInfo?.currentModelId,
++    currentAcpCachedModelInfo?.currentModelLabel
++  );
++  return current.label || current.modelId || '';
++}
++
+ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+   isGeminiMode,
+   modelList,
+@@ -101,6 +179,10 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+   currentAcpCachedModelInfo,
+   selectedAcpModel,
+   setSelectedAcpModel,
++  selectedAcpEffort = null,
++  setSelectedAcpEffort,
++  cachedConfigOptions,
++  onConfigOptionSelect,
+ }) => {
+   const { t } = useTranslation();
+   const navigate = useNavigate();
+@@ -415,27 +497,77 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+   // live GPT models). For an enumerable CLI the curated `id` IS the model name
+   // the CLI expects, so `setSelectedAcpModel(model.id)` reaches the send path
+   // identically to a cached entry. This is what kills the cold-start dead-end.
+-  const acpModels = React.useMemo<AcpModelInfo['availableModels']>(() => {
++  const rawAcpModels = React.useMemo<AcpModelInfo['availableModels']>(() => {
+     if (currentAcpCachedModelInfo?.availableModels?.length) {
+       return currentAcpCachedModelInfo.availableModels;
+     }
+     return (curated ?? []).map((m) => ({ id: m.id, label: m.displayName }));
+   }, [currentAcpCachedModelInfo?.availableModels, curated]);
+
++  const acpModels = React.useMemo(() => normalizeAcpModelOptions(rawAcpModels), [rawAcpModels]);
++
++  const selectedBaseModelId = React.useMemo(
++    () => splitAcpModelEffort(selectedAcpModel || currentAcpCachedModelInfo?.currentModelId).modelId,
++    [currentAcpCachedModelInfo?.currentModelId, selectedAcpModel]
++  );
++
++  const reasoningEffortOption = React.useMemo(
++    () => getReasoningEffortOption(cachedConfigOptions),
++    [cachedConfigOptions]
++  );
++
++  const configEffort = React.useMemo(
++    () => normalizeEffort(reasoningEffortOption?.currentValue || reasoningEffortOption?.selectedValue),
++    [reasoningEffortOption]
++  );
++
++  const modelEffort = React.useMemo(
++    () => splitAcpModelEffort(selectedAcpModel || currentAcpCachedModelInfo?.currentModelId).effort ?? null,
++    [currentAcpCachedModelInfo?.currentModelId, selectedAcpModel]
++  );
++
++  const effortOptions = React.useMemo<GuidReasoningEffort[]>(() => {
++    const fromConfig = reasoningEffortOption?.options
++      ?.map((option) => normalizeEffort(option.value))
++      .filter((value): value is GuidReasoningEffort => Boolean(value));
++    if (fromConfig && fromConfig.length > 0) return Array.from(new Set(fromConfig));
++
++    const bySelectedModel = rawAcpModels
++      .filter((model) => splitAcpModelEffort(model.id, model.label).modelId === selectedBaseModelId)
++      .map((model) => splitAcpModelEffort(model.id, model.label).effort)
++      .filter((value): value is GuidReasoningEffort => Boolean(value));
++    if (bySelectedModel.length > 0) return Array.from(new Set(bySelectedModel));
++
++    if (agentKey === 'codex' || agentKey === 'hermes') return GUID_REASONING_EFFORTS;
++    return [];
++  }, [agentKey, rawAcpModels, reasoningEffortOption, selectedBaseModelId]);
++
++  const currentEffort =
++    selectedAcpEffort ||
++    configEffort ||
++    modelEffort ||
++    (effortOptions.includes('xhigh') ? 'xhigh' : (effortOptions[0] ?? null));
++
++  const handleSelectEffort = React.useCallback(
++    (effort: GuidReasoningEffort) => {
++      setSelectedAcpEffort?.(effort);
++      onConfigOptionSelect?.(REASONING_EFFORT_CONFIG_ID, effort);
++      recordTelemetry({
++        eventType: 'guid.model_selected',
++        cliBackend: agentKey,
++        metadata: { effort, source: 'acp-effort' },
++      });
++    },
++    [agentKey, onConfigOptionSelect, recordTelemetry, setSelectedAcpEffort]
++  );
++
+   const acpSelectedLabel = React.useMemo(() => {
+-    if (isFluxModelId(selectedAcpModel)) return FLUX_MODEL_DISPLAY[selectedAcpModel as FluxModelId];
+-    return (
+-      currentAcpCachedModelInfo?.availableModels?.find((m) => m.id === selectedAcpModel)?.label ||
+-      currentAcpCachedModelInfo?.currentModelLabel ||
+-      currentAcpCachedModelInfo?.currentModelId ||
+-      ''
+-    );
+-  }, [
+-    currentAcpCachedModelInfo?.availableModels,
+-    currentAcpCachedModelInfo?.currentModelId,
+-    currentAcpCachedModelInfo?.currentModelLabel,
+-    selectedAcpModel,
+-  ]);
++    return resolveAcpSelectedLabel({
++      selectedAcpModel,
++      acpModels,
++      currentAcpCachedModelInfo,
++    });
++  }, [acpModels, currentAcpCachedModelInfo, selectedAcpModel]);
+
+   const acpButtonLabel = React.useMemo(() => {
+     return getModelDisplayLabel({
+@@ -454,6 +586,49 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+     [acpButtonLabel, acpSourceLabel]
+   );
+
++  const currentEffortLabel = currentEffort
++    ? t(effortLabelKey(currentEffort), {
++        defaultValue:
++          currentEffort === 'xhigh' ? 'XHigh' : currentEffort.charAt(0).toUpperCase() + currentEffort.slice(1),
++      })
++    : '';
++
++  const effortSelectorNode =
++    effortOptions.length > 0 && currentEffort ? (
++      <Dropdown
++        trigger='click'
++        droplist={
++          <Menu selectedKeys={[currentEffort]}>
++            <Menu.ItemGroup title={t('conversation.modelSelector.effort')}>
++              {effortOptions.map((effort) => {
++                const label = t(effortLabelKey(effort), {
++                  defaultValue: effort === 'xhigh' ? 'XHigh' : effort.charAt(0).toUpperCase() + effort.slice(1),
++                });
++                return (
++                  <Menu.Item key={effort} onClick={() => handleSelectEffort(effort)}>
++                    <div className='flex items-center gap-8px w-full'>
++                      {effort === currentEffort && <span className='text-primary shrink-0'>✓</span>}
++                      <span className={`flex-1 min-w-0 truncate ${effort !== currentEffort ? 'ml-16px' : ''}`}>
++                        {label}
++                      </span>
++                    </div>
++                  </Menu.Item>
++                );
++              })}
++            </Menu.ItemGroup>
++          </Menu>
++        }
++      >
++        <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
++          <span className='flex items-center gap-6px min-w-0'>
++            <Zap size={14} color={iconColors.secondary} className='shrink-0' />
++            <span className='truncate'>{currentEffortLabel}</span>
++            <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
++          </span>
++        </Button>
++      </Dropdown>
++    ) : null;
++
+   // ── Provider-based agents (Gemini / Wayland Core) - three-tier picker ────
+   if (isGeminiMode) {
+     return (
+@@ -500,72 +675,75 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+       </Menu.Item>
+     );
+     return (
+-      <Dropdown
+-        trigger='click'
+-        droplist={
+-          <Menu selectedKeys={selectedAcpModel ? [selectedAcpModel] : []}>
+-            {showAcpFlux && (
+-              <Menu.ItemGroup title={t('conversation.welcome.fluxGroupLabel')}>
+-                {FLUX_MODEL_IDS.map((fluxId) => (
++      <>
++        <Dropdown
++          trigger='click'
++          droplist={
++            <Menu selectedKeys={selectedBaseModelId ? [selectedBaseModelId] : []}>
++              {showAcpFlux && (
++                <Menu.ItemGroup title={t('conversation.welcome.fluxGroupLabel')}>
++                  {FLUX_MODEL_IDS.map((fluxId) => (
++                    <Menu.Item
++                      key={fluxId}
++                      onClick={() => {
++                        setSelectedAcpModel(fluxId);
++                        recordTelemetry({
++                          eventType: 'guid.model_selected',
++                          cliBackend: agentKey,
++                          metadata: { modelId: fluxId, source: 'flux' },
++                        });
++                      }}
++                    >
++                      <div className='flex items-center gap-8px w-full'>
++                        <FluxRouterMark size={14} className='shrink-0' />
++                        <span className='flex-1 min-w-0 truncate'>{FLUX_MODEL_DISPLAY[fluxId]}</span>
++                      </div>
++                    </Menu.Item>
++                  ))}
++                </Menu.ItemGroup>
++              )}
++              {scopeCaptionItem}
++              {acpModels.map((model) => {
++                const tier = acpTierFor(model.id, model.label);
++                return (
+                   <Menu.Item
+-                    key={fluxId}
++                    key={model.id}
+                     onClick={() => {
+-                      setSelectedAcpModel(fluxId);
++                      setSelectedAcpModel(model.id);
+                       recordTelemetry({
+                         eventType: 'guid.model_selected',
+                         cliBackend: agentKey,
+-                        metadata: { modelId: fluxId, source: 'flux' },
++                        metadata: { modelId: model.id, source: 'acp' },
+                       });
+                     }}
+                   >
+                     <div className='flex items-center gap-8px w-full'>
+-                      <FluxRouterMark size={14} className='shrink-0' />
+-                      <span className='flex-1 min-w-0 truncate'>{FLUX_MODEL_DISPLAY[fluxId]}</span>
++                      <span className='flex-1 min-w-0 truncate'>{model.label}</span>
++                      {tier && (
++                        <span
++                          className='text-11px font-600 text-t-tertiary tracking-wider shrink-0'
++                          aria-label={t('settings.modelsPage.homePicker.priceTierAria', { tier })}
++                        >
++                          {tier}
++                        </span>
++                      )}
+                     </div>
+                   </Menu.Item>
+-                ))}
+-              </Menu.ItemGroup>
+-            )}
+-            {scopeCaptionItem}
+-            {acpModels.map((model) => {
+-              const tier = acpTierFor(model.id, model.label);
+-              return (
+-                <Menu.Item
+-                  key={model.id}
+-                  onClick={() => {
+-                    setSelectedAcpModel(model.id);
+-                    recordTelemetry({
+-                      eventType: 'guid.model_selected',
+-                      cliBackend: agentKey,
+-                      metadata: { modelId: model.id, source: 'acp' },
+-                    });
+-                  }}
+-                >
+-                  <div className='flex items-center gap-8px w-full'>
+-                    <span className='flex-1 min-w-0 truncate'>{model.label}</span>
+-                    {tier && (
+-                      <span
+-                        className='text-11px font-600 text-t-tertiary tracking-wider shrink-0'
+-                        aria-label={t('settings.modelsPage.homePicker.priceTierAria', { tier })}
+-                      >
+-                        {tier}
+-                      </span>
+-                    )}
+-                  </div>
+-                </Menu.Item>
+-              );
+-            })}
+-          </Menu>
+-        }
+-      >
+-        <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
+-          <span className='flex items-center gap-6px min-w-0'>
+-            <Brain size={14} color={iconColors.secondary} className='shrink-0' />
+-            <span>{acpButtonDisplayLabel}</span>
+-            <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
+-          </span>
+-        </Button>
+-      </Dropdown>
++                );
++              })}
++            </Menu>
++          }
++        >
++          <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
++            <span className='flex items-center gap-6px min-w-0'>
++              <Brain size={14} color={iconColors.secondary} className='shrink-0' />
++              <span>{acpButtonDisplayLabel}</span>
++              <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
++            </span>
++          </Button>
++        </Dropdown>
++        {effortSelectorNode}
++      </>
+     );
+   }
+
+diff --git a/src/renderer/pages/guid/components/newChatStarter/IntentPillBar.module.css b/src/renderer/pages/guid/components/newChatStarter/IntentPillBar.module.css
+index 5f8854113..5246d3351 100644
+--- a/src/renderer/pages/guid/components/newChatStarter/IntentPillBar.module.css
++++ b/src/renderer/pages/guid/components/newChatStarter/IntentPillBar.module.css
+@@ -20,7 +20,11 @@
+   font-weight: 500;
+   letter-spacing: 0.01em;
+   cursor: pointer;
+-  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, transform 120ms ease;
++  transition:
++    background-color 120ms ease,
++    border-color 120ms ease,
++    color 120ms ease,
++    transform 120ms ease;
+ }
+
+ .pill:hover {
+@@ -44,26 +48,19 @@
+   color: #ffffff;
+ }
+
+-/* Narrow / mobile: a single horizontal scroll row instead of wrapping the
+-   intent pills into 2-3 ragged rows (the #2 mobile-layout complaint). */
++/* Narrow / mobile: wrap visible intent pills instead of hiding later actions
++   behind horizontal scroll. */
+ @media (max-width: 768px) {
+   .pillBar {
+-    flex-wrap: nowrap;
+-    justify-content: flex-start;
+-    overflow-x: auto;
+-    overflow-y: hidden;
+-    scroll-snap-type: x proximity;
+-    -webkit-overflow-scrolling: touch;
+-    scrollbar-width: none;
++    flex-wrap: wrap;
++    justify-content: center;
++    overflow: visible;
+     padding-bottom: 2px;
+   }
+
+-  .pillBar::-webkit-scrollbar {
+-    display: none;
+-  }
+-
+   .pill {
+-    flex-shrink: 0;
+-    scroll-snap-align: start;
++    flex: 1 1 104px;
++    min-width: min(104px, 100%);
++    justify-content: center;
+   }
+ }
+diff --git a/src/renderer/pages/guid/hooks/useGuidAgentSelection.ts b/src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
+index 2628b8146..73f4e2870 100644
+--- a/src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
++++ b/src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
+@@ -9,6 +9,7 @@ import type { IProvider } from '@/common/config/storage';
+ import { ConfigStorage } from '@/common/config/storage';
+ import type { AcpBackendAll, AcpSessionConfigOption } from '@/common/types/acpTypes';
+ import type { AcpBackend, AcpBackendConfig, AcpModelInfo, AvailableAgent, EffectiveAgentInfo } from '../types';
++import type { GuidReasoningEffort } from '../components/GuidModelSelector';
+ import { DETECTED_AGENTS_SWR_KEY, fetchDetectedAgents } from '@/renderer/utils/model/agentTypes';
+ import { getAgentModes } from '@/renderer/utils/model/agentModes';
+ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+@@ -39,6 +40,8 @@ export type GuidAgentSelectionResult = {
+   acpCachedModels: Record<string, AcpModelInfo>;
+   selectedAcpModel: string | null;
+   setSelectedAcpModel: React.Dispatch<React.SetStateAction<string | null>>;
++  selectedAcpEffort: GuidReasoningEffort | null;
++  setSelectedAcpEffort: (effort: GuidReasoningEffort) => void;
+   currentAcpCachedModelInfo: AcpModelInfo | null;
+   currentEffectiveAgentInfo: EffectiveAgentInfo;
+   cachedConfigOptions: AcpSessionConfigOption[];
+@@ -65,6 +68,34 @@ export type GuidAgentSelectionResult = {
+   customAgentAvatarMap: Map<string, string | undefined>;
+ };
+
++const GUID_REASONING_EFFORTS: GuidReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
++const MODEL_EFFORT_SUFFIX = /\/(low|medium|high|xhigh)$/i;
++
++const normalizeEffort = (value: unknown): GuidReasoningEffort | null => {
++  if (typeof value !== 'string') return null;
++  const normalized = value.toLowerCase() as GuidReasoningEffort;
++  return GUID_REASONING_EFFORTS.includes(normalized) ? normalized : null;
++};
++
++const splitModelEffort = (
++  modelId: string | null | undefined
++): { modelId: string | null; effort: GuidReasoningEffort | null } => {
++  const match = modelId?.match(MODEL_EFFORT_SUFFIX);
++  if (!match) return { modelId: modelId || null, effort: null };
++  return { modelId: modelId!.slice(0, -match[0].length), effort: normalizeEffort(match[1]) };
++};
++
++const effortFromConfigOptions = (options: AcpSessionConfigOption[] | undefined): GuidReasoningEffort | null => {
++  const option = options?.find(
++    (opt) =>
++      opt.id === 'reasoning_effort' || opt.category === 'thought_level' || opt.name?.toLowerCase().includes('reasoning')
++  );
++  return normalizeEffort(option?.currentValue || option?.selectedValue);
++};
++
++const defaultEffortForBackend = (backend: string): GuidReasoningEffort | null =>
++  backend === 'codex' || backend === 'hermes' ? 'xhigh' : null;
++
+ type UseGuidAgentSelectionOptions = {
+   modelList: IProvider[];
+   isGoogleAuth: boolean;
+@@ -93,6 +124,7 @@ export const useGuidAgentSelection = ({
+   const initialRestoreDoneRef = useRef(false);
+   const [acpCachedModels, setAcpCachedModels] = useState<Record<string, AcpModelInfo>>({});
+   const [selectedAcpModel, _setSelectedAcpModel] = useState<string | null>(null);
++  const [selectedAcpEffort, _setSelectedAcpEffort] = useState<GuidReasoningEffort | null>(null);
+   const [cachedConfigOptions, setCachedConfigOptions] = useState<AcpSessionConfigOption[]>([]);
+   const [pendingConfigOptions, setPendingConfigOptions] = useState<Record<string, string>>({});
+
+@@ -122,10 +154,17 @@ export const useGuidAgentSelection = ({
+     setPendingConfigOptions((prev) => ({ ...prev, [configId]: value }));
+   }, []);
+
++  const setSelectedAcpEffort = useCallback((effort: GuidReasoningEffort) => {
++    _setSelectedAcpEffort(effort);
++    setPendingConfigOptions((prev) => ({ ...prev, reasoning_effort: effort }));
++  }, []);
++
+   // Wrap setSelectedAcpModel to also save preferred model to the agent's config
+   const setSelectedAcpModel = useCallback((modelId: React.SetStateAction<string | null>) => {
+     _setSelectedAcpModel((prev) => {
+-      const newModelId = typeof modelId === 'function' ? modelId(prev) : modelId;
++      const rawModelId = typeof modelId === 'function' ? modelId(prev) : modelId;
++      const { modelId: newModelId, effort } = splitModelEffort(rawModelId);
++      if (effort) _setSelectedAcpEffort(effort);
+       const agentKey = selectedAgentRef.current;
+       if (agentKey && agentKey !== 'gemini' && agentKey !== 'custom' && newModelId) {
+         void savePreferredModelId(agentKey, newModelId);
+@@ -379,18 +418,18 @@ export const useGuidAgentSelection = ({
+       .then((cached) => {
+         if (!isActive) return;
+         const options = cached?.[backend];
+-        // Filter out model/mode categories - those are handled by AcpModelSelector / AgentModeSelector
+-        const filtered = Array.isArray(options)
+-          ? (options as Array<{ category?: string }>).filter(
+-              (opt) => opt.category !== 'model' && opt.category !== 'mode'
+-            )
+-          : [];
+-        setCachedConfigOptions(filtered as AcpSessionConfigOption[]);
++        const typedOptions = Array.isArray(options) ? (options as AcpSessionConfigOption[]) : [];
++        // Filter out model/mode categories - those are handled by AcpModelSelector / AgentModeSelector.
++        // Keep reasoning_effort here so the GUID can render it as a dedicated selector.
++        const filtered = typedOptions.filter((opt) => opt.category !== 'model' && opt.category !== 'mode');
++        setCachedConfigOptions(filtered);
++        _setSelectedAcpEffort(effortFromConfigOptions(typedOptions) ?? defaultEffortForBackend(backend));
+         setPendingConfigOptions({});
+       })
+       .catch(() => {
+         if (!isActive) return;
+         setCachedConfigOptions([]);
++        _setSelectedAcpEffort(defaultEffortForBackend(backend));
+         setPendingConfigOptions({});
+       });
+     return () => {
+@@ -425,7 +464,9 @@ export const useGuidAgentSelection = ({
+           | string
+           | undefined;
+         if (preferred) {
+-          _setSelectedAcpModel(preferred);
++          const parsed = splitModelEffort(preferred);
++          _setSelectedAcpModel(parsed.modelId);
++          if (parsed.effort) _setSelectedAcpEffort(parsed.effort);
+           return;
+         }
+       } catch {
+@@ -436,7 +477,9 @@ export const useGuidAgentSelection = ({
+       // 2. Last model the ACP bridge cached for this backend.
+       const cachedModelId = acpCachedModels[backend]?.currentModelId;
+       if (cachedModelId) {
+-        _setSelectedAcpModel(cachedModelId);
++        const parsed = splitModelEffort(cachedModelId);
++        _setSelectedAcpModel(parsed.modelId);
++        if (parsed.effort) _setSelectedAcpEffort(parsed.effort);
+         return;
+       }
+
+@@ -457,7 +500,10 @@ export const useGuidAgentSelection = ({
+       }
+
+       // 4. No signal (non-claude backend, or claude without a native login).
+-      if (!cancelled) _setSelectedAcpModel(null);
++      if (!cancelled) {
++        _setSelectedAcpModel(null);
++        _setSelectedAcpEffort(defaultEffortForBackend(backend));
++      }
+     };
+
+     void resolveAcpModel();
+@@ -617,6 +663,8 @@ export const useGuidAgentSelection = ({
+     acpCachedModels,
+     selectedAcpModel,
+     setSelectedAcpModel,
++    selectedAcpEffort,
++    setSelectedAcpEffort,
+     currentAcpCachedModelInfo,
+     currentEffectiveAgentInfo,
+     cachedConfigOptions,
+diff --git a/src/renderer/pages/guid/hooks/useGuidSend.ts b/src/renderer/pages/guid/hooks/useGuidSend.ts
+index e5c063be6..1091d6b03 100644
+--- a/src/renderer/pages/guid/hooks/useGuidSend.ts
++++ b/src/renderer/pages/guid/hooks/useGuidSend.ts
+@@ -17,6 +17,8 @@ import { type TFunction } from 'i18next';
+ import type { NavigateFunction } from 'react-router-dom';
+ import type { AcpBackend, AvailableAgent, EffectiveAgentInfo } from '../types';
+
++type GuidReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
++
+ export type GuidSendDeps = {
+   // Input state
+   input: string;
+@@ -35,6 +37,7 @@ export type GuidSendDeps = {
+   isPresetAgent: boolean;
+   selectedMode: string;
+   selectedAcpModel: string | null;
++  selectedAcpEffort: GuidReasoningEffort | null;
+   pendingConfigOptions: Record<string, string>;
+   cachedConfigOptions: import('@/common/types/acpTypes').AcpSessionConfigOption[];
+   currentModel: TProviderWithModel | undefined;
+@@ -138,6 +141,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+     isPresetAgent,
+     selectedMode,
+     selectedAcpModel,
++    selectedAcpEffort,
+     pendingConfigOptions,
+     cachedConfigOptions,
+     currentModel,
+@@ -458,6 +462,9 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+         console.warn(`${acpBackend} CLI not found, but proceeding to let conversation panel handle it.`);
+       }
+       const agentBackend = acpBackend || selectedAgent;
++      const effectivePendingConfigOptions = selectedAcpEffort
++        ? { ...pendingConfigOptions, reasoning_effort: selectedAcpEffort }
++        : pendingConfigOptions;
+       const agentConversationParams = buildAgentConversationParams({
+         backend: agentBackend,
+         name: input,
+@@ -484,6 +491,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+           ...projectExtra,
+           ...sessionSkillsExtra,
+           excludeBuiltinSkills,
++          ...(selectedAcpEffort ? { effort: selectedAcpEffort } : {}),
+         },
+       });
+
+@@ -491,9 +499,9 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+         // Merge pending selections into cached options so the UI shows the user's choice immediately
+         const mergedCachedConfigOptions =
+           cachedConfigOptions.length > 0
+-            ? Object.keys(pendingConfigOptions).length > 0
++            ? Object.keys(effectivePendingConfigOptions).length > 0
+               ? cachedConfigOptions.map((opt) => {
+-                  const pending = opt.id ? pendingConfigOptions[opt.id] : undefined;
++                  const pending = opt.id ? effectivePendingConfigOptions[opt.id] : undefined;
+                   return pending ? { ...opt, currentValue: pending, selectedValue: pending } : opt;
+                 })
+               : cachedConfigOptions
+@@ -506,8 +514,11 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+             cachedConfigOptions: mergedCachedConfigOptions,
+           };
+         }
+-        if (Object.keys(pendingConfigOptions).length > 0) {
+-          agentConversationParams.extra = { ...agentConversationParams.extra, pendingConfigOptions };
++        if (Object.keys(effectivePendingConfigOptions).length > 0) {
++          agentConversationParams.extra = {
++            ...agentConversationParams.extra,
++            pendingConfigOptions: effectivePendingConfigOptions,
++          };
+         }
+
+         const conversation = await ipcBridge.conversation.create.invoke(agentConversationParams);
+@@ -547,6 +558,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+     isPresetAgent,
+     selectedMode,
+     selectedAcpModel,
++    selectedAcpEffort,
+     pendingConfigOptions,
+     cachedConfigOptions,
+     currentModel,
+@@ -565,42 +577,45 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+     projectWorkspace,
+   ]);
+
+-  const sendMessageHandler = useCallback((opts?: { onSent?: () => void }) => {
+-    if (loading || sendingRef.current) return;
+-    sendingRef.current = true;
+-    setLoading(true);
+-    handleSend()
+-      .then((ok) => {
+-        setInput('');
+-        setMentionOpen(false);
+-        setMentionQuery(null);
+-        setMentionSelectorOpen(false);
+-        setMentionActiveIndex(0);
+-        setFiles([]);
+-        setDir('');
+-        // Cross-audit MED-3: only fire onSent (telemetry) when the send
+-        // actually succeeded - validation early-returns resolve to false.
+-        if (ok) opts?.onSent?.();
+-      })
+-      .catch((error) => {
+-        console.error('Failed to send message:', error);
+-      })
+-      .finally(() => {
+-        sendingRef.current = false;
+-        setLoading(false);
+-      });
+-  }, [
+-    loading,
+-    handleSend,
+-    setLoading,
+-    setInput,
+-    setMentionOpen,
+-    setMentionQuery,
+-    setMentionSelectorOpen,
+-    setMentionActiveIndex,
+-    setFiles,
+-    setDir,
+-  ]);
++  const sendMessageHandler = useCallback(
++    (opts?: { onSent?: () => void }) => {
++      if (loading || sendingRef.current) return;
++      sendingRef.current = true;
++      setLoading(true);
++      handleSend()
++        .then((ok) => {
++          setInput('');
++          setMentionOpen(false);
++          setMentionQuery(null);
++          setMentionSelectorOpen(false);
++          setMentionActiveIndex(0);
++          setFiles([]);
++          setDir('');
++          // Cross-audit MED-3: only fire onSent (telemetry) when the send
++          // actually succeeded - validation early-returns resolve to false.
++          if (ok) opts?.onSent?.();
++        })
++        .catch((error) => {
++          console.error('Failed to send message:', error);
++        })
++        .finally(() => {
++          sendingRef.current = false;
++          setLoading(false);
++        });
++    },
++    [
++      loading,
++      handleSend,
++      setLoading,
++      setInput,
++      setMentionOpen,
++      setMentionQuery,
++      setMentionSelectorOpen,
++      setMentionActiveIndex,
++      setFiles,
++      setDir,
++    ]
++  );
+
+   // No usable model configured. Mirrors the send-time validation: only the
+   // model-backed backends actually reject on a missing model - the Gemini path
+diff --git a/src/renderer/pages/guid/index.module.css b/src/renderer/pages/guid/index.module.css
+index d4f57919e..c9f127437 100644
+--- a/src/renderer/pages/guid/index.module.css
++++ b/src/renderer/pages/guid/index.module.css
+@@ -454,27 +454,35 @@
+   }
+
+   .actionRow {
+-    flex-wrap: nowrap;
++    align-items: flex-end;
++    flex-wrap: wrap;
+     gap: 8px;
+   }
+
+   .actionTools {
+-    gap: 8px;
+-    flex: 1 1 auto;
++    gap: 6px;
++    flex: 1 1 calc(100% - 44px);
+     min-width: 0;
+-    overflow-x: auto;
+-    overflow-y: hidden;
+-    white-space: nowrap;
+-    -webkit-overflow-scrolling: touch;
+-    scrollbar-width: none;
++    overflow: visible;
++    white-space: normal;
++    flex-wrap: wrap;
+   }
+
+-  .actionTools::-webkit-scrollbar {
+-    display: none;
++  .actionTools > * {
++    flex: 0 1 auto;
+   }
+
+-  .actionTools > * {
+-    flex: 0 0 auto;
++  .actionTools :global(.sendbox-model-btn) {
++    max-width: 100%;
++    padding-inline: 8px !important;
++  }
++
++  .actionTools :global(.sendbox-model-btn .arco-btn-content) {
++    min-width: 0;
++  }
++
++  .actionTools :global(.sendbox-model-btn .arco-btn-content span) {
++    min-width: 0;
+   }
+
+   .actionEntry {
+@@ -694,30 +702,28 @@
+
+   .actionTools {
+     gap: 6px;
+-    flex: 1 1 auto;
++    flex: 1 1 calc(100% - 44px);
+     min-width: 0;
+-    overflow-x: auto;
+-    overflow-y: hidden;
+-    white-space: nowrap;
+-    -webkit-overflow-scrolling: touch;
+-    touch-action: pan-x;
++    overflow: visible;
++    white-space: normal;
++    flex-wrap: wrap;
++    touch-action: manipulation;
+   }
+ }
+
+ /* iPhone-specific optimizations */
+ @supports (-webkit-touch-callout: none) {
+   .actionRow {
+-    flex-wrap: nowrap !important;
++    flex-wrap: wrap !important;
+   }
+
+   .actionTools {
+-    flex: 1 1 auto;
++    flex: 1 1 calc(100% - 44px);
+     min-width: 0;
+-    overflow-x: auto;
+-    overflow-y: hidden;
+-    white-space: nowrap;
+-    -webkit-overflow-scrolling: touch;
+-    touch-action: pan-x;
++    overflow: visible;
++    white-space: normal;
++    flex-wrap: wrap;
++    touch-action: manipulation;
+   }
+
+   .actionSubmit {
+diff --git a/src/renderer/services/i18n/i18n-keys.d.ts b/src/renderer/services/i18n/i18n-keys.d.ts
+index a608f31a6..941cf099d 100644
+--- a/src/renderer/services/i18n/i18n-keys.d.ts
++++ b/src/renderer/services/i18n/i18n-keys.d.ts
+@@ -48,6 +48,7 @@ export type I18nKey =
+   | 'agentMode.build'
+   | 'agentMode.bypass'
+   | 'agentMode.bypassPermissions'
++  | 'agentMode.configToml'
+   | 'agentMode.default'
+   | 'agentMode.dontAsk'
+   | 'agentMode.permission'
+@@ -561,6 +562,8 @@ export type I18nKey =
+   | 'conversation.modelSelector.effortLowDesc'
+   | 'conversation.modelSelector.effortMedium'
+   | 'conversation.modelSelector.effortMediumDesc'
++  | 'conversation.modelSelector.effortXhigh'
++  | 'conversation.modelSelector.effortXhighDesc'
+   | 'conversation.modelSelector.emptyBody'
+   | 'conversation.modelSelector.emptyFlux'
+   | 'conversation.modelSelector.emptySub'
+diff --git a/src/renderer/services/i18n/index.ts b/src/renderer/services/i18n/index.ts
+index dfed662be..11974739a 100644
+--- a/src/renderer/services/i18n/index.ts
++++ b/src/renderer/services/i18n/index.ts
+@@ -33,6 +33,7 @@ export { normalizeLanguageCode } from '@/common/config/i18n';
+ export type { SupportedLanguage } from '@/common/config/i18n';
+
+ export const supportedLanguages = i18nConfig.supportedLanguages;
++const DEFAULT_LOGIN_LANGUAGE = 'pt-BR';
+
+ const localeData: LocaleData = {
+   'en-US': enUS,
+@@ -89,7 +90,7 @@ i18n
+         translation: fallbackLocale,
+       },
+     },
+-    lng: (typeof localStorage !== 'undefined' ? localStorage.getItem('i18nextLng') : null) || DEFAULT_LANGUAGE,
++    lng: (typeof localStorage !== 'undefined' ? localStorage.getItem('i18nextLng') : null) || DEFAULT_LOGIN_LANGUAGE,
+     fallbackLng: DEFAULT_LANGUAGE,
+     debug: false,
+     interpolation: { escapeValue: false },
+@@ -102,7 +103,7 @@ i18n
+ async function initLanguage(): Promise<void> {
+   try {
+     const savedLanguage = await ConfigStorage.get('language');
+-    const language = savedLanguage || normalizeLanguageCode(navigator.language || DEFAULT_LANGUAGE);
++    const language = savedLanguage || DEFAULT_LOGIN_LANGUAGE;
+     await ensureAndSwitch(i18n, language, loadLocaleModules);
+     // Sync to localStorage so next page load can use it as a fast hint
+     if (typeof localStorage !== 'undefined') {
+diff --git a/src/renderer/services/i18n/locales/de-DE/agentMode.json b/src/renderer/services/i18n/locales/de-DE/agentMode.json
+index 0a50e4e0f..fcc11caf6 100644
+--- a/src/renderer/services/i18n/locales/de-DE/agentMode.json
++++ b/src/renderer/services/i18n/locales/de-DE/agentMode.json
+@@ -15,5 +15,6 @@
+   "permission": "Berechtigung",
+   "switchMode": "Modus wechseln",
+   "switchSuccess": "Modus erfolgreich gewechselt",
+-  "switchFailed": "Moduswechsel fehlgeschlagen"
++  "switchFailed": "Moduswechsel fehlgeschlagen",
++  "configToml": "Custom (config.toml)"
+ }
+diff --git a/src/renderer/services/i18n/locales/de-DE/conversation.json b/src/renderer/services/i18n/locales/de-DE/conversation.json
+index 3c332357c..56e81537f 100644
+--- a/src/renderer/services/i18n/locales/de-DE/conversation.json
++++ b/src/renderer/services/i18n/locales/de-DE/conversation.json
+@@ -438,6 +438,8 @@
+     "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
+     "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
+     "connectProvider": "Connect a provider",
+-    "manageModels": "Manage models"
++    "manageModels": "Manage models",
++    "effortXhigh": "XHigh",
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
+   }
+ }
+diff --git a/src/renderer/services/i18n/locales/en-US/agentMode.json b/src/renderer/services/i18n/locales/en-US/agentMode.json
+index 630a23ccd..9537a0ea6 100644
+--- a/src/renderer/services/i18n/locales/en-US/agentMode.json
++++ b/src/renderer/services/i18n/locales/en-US/agentMode.json
+@@ -15,5 +15,6 @@
+   "permission": "Permission",
+   "switchMode": "Switch Mode",
+   "switchSuccess": "Mode switched successfully",
+-  "switchFailed": "Failed to switch mode"
++  "switchFailed": "Failed to switch mode",
++  "configToml": "Custom (config.toml)"
+ }
+diff --git a/src/renderer/services/i18n/locales/en-US/conversation.json b/src/renderer/services/i18n/locales/en-US/conversation.json
+index a49f73fb0..bef7c7c9b 100644
+--- a/src/renderer/services/i18n/locales/en-US/conversation.json
++++ b/src/renderer/services/i18n/locales/en-US/conversation.json
+@@ -518,7 +518,9 @@
+     "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
+     "connectProvider": "Connect a provider",
+     "manageModels": "Manage models",
+-    "claudeSubscriptionNotice": "Claude Code runs on your Claude subscription (Anthropic), so this chat stays on Claude models. To use a different provider like ChatGPT or Gemini, start a new chat and pick that agent."
++    "claudeSubscriptionNotice": "Claude Code runs on your Claude subscription (Anthropic), so this chat stays on Claude models. To use a different provider like ChatGPT or Gemini, start a new chat and pick that agent.",
++    "effortXhigh": "XHigh",
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
+   },
+   "tool": {
+     "openGoogleConsent": "Open Google sign-in"
+diff --git a/src/renderer/services/i18n/locales/es-ES/agentMode.json b/src/renderer/services/i18n/locales/es-ES/agentMode.json
+index ed394efb5..383fc30ae 100644
+--- a/src/renderer/services/i18n/locales/es-ES/agentMode.json
++++ b/src/renderer/services/i18n/locales/es-ES/agentMode.json
+@@ -15,5 +15,6 @@
+   "permission": "Permiso",
+   "switchMode": "Cambiar de modo",
+   "switchSuccess": "Modo cambiado correctamente",
+-  "switchFailed": "No se pudo cambiar de modo"
++  "switchFailed": "No se pudo cambiar de modo",
++  "configToml": "Custom (config.toml)"
+ }
+diff --git a/src/renderer/services/i18n/locales/es-ES/conversation.json b/src/renderer/services/i18n/locales/es-ES/conversation.json
+index 56776d2a8..ec0c67d11 100644
+--- a/src/renderer/services/i18n/locales/es-ES/conversation.json
++++ b/src/renderer/services/i18n/locales/es-ES/conversation.json
+@@ -438,6 +438,8 @@
+     "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
+     "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
+     "connectProvider": "Connect a provider",
+-    "manageModels": "Manage models"
++    "manageModels": "Manage models",
++    "effortXhigh": "XHigh",
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
+   }
+ }
+diff --git a/src/renderer/services/i18n/locales/fr-FR/agentMode.json b/src/renderer/services/i18n/locales/fr-FR/agentMode.json
+index c7e51e1a7..4a4683862 100644
+--- a/src/renderer/services/i18n/locales/fr-FR/agentMode.json
++++ b/src/renderer/services/i18n/locales/fr-FR/agentMode.json
+@@ -15,5 +15,6 @@
+   "permission": "Autorisation",
+   "switchMode": "Changer de mode",
+   "switchSuccess": "Mode changé avec succès",
+-  "switchFailed": "Échec du changement de mode"
++  "switchFailed": "Échec du changement de mode",
++  "configToml": "Custom (config.toml)"
+ }
+diff --git a/src/renderer/services/i18n/locales/fr-FR/conversation.json b/src/renderer/services/i18n/locales/fr-FR/conversation.json
+index a8f429a3e..2a13b74bd 100644
+--- a/src/renderer/services/i18n/locales/fr-FR/conversation.json
++++ b/src/renderer/services/i18n/locales/fr-FR/conversation.json
+@@ -438,6 +438,8 @@
+     "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
+     "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
+     "connectProvider": "Connect a provider",
+-    "manageModels": "Manage models"
++    "manageModels": "Manage models",
++    "effortXhigh": "XHigh",
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
+   }
+ }
+diff --git a/src/renderer/services/i18n/locales/ja-JP/agentMode.json b/src/renderer/services/i18n/locales/ja-JP/agentMode.json
+index e329de963..a3cfc59ec 100644
+--- a/src/renderer/services/i18n/locales/ja-JP/agentMode.json
++++ b/src/renderer/services/i18n/locales/ja-JP/agentMode.json
+@@ -15,5 +15,6 @@
+   "permission": "権限",
+   "switchMode": "モード切替",
+   "switchSuccess": "モードを切り替えました",
+-  "switchFailed": "モードの切り替えに失敗しました"
++  "switchFailed": "モードの切り替えに失敗しました",
++  "configToml": "Custom (config.toml)"
+ }
+diff --git a/src/renderer/services/i18n/locales/ja-JP/conversation.json b/src/renderer/services/i18n/locales/ja-JP/conversation.json
+index edac437f5..2de5b7767 100644
+--- a/src/renderer/services/i18n/locales/ja-JP/conversation.json
++++ b/src/renderer/services/i18n/locales/ja-JP/conversation.json
+@@ -438,6 +438,8 @@
+     "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
+     "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
+     "connectProvider": "Connect a provider",
+-    "manageModels": "Manage models"
++    "manageModels": "Manage models",
++    "effortXhigh": "XHigh",
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
+   }
+ }
+diff --git a/src/renderer/services/i18n/locales/ko-KR/agentMode.json b/src/renderer/services/i18n/locales/ko-KR/agentMode.json
+index bcb972f24..8b6cee311 100644
+--- a/src/renderer/services/i18n/locales/ko-KR/agentMode.json
++++ b/src/renderer/services/i18n/locales/ko-KR/agentMode.json
+@@ -15,5 +15,6 @@
+   "permission": "권한",
+   "switchMode": "모드 전환",
+   "switchSuccess": "모드가 성공적으로 전환되었습니다",
+-  "switchFailed": "모드 전환에 실패했습니다"
++  "switchFailed": "모드 전환에 실패했습니다",
++  "configToml": "Custom (config.toml)"
+ }
+diff --git a/src/renderer/services/i18n/locales/ko-KR/conversation.json b/src/renderer/services/i18n/locales/ko-KR/conversation.json
+index 9cdb43fac..2827ca09a 100644
+--- a/src/renderer/services/i18n/locales/ko-KR/conversation.json
++++ b/src/renderer/services/i18n/locales/ko-KR/conversation.json
+@@ -438,6 +438,8 @@
+     "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
+     "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
+     "connectProvider": "Connect a provider",
+-    "manageModels": "Manage models"
++    "manageModels": "Manage models",
++    "effortXhigh": "XHigh",
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
+   }
+ }
+diff --git a/src/renderer/services/i18n/locales/pt-BR/agentMode.json b/src/renderer/services/i18n/locales/pt-BR/agentMode.json
+index dc4d40471..c23cb0a42 100644
+--- a/src/renderer/services/i18n/locales/pt-BR/agentMode.json
++++ b/src/renderer/services/i18n/locales/pt-BR/agentMode.json
+@@ -15,5 +15,6 @@
+   "permission": "Permissão",
+   "switchMode": "Trocar Modo",
+   "switchSuccess": "Modo trocado com sucesso",
+-  "switchFailed": "Falha ao trocar o modo"
++  "switchFailed": "Falha ao trocar o modo",
++  "configToml": "Personalizado(config.toml)"
+ }
+diff --git a/src/renderer/services/i18n/locales/pt-BR/conversation.json b/src/renderer/services/i18n/locales/pt-BR/conversation.json
+index fe91def75..c6cc7ac3b 100644
+--- a/src/renderer/services/i18n/locales/pt-BR/conversation.json
++++ b/src/renderer/services/i18n/locales/pt-BR/conversation.json
+@@ -438,6 +438,8 @@
+     "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
+     "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
+     "connectProvider": "Connect a provider",
+-    "manageModels": "Manage models"
++    "manageModels": "Manage models",
++    "effortXhigh": "XHigh",
++    "effortXhighDesc": "Raciocínio máximo para trabalhos difíceis"
+   }
+ }
+diff --git a/src/renderer/services/i18n/locales/ru-RU/agentMode.json b/src/renderer/services/i18n/locales/ru-RU/agentMode.json
+index 69d8c1e7e..ab6851b1e 100644
+--- a/src/renderer/services/i18n/locales/ru-RU/agentMode.json
++++ b/src/renderer/services/i18n/locales/ru-RU/agentMode.json
+@@ -15,5 +15,6 @@
+   "permission": "Разрешение",
+   "switchMode": "Сменить режим",
+   "switchSuccess": "Режим успешно сменён",
+-  "switchFailed": "Не удалось сменить режим"
++  "switchFailed": "Не удалось сменить режим",
++  "configToml": "Custom (config.toml)"
+ }
+diff --git a/src/renderer/services/i18n/locales/ru-RU/conversation.json b/src/renderer/services/i18n/locales/ru-RU/conversation.json
+index e183cc063..3c24f4675 100644
+--- a/src/renderer/services/i18n/locales/ru-RU/conversation.json
++++ b/src/renderer/services/i18n/locales/ru-RU/conversation.json
+@@ -438,6 +438,8 @@
+     "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
+     "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
+     "connectProvider": "Connect a provider",
+-    "manageModels": "Manage models"
++    "manageModels": "Manage models",
++    "effortXhigh": "XHigh",
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
+   }
+ }
+diff --git a/src/renderer/services/i18n/locales/tr-TR/agentMode.json b/src/renderer/services/i18n/locales/tr-TR/agentMode.json
+index 49a50bf27..49a863104 100644
+--- a/src/renderer/services/i18n/locales/tr-TR/agentMode.json
++++ b/src/renderer/services/i18n/locales/tr-TR/agentMode.json
+@@ -15,5 +15,6 @@
+   "permission": "İzin",
+   "switchMode": "Switch Mode",
+   "switchSuccess": "Mode switched successfully",
+-  "switchFailed": "Failed to switch mode"
++  "switchFailed": "Failed to switch mode",
++  "configToml": "Custom (config.toml)"
+ }
+diff --git a/src/renderer/services/i18n/locales/tr-TR/conversation.json b/src/renderer/services/i18n/locales/tr-TR/conversation.json
+index 9ef78e4a1..7bc5f8aa0 100644
+--- a/src/renderer/services/i18n/locales/tr-TR/conversation.json
++++ b/src/renderer/services/i18n/locales/tr-TR/conversation.json
+@@ -440,6 +440,8 @@
+     "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
+     "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
+     "connectProvider": "Connect a provider",
+-    "manageModels": "Manage models"
++    "manageModels": "Manage models",
++    "effortXhigh": "XHigh",
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
+   }
+ }
+diff --git a/src/renderer/services/i18n/locales/uk-UA/agentMode.json b/src/renderer/services/i18n/locales/uk-UA/agentMode.json
+index 791226d9b..ff7507c19 100644
+--- a/src/renderer/services/i18n/locales/uk-UA/agentMode.json
++++ b/src/renderer/services/i18n/locales/uk-UA/agentMode.json
+@@ -15,5 +15,6 @@
+   "permission": "Дозвіл",
+   "switchMode": "Змінити режим",
+   "switchSuccess": "Режим успішно змінено",
+-  "switchFailed": "Не вдалося змінити режим"
++  "switchFailed": "Не вдалося змінити режим",
++  "configToml": "Custom (config.toml)"
+ }
+diff --git a/src/renderer/services/i18n/locales/uk-UA/conversation.json b/src/renderer/services/i18n/locales/uk-UA/conversation.json
+index ac75f08af..18a16f670 100644
+--- a/src/renderer/services/i18n/locales/uk-UA/conversation.json
++++ b/src/renderer/services/i18n/locales/uk-UA/conversation.json
+@@ -438,6 +438,8 @@
+     "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
+     "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
+     "connectProvider": "Connect a provider",
+-    "manageModels": "Manage models"
++    "manageModels": "Manage models",
++    "effortXhigh": "XHigh",
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
+   }
+ }
+diff --git a/src/renderer/services/i18n/locales/zh-CN/agentMode.json b/src/renderer/services/i18n/locales/zh-CN/agentMode.json
+index c5a74cbc0..4d4235325 100644
+--- a/src/renderer/services/i18n/locales/zh-CN/agentMode.json
++++ b/src/renderer/services/i18n/locales/zh-CN/agentMode.json
+@@ -15,5 +15,6 @@
+   "permission": "权限",
+   "switchMode": "切换模式",
+   "switchSuccess": "模式切换成功",
+-  "switchFailed": "模式切换失败"
++  "switchFailed": "模式切换失败",
++  "configToml": "Custom (config.toml)"
+ }
+diff --git a/src/renderer/services/i18n/locales/zh-CN/conversation.json b/src/renderer/services/i18n/locales/zh-CN/conversation.json
+index 75a7a2626..7c59e76e1 100644
+--- a/src/renderer/services/i18n/locales/zh-CN/conversation.json
++++ b/src/renderer/services/i18n/locales/zh-CN/conversation.json
+@@ -438,6 +438,8 @@
+     "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
+     "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
+     "connectProvider": "Connect a provider",
+-    "manageModels": "Manage models"
++    "manageModels": "Manage models",
++    "effortXhigh": "XHigh",
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
+   }
+ }
+diff --git a/src/renderer/services/i18n/locales/zh-TW/agentMode.json b/src/renderer/services/i18n/locales/zh-TW/agentMode.json
+index 9801fe1e1..17ee6c11c 100644
+--- a/src/renderer/services/i18n/locales/zh-TW/agentMode.json
++++ b/src/renderer/services/i18n/locales/zh-TW/agentMode.json
+@@ -15,5 +15,6 @@
+   "permission": "權限",
+   "switchMode": "切換模式",
+   "switchSuccess": "模式切換成功",
+-  "switchFailed": "模式切換失敗"
++  "switchFailed": "模式切換失敗",
++  "configToml": "Custom (config.toml)"
+ }
+diff --git a/src/renderer/services/i18n/locales/zh-TW/conversation.json b/src/renderer/services/i18n/locales/zh-TW/conversation.json
+index 8b2037463..7ef683233 100644
+--- a/src/renderer/services/i18n/locales/zh-TW/conversation.json
++++ b/src/renderer/services/i18n/locales/zh-TW/conversation.json
+@@ -438,6 +438,8 @@
+     "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
+     "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
+     "connectProvider": "Connect a provider",
+-    "manageModels": "Manage models"
++    "manageModels": "Manage models",
++    "effortXhigh": "XHigh",
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
+   }
+ }
+diff --git a/src/renderer/utils/model/agentModes.ts b/src/renderer/utils/model/agentModes.ts
+index 3b9f8f839..480119ba5 100644
+--- a/src/renderer/utils/model/agentModes.ts
++++ b/src/renderer/utils/model/agentModes.ts
+@@ -6,6 +6,7 @@
+
+ import {
+   CODEX_MODE_AUTO_EDIT,
++  CODEX_MODE_CONFIG_TOML,
+   CODEX_MODE_FULL_AUTO,
+   CODEX_MODE_FULL_AUTO_NO_SANDBOX,
+ } from '@/common/types/codex/codexModes';
+@@ -75,6 +76,7 @@ export const AGENT_MODES: Record<string, AgentModeOption[]> = {
+     { value: CODEX_MODE_AUTO_EDIT, label: 'Auto Edit' },
+     { value: CODEX_MODE_FULL_AUTO, label: 'Full Auto' },
+     { value: CODEX_MODE_FULL_AUTO_NO_SANDBOX, label: 'Full Auto (No Sandbox)' },
++    { value: CODEX_MODE_CONFIG_TOML, label: 'Custom (config.toml)' },
+   ],
+   cursor: [
+     { value: 'agent', label: 'Agent', description: 'Full agent capabilities with tool access' },
+diff --git a/tests/unit/AgentPillBar.dom.test.tsx b/tests/unit/AgentPillBar.dom.test.tsx
+index a4b0b5ed7..69288fd2f 100644
+--- a/tests/unit/AgentPillBar.dom.test.tsx
++++ b/tests/unit/AgentPillBar.dom.test.tsx
+@@ -115,6 +115,22 @@ describe('AgentPillBar', () => {
+     expect(onSelectAgent).toHaveBeenCalledWith('gemini');
+   });
+
++  it('exposes collapsed desktop pills by accessible agent name', () => {
++    const onSelectAgent = vi.fn();
++    const agents: AvailableAgent[] = [
++      makeAgent({ backend: 'codex', name: 'Codex' }),
++      makeAgent({ backend: 'hermes', name: 'Hermes Agent' }),
++    ];
++
++    render(<AgentPillBar {...defaultProps} availableAgents={agents} onSelectAgent={onSelectAgent} />);
++
++    const hermesPill = screen.getByRole('button', { name: 'Hermes Agent' });
++    fireEvent.click(hermesPill);
++    expect(onSelectAgent).toHaveBeenCalledWith('hermes');
++    fireEvent.keyDown(hermesPill, { key: 'Enter' });
++    expect(onSelectAgent).toHaveBeenCalledWith('hermes');
++  });
++
+   it('marks selected agent with data attribute', () => {
+     const agents: AvailableAgent[] = [
+       makeAgent({ backend: 'claude', name: 'Claude' }),
 diff --git a/tests/unit/WebSocketManager.test.ts b/tests/unit/WebSocketManager.test.ts
 index a837db695..872d740a8 100644
 --- a/tests/unit/WebSocketManager.test.ts
@@ -248,6 +3061,39 @@ index a837db695..872d740a8 100644
 +  });
 +
  });
+diff --git a/tests/unit/process/task/codexConfigEffort.test.ts b/tests/unit/process/task/codexConfigEffort.test.ts
+index 3df770204..6acf2ec5b 100644
+--- a/tests/unit/process/task/codexConfigEffort.test.ts
++++ b/tests/unit/process/task/codexConfigEffort.test.ts
+@@ -32,10 +32,10 @@ describe('materializeFluxCodexHome - per-conversation effort', () => {
+     expect(config).toContain('model_reasoning_effort = "high"');
+   });
+
+-  it('emits the selected effort verbatim for low/medium', async () => {
++  it('emits the selected effort verbatim for low/medium/xhigh', async () => {
+     // Each effort materializes a distinct home so the configs do not clobber each other.
+     const results = await Promise.all(
+-      (['low', 'medium'] as const).map(async (effort) => {
++      (['low', 'medium', 'xhigh'] as const).map(async (effort) => {
+         const home = await materializeFluxCodexHome(
+           join(dir, effort),
+           'workspace-write',
+diff --git a/tests/unit/process/task/codexNativeSandbox.test.ts b/tests/unit/process/task/codexNativeSandbox.test.ts
+index 22e16db68..1f6b0439b 100644
+--- a/tests/unit/process/task/codexNativeSandbox.test.ts
++++ b/tests/unit/process/task/codexNativeSandbox.test.ts
+@@ -61,6 +61,11 @@ describe('getCodexSandboxModeForSessionMode (#536)', () => {
+     expect(getCodexSandboxModeForSessionMode('autoEdit')).toBe('workspace-write');
+   });
+
++  it('keeps configToml mode on the configured fallback instead of forcing a Wayland override', () => {
++    expect(getCodexSandboxModeForSessionMode('configToml')).toBe('read-only');
++    expect(getCodexSandboxModeForSessionMode('configToml', 'danger-full-access')).toBe('danger-full-access');
++  });
++
+   it('maps an explicit no-sandbox (yolo) session mode to danger-full-access', () => {
+     expect(getCodexSandboxModeForSessionMode('yoloNoSandbox')).toBe('danger-full-access');
+   });
 diff --git a/tests/unit/renderer/GuidActionRow.dom.test.tsx b/tests/unit/renderer/GuidActionRow.dom.test.tsx
 index 6f2bb3023..c249c30bc 100644
 --- a/tests/unit/renderer/GuidActionRow.dom.test.tsx
@@ -299,3 +3145,190 @@ index 6f2bb3023..c249c30bc 100644
    it('shows generic error toast when file upload fails', async () => {
      mockIsElectronDesktop.mockReturnValueOnce(false); // WebUI mode so file input is rendered
      const { Message } = await import('@arco-design/web-react');
+diff --git a/tests/unit/renderer/guid/firstSafeCuratedModel.test.ts b/tests/unit/renderer/guid/firstSafeCuratedModel.test.ts
+index 62e56ae1b..4b3f1f41a 100644
+--- a/tests/unit/renderer/guid/firstSafeCuratedModel.test.ts
++++ b/tests/unit/renderer/guid/firstSafeCuratedModel.test.ts
+@@ -5,7 +5,7 @@
+  */
+
+ import { describe, expect, it } from 'vitest';
+-import { firstSafeCuratedModel } from '@renderer/pages/guid/components/GuidModelSelector';
++import { firstSafeCuratedModel, resolveAcpSelectedLabel } from '@renderer/pages/guid/components/GuidModelSelector';
+ import type { CuratedModel } from '@process/providers/types';
+
+ const model = (over: Partial<CuratedModel> & { id: string }): CuratedModel =>
+@@ -64,3 +64,18 @@ describe('firstSafeCuratedModel', () => {
+     expect(firstSafeCuratedModel([])).toBeUndefined();
+   });
+ });
++
++describe('resolveAcpSelectedLabel', () => {
++  it('uses the selected curated ACP model label when no ACP cache exists yet', () => {
++    expect(
++      resolveAcpSelectedLabel({
++        selectedAcpModel: 'gpt-5.5',
++        acpModels: [
++          { id: 'gpt-5.4', label: 'GPT-5.4' },
++          { id: 'gpt-5.5', label: 'GPT-5.5' },
++        ],
++        currentAcpCachedModelInfo: null,
++      })
++    ).toBe('GPT-5.5');
++  });
++});
+diff --git a/tests/unit/renderer/guidModelSelector.dom.test.tsx b/tests/unit/renderer/guidModelSelector.dom.test.tsx
+index 1f90ee674..917ca2067 100644
+--- a/tests/unit/renderer/guidModelSelector.dom.test.tsx
++++ b/tests/unit/renderer/guidModelSelector.dom.test.tsx
+@@ -215,6 +215,10 @@ const baseProps = {
+   currentAcpCachedModelInfo: null,
+   selectedAcpModel: null,
+   setSelectedAcpModel: vi.fn(),
++  selectedAcpEffort: null,
++  setSelectedAcpEffort: vi.fn(),
++  cachedConfigOptions: [],
++  onConfigOptionSelect: vi.fn(),
+ };
+
+ beforeEach(() => {
+@@ -226,6 +230,9 @@ beforeEach(() => {
+   // resolves cleanly and stays silent in tests that don't exercise it.
+   mockResolveForChatStart.mockResolvedValue({ ok: false, error: 'not-connected' });
+   baseProps.setCurrentModel.mockClear();
++  baseProps.setSelectedAcpModel.mockClear();
++  baseProps.setSelectedAcpEffort.mockClear();
++  baseProps.onConfigOptionSelect.mockClear();
+ });
+
+ afterEach(() => {
+@@ -518,6 +525,67 @@ describe('GuidModelSelector home picker', () => {
+     expect(screen.getByText('$')).toBeInTheDocument();
+   });
+
++  it('collapses Codex ACP model/effort variants into one model row plus a separate effort selector', async () => {
++    mockCuratedForAgent.mockResolvedValue([]);
++    const fireEventClick = (await import('@testing-library/react')).fireEvent.click;
++    const setSelectedAcpModel = vi.fn();
++    const setSelectedAcpEffort = vi.fn();
++    const onConfigOptionSelect = vi.fn();
++    const acpInfo = {
++      currentModelId: 'gpt-5.5/xhigh',
++      currentModelLabel: 'GPT-5.5 (xhigh)',
++      availableModels: [
++        { id: 'gpt-5.5/low', label: 'GPT-5.5 (low)' },
++        { id: 'gpt-5.5/medium', label: 'GPT-5.5 (medium)' },
++        { id: 'gpt-5.5/high', label: 'GPT-5.5 (high)' },
++        { id: 'gpt-5.5/xhigh', label: 'GPT-5.5 (xhigh)' },
++        { id: 'gpt-5.4/high', label: 'GPT-5.4 (high)' },
++      ],
++      canSwitch: true,
++      source: 'models' as const,
++      sourceDetail: 'codex-stream' as const,
++    };
++
++    render(
++      <GuidModelSelector
++        {...baseProps}
++        isGeminiMode={false}
++        agentKey='codex'
++        currentAcpCachedModelInfo={acpInfo}
++        selectedAcpModel='gpt-5.5/xhigh'
++        selectedAcpEffort='xhigh'
++        setSelectedAcpModel={setSelectedAcpModel}
++        setSelectedAcpEffort={setSelectedAcpEffort}
++        cachedConfigOptions={[
++          {
++            id: 'reasoning_effort',
++            category: 'thought_level',
++            type: 'select',
++            currentValue: 'xhigh',
++            options: [
++              { value: 'low', name: 'Low' },
++              { value: 'medium', name: 'Medium' },
++              { value: 'high', name: 'High' },
++              { value: 'xhigh', name: 'XHigh' },
++            ],
++          },
++        ]}
++        onConfigOptionSelect={onConfigOptionSelect}
++      />
++    );
++
++    expect(await screen.findByText('GPT-5.5')).toBeInTheDocument();
++    expect(screen.getByText('GPT-5.4')).toBeInTheDocument();
++    expect(screen.queryByText('GPT-5.5 (xhigh)')).not.toBeInTheDocument();
++
++    fireEventClick(screen.getByText('GPT-5.4'));
++    expect(setSelectedAcpModel).toHaveBeenCalledWith('gpt-5.4');
++
++    fireEventClick(screen.getByText('conversation.modelSelector.effortLow'));
++    expect(setSelectedAcpEffort).toHaveBeenCalledWith('low');
++    expect(onConfigOptionSelect).toHaveBeenCalledWith('reasoning_effort', 'low');
++  });
++
+   it('passes the non-secret chat-start handle through to setCurrentModel (audit C4)', async () => {
+     // The resolver hands back the NON-SECRET handle (platform + baseUrl +
+     // account binding) - no decrypted key. The picker writes the binding into
+diff --git a/tests/unit/useGuidSend.dom.test.ts b/tests/unit/useGuidSend.dom.test.ts
+index 0ce473483..ec97ccd1e 100644
+--- a/tests/unit/useGuidSend.dom.test.ts
++++ b/tests/unit/useGuidSend.dom.test.ts
+@@ -69,6 +69,7 @@ function makeDeps(overrides: Partial<GuidSendDeps> = {}): GuidSendDeps {
+     isPresetAgent: false,
+     selectedMode: 'default',
+     selectedAcpModel: null,
++    selectedAcpEffort: null,
+     pendingConfigOptions: {},
+     cachedConfigOptions: [],
+     currentModel: undefined,
+@@ -213,6 +214,49 @@ describe('useGuidSend', () => {
+     });
+   });
+
++  it('stores selected reasoning effort as ACP pending config and conversation extra', async () => {
++    const deps = makeDeps({
++      selectedAgent: 'codex',
++      selectedAgentKey: 'codex',
++      selectedAcpModel: 'gpt-5.5',
++      selectedAcpEffort: 'xhigh',
++      cachedConfigOptions: [
++        {
++          id: 'reasoning_effort',
++          category: 'thought_level',
++          type: 'select',
++          currentValue: 'medium',
++          options: [
++            { value: 'medium', name: 'Medium' },
++            { value: 'xhigh', name: 'XHigh' },
++          ],
++        },
++      ],
++    });
++    const { result } = renderHook(() => useGuidSend(deps));
++
++    await act(async () => {
++      await result.current.handleSend();
++    });
++
++    expect(mockCreate).toHaveBeenCalledWith(
++      expect.objectContaining({
++        type: 'acp',
++        extra: expect.objectContaining({
++          effort: 'xhigh',
++          pendingConfigOptions: { reasoning_effort: 'xhigh' },
++          cachedConfigOptions: [
++            expect.objectContaining({
++              id: 'reasoning_effort',
++              currentValue: 'xhigh',
++              selectedValue: 'xhigh',
++            }),
++          ],
++        }),
++      })
++    );
++  });
++
+   describe('sendMessageHandler', () => {
+     it('resets input state after successful send', async () => {
+       const deps = makeDeps();

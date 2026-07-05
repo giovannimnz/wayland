@@ -32,10 +32,10 @@ describe('materializeFluxCodexHome - per-conversation effort', () => {
     expect(config).toContain('model_reasoning_effort = "high"');
   });
 
-  it('emits the selected effort verbatim for low/medium', async () => {
+  it('emits the selected effort verbatim for low/medium/xhigh', async () => {
     // Each effort materializes a distinct home so the configs do not clobber each other.
     const results = await Promise.all(
-      (['low', 'medium'] as const).map(async (effort) => {
+      (['low', 'medium', 'xhigh'] as const).map(async (effort) => {
         const home = await materializeFluxCodexHome(
           join(dir, effort),
           'workspace-write',

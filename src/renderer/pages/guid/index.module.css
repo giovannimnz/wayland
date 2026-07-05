@@ -454,27 +454,35 @@
   }
 
   .actionRow {
-    flex-wrap: nowrap;
+    align-items: flex-end;
+    flex-wrap: wrap;
     gap: 8px;
   }
 
   .actionTools {
-    gap: 8px;
-    flex: 1 1 auto;
+    gap: 6px;
+    flex: 1 1 calc(100% - 44px);
     min-width: 0;
-    overflow-x: auto;
-    overflow-y: hidden;
-    white-space: nowrap;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-  }
-
-  .actionTools::-webkit-scrollbar {
-    display: none;
+    overflow: visible;
+    white-space: normal;
+    flex-wrap: wrap;
   }
 
   .actionTools > * {
-    flex: 0 0 auto;
+    flex: 0 1 auto;
+  }
+
+  .actionTools :global(.sendbox-model-btn) {
+    max-width: 100%;
+    padding-inline: 8px !important;
+  }
+
+  .actionTools :global(.sendbox-model-btn .arco-btn-content) {
+    min-width: 0;
+  }
+
+  .actionTools :global(.sendbox-model-btn .arco-btn-content span) {
+    min-width: 0;
   }
 
   .actionEntry {
@@ -694,30 +702,28 @@
 
   .actionTools {
     gap: 6px;
-    flex: 1 1 auto;
+    flex: 1 1 calc(100% - 44px);
     min-width: 0;
-    overflow-x: auto;
-    overflow-y: hidden;
-    white-space: nowrap;
-    -webkit-overflow-scrolling: touch;
-    touch-action: pan-x;
+    overflow: visible;
+    white-space: normal;
+    flex-wrap: wrap;
+    touch-action: manipulation;
   }
 }
 
 /* iPhone-specific optimizations */
 @supports (-webkit-touch-callout: none) {
   .actionRow {
-    flex-wrap: nowrap !important;
+    flex-wrap: wrap !important;
   }
 
   .actionTools {
-    flex: 1 1 auto;
+    flex: 1 1 calc(100% - 44px);
     min-width: 0;
-    overflow-x: auto;
-    overflow-y: hidden;
-    white-space: nowrap;
-    -webkit-overflow-scrolling: touch;
-    touch-action: pan-x;
+    overflow: visible;
+    white-space: normal;
+    flex-wrap: wrap;
+    touch-action: manipulation;
   }
 
   .actionSubmit {

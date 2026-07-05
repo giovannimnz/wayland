@@ -115,6 +115,22 @@ describe('AgentPillBar', () => {
     expect(onSelectAgent).toHaveBeenCalledWith('gemini');
   });
 
+  it('exposes collapsed desktop pills by accessible agent name', () => {
+    const onSelectAgent = vi.fn();
+    const agents: AvailableAgent[] = [
+      makeAgent({ backend: 'codex', name: 'Codex' }),
+      makeAgent({ backend: 'hermes', name: 'Hermes Agent' }),
+    ];
+
+    render(<AgentPillBar {...defaultProps} availableAgents={agents} onSelectAgent={onSelectAgent} />);
+
+    const hermesPill = screen.getByRole('button', { name: 'Hermes Agent' });
+    fireEvent.click(hermesPill);
+    expect(onSelectAgent).toHaveBeenCalledWith('hermes');
+    fireEvent.keyDown(hermesPill, { key: 'Enter' });
+    expect(onSelectAgent).toHaveBeenCalledWith('hermes');
+  });
+
   it('marks selected agent with data attribute', () => {
     const agents: AvailableAgent[] = [
       makeAgent({ backend: 'claude', name: 'Claude' }),

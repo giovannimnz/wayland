@@ -15,5 +15,6 @@
   "permission": "権限",
   "switchMode": "モード切替",
   "switchSuccess": "モードを切り替えました",
-  "switchFailed": "モードの切り替えに失敗しました"
+  "switchFailed": "モードの切り替えに失敗しました",
+  "configToml": "Custom (config.toml)"
 }

@@ -105,6 +105,10 @@ const AgentPillBar: React.FC<AgentPillBarProps> = ({
       <div className='w-full flex justify-center' style={{ marginBottom: 20 }}>
         <Dropdown droplist={droplist} trigger='click' position='bl'>
           <div
+            role='button'
+            tabIndex={0}
+            aria-label={selected?.name ?? t('settings.agentManagement.selectAgent', { defaultValue: 'Select agent' })}
+            aria-haspopup='menu'
             data-agent-pill='true'
             data-agent-key={selected ? getAgentKey(selected) : ''}
             className='flex items-center gap-8px cursor-pointer'
@@ -115,6 +119,12 @@ const AgentPillBar: React.FC<AgentPillBarProps> = ({
               border: '1px solid var(--color-border-1)',
               maxWidth: '100%',
               color: 'var(--text-primary)',
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                event.currentTarget.click();
+              }
             }}
           >
             {selected ? renderAgentIcon(selected, 20) : <Bot size={20} style={{ flexShrink: 0 }} />}
@@ -154,7 +164,8 @@ const AgentPillBar: React.FC<AgentPillBarProps> = ({
         {availableAgents
           .filter((agent) => !agent.isPreset)
           .map((agent) => {
-            const isSelected = selectedAgentKey === getAgentKey(agent);
+            const agentKey = getAgentKey(agent);
+            const isSelected = selectedAgentKey === agentKey;
             const LucideIconComponent = getLucideIcon(agent.avatar);
             const extensionAvatar = LucideIconComponent
               ? undefined
@@ -162,23 +173,27 @@ const AgentPillBar: React.FC<AgentPillBarProps> = ({
             // Remote agents use emoji avatars - not image URLs
             const emojiAvatar =
               !LucideIconComponent && agent.backend === 'remote' && agent.avatar ? agent.avatar : undefined;
-            const logoSrc =
-              LucideIconComponent
-                ? undefined
-                : extensionAvatar ||
-                  (!emojiAvatar
-                    ? resolveAgentLogo({
-                        backend: agent.backend,
-                        customAgentId: agent.customAgentId,
-                        isExtension: agent.isExtension,
-                      })
-                    : undefined);
+            const logoSrc = LucideIconComponent
+              ? undefined
+              : extensionAvatar ||
+                (!emojiAvatar
+                  ? resolveAgentLogo({
+                      backend: agent.backend,
+                      customAgentId: agent.customAgentId,
+                      isExtension: agent.isExtension,
+                    })
+                  : undefined);
 
             return (
-              <React.Fragment key={getAgentKey(agent)}>
+              <React.Fragment key={agentKey}>
                 <div
+                  role='button'
+                  tabIndex={0}
+                  aria-label={agent.name}
+                  aria-pressed={isSelected}
+                  title={agent.name}
                   data-agent-pill='true'
-                  data-agent-key={getAgentKey(agent)}
+                  data-agent-key={agentKey}
                   data-agent-backend={agent.backend}
                   data-agent-selected={isSelected ? 'true' : 'false'}
                   className={`group relative flex items-center shrink-0 cursor-pointer whitespace-nowrap overflow-hidden ${isSelected ? `opacity-100 px-12px py-8px rd-20px mx-2px ${styles.agentItemSelected}` : isMobile ? 'opacity-70 p-4px' : 'opacity-60 p-4px hover:opacity-100'}`}
@@ -191,7 +206,13 @@ const AgentPillBar: React.FC<AgentPillBarProps> = ({
                         }
                       : { transition: 'opacity 0.2s ease' }),
                   }}
-                  onClick={() => onSelectAgent(getAgentKey(agent))}
+                  onClick={() => onSelectAgent(agentKey)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      onSelectAgent(agentKey);
+                    }
+                  }}
                 >
                   {LucideIconComponent ? (
                     <LucideIconComponent size={20} className='flex-shrink-0 text-[var(--color-text-1)]' />
@@ -225,7 +246,10 @@ const AgentPillBar: React.FC<AgentPillBarProps> = ({
               </React.Fragment>
             );
           })}
-        <div className='w-1px h-16px mx-4px self-center' style={{ backgroundColor: 'var(--color-border-2)', opacity: 0.5 }} />
+        <div
+          className='w-1px h-16px mx-4px self-center'
+          style={{ backgroundColor: 'var(--color-border-2)', opacity: 0.5 }}
+        />
         <Tooltip content={t('settings.agentManagement.discoverMoreAgents', { defaultValue: 'Discover more agents' })}>
           <div
             className='flex items-center justify-center cursor-pointer p-4px opacity-60 hover:opacity-100 self-center'

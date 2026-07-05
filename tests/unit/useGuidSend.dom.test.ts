@@ -69,6 +69,7 @@ function makeDeps(overrides: Partial<GuidSendDeps> = {}): GuidSendDeps {
     isPresetAgent: false,
     selectedMode: 'default',
     selectedAcpModel: null,
+    selectedAcpEffort: null,
     pendingConfigOptions: {},
     cachedConfigOptions: [],
     currentModel: undefined,
@@ -211,6 +212,49 @@ describe('useGuidSend', () => {
       expect(deps.closeAllTabs).toHaveBeenCalled();
       expect(deps.openTab).toHaveBeenCalledWith({ id: 'new-conv', extra: { workspace: '' } });
     });
+  });
+
+  it('stores selected reasoning effort as ACP pending config and conversation extra', async () => {
+    const deps = makeDeps({
+      selectedAgent: 'codex',
+      selectedAgentKey: 'codex',
+      selectedAcpModel: 'gpt-5.5',
+      selectedAcpEffort: 'xhigh',
+      cachedConfigOptions: [
+        {
+          id: 'reasoning_effort',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'medium',
+          options: [
+            { value: 'medium', name: 'Medium' },
+            { value: 'xhigh', name: 'XHigh' },
+          ],
+        },
+      ],
+    });
+    const { result } = renderHook(() => useGuidSend(deps));
+
+    await act(async () => {
+      await result.current.handleSend();
+    });
+
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'acp',
+        extra: expect.objectContaining({
+          effort: 'xhigh',
+          pendingConfigOptions: { reasoning_effort: 'xhigh' },
+          cachedConfigOptions: [
+            expect.objectContaining({
+              id: 'reasoning_effort',
+              currentValue: 'xhigh',
+              selectedValue: 'xhigh',
+            }),
+          ],
+        }),
+      })
+    );
   });
 
   describe('sendMessageHandler', () => {

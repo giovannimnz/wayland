@@ -6,7 +6,9 @@
 
 import { ArrowUp, Brain, FolderOpen, Shield } from 'lucide-react';
 import { ipcBridge } from '@/common';
-import ComposerAddMenu, { type ComposerUploadItem } from '@/renderer/pages/conversation/components/composerMenu/ComposerAddMenu';
+import ComposerAddMenu, {
+  type ComposerUploadItem,
+} from '@/renderer/pages/conversation/components/composerMenu/ComposerAddMenu';
 import AgentModeSelector from '@/renderer/components/agent/AgentModeSelector';
 import AcpConfigSelector from '@/renderer/components/agent/AcpConfigSelector';
 import { supportsModeSwitch, type AgentModeOption } from '@/renderer/utils/model/agentModes';
@@ -111,7 +113,15 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
   const layout = useLayoutContext();
   const modeBackend = effectiveModeAgent || selectedAgent;
   const showModeSwitch = supportsModeSwitch(modeBackend);
-  const configOptionCount = (modelSelectorNode ? 1 : 0) + (showModeSwitch ? 1 : 0);
+  const visibleConfigOptions = useMemo(
+    () =>
+      cachedConfigOptions?.filter(
+        (option) => option.id !== 'reasoning_effort' && option.category !== 'thought_level'
+      ) ?? [],
+    [cachedConfigOptions]
+  );
+  const configOptionCount =
+    (modelSelectorNode ? 1 : 0) + (showModeSwitch ? 1 : 0) + (visibleConfigOptions.length > 0 ? 1 : 0);
 
   // Browser file picker ref (WebUI only)
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -217,12 +227,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
         </div>
 
         {
-          <Button
-            className='sendbox-model-btn'
-            shape='round'
-            size='small'
-            onClick={openWorkspacePicker}
-          >
+          <Button className='sendbox-model-btn' shape='round' size='small' onClick={openWorkspacePicker}>
             <span className='flex items-center gap-6px leading-none'>
               <FolderOpen size={14} style={{ lineHeight: 0, flexShrink: 0 }} />
               <span>{t('conversation.welcome.specifyWorkspace')}</span>
@@ -250,7 +255,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
           <AcpConfigSelector
             backend={configOptionsBackend}
             buttonClassName='guid-config-btn'
-            initialConfigOptions={cachedConfigOptions}
+            initialConfigOptions={visibleConfigOptions}
             leadingIcon={<Brain size={14} color={iconColors.secondary} />}
             onOptionSelect={onConfigOptionSelect}
           />

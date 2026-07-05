@@ -13,13 +13,83 @@ if [[ $# -gt 0 ]]; then
 fi
 FILES=(
   package.json
+  atius-overlay.json
   scripts/install-ubuntu.sh
+  scripts/build-server.mjs
+  scripts/build-mcp-servers.js
+  scripts/atius-apply-source-patch.sh
+  scripts/atius-build-renderer-overlay.sh
+  scripts/atius-postinstall-hook.sh
+  scripts/atius-refresh-source-patch.sh
+  scripts/atius-reapply-renderer-overlay.sh
+  scripts/atius-update.sh
+  src/common/adapter/ipcBridge.ts
+  src/common/config/storage.ts
+  src/common/types/codex/codexModes.ts
+  src/common/types/codex/types/eventData.ts
+  src/process/agent/acp/AcpDetector.ts
+  src/process/extensions/data/bundle-vendored/agentProfileMerge.ts
+  src/process/extensions/resolvers/ChannelPluginResolver.ts
+  src/process/task/AcpAgentManager.ts
+  src/process/task/WCoreManager.ts
+  src/process/task/claudeConfig.ts
+  src/process/task/codexConfig.ts
+  src/process/task/hermesConfig.ts
+  src/process/utils/initStorage.ts
+  src/process/utils/shellEnv.ts
+  src/process/webserver/routes/apiRoutes.ts
   src/process/webserver/websocket/WebSocketManager.ts
+  src/renderer/components/agent/AgentModeSelector.tsx
+  src/renderer/components/model/modelSelector/EffortSubRow.tsx
+  src/renderer/components/model/modelSelector/modelSelectorTypes.ts
   src/renderer/components/settings/DirectorySelectionModal.tsx
   src/renderer/hooks/file/useDirectorySelection.tsx
+  src/renderer/pages/guid/GuidPage.tsx
+  src/renderer/pages/guid/index.module.css
+  src/renderer/pages/guid/components/AgentPillBar.tsx
   src/renderer/pages/guid/components/GuidActionRow.tsx
+  src/renderer/pages/guid/components/GuidModelSelector.tsx
+  src/renderer/pages/guid/components/newChatStarter/IntentPillBar.module.css
+  src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
+  src/renderer/pages/guid/hooks/useGuidSend.ts
+  src/renderer/services/i18n/i18n-keys.d.ts
+  src/renderer/services/i18n/index.ts
+  src/renderer/utils/model/agentModes.ts
+  src/renderer/services/i18n/locales/de-DE/agentMode.json
+  src/renderer/services/i18n/locales/en-US/agentMode.json
+  src/renderer/services/i18n/locales/es-ES/agentMode.json
+  src/renderer/services/i18n/locales/fr-FR/agentMode.json
+  src/renderer/services/i18n/locales/ja-JP/agentMode.json
+  src/renderer/services/i18n/locales/ko-KR/agentMode.json
+  src/renderer/services/i18n/locales/pt-BR/agentMode.json
+  src/renderer/services/i18n/locales/ru-RU/agentMode.json
+  src/renderer/services/i18n/locales/tr-TR/agentMode.json
+  src/renderer/services/i18n/locales/uk-UA/agentMode.json
+  src/renderer/services/i18n/locales/zh-CN/agentMode.json
+  src/renderer/services/i18n/locales/zh-TW/agentMode.json
+  src/renderer/services/i18n/locales/de-DE/conversation.json
+  src/renderer/services/i18n/locales/en-US/conversation.json
+  src/renderer/services/i18n/locales/es-ES/conversation.json
+  src/renderer/services/i18n/locales/fr-FR/conversation.json
+  src/renderer/services/i18n/locales/ja-JP/conversation.json
+  src/renderer/services/i18n/locales/ko-KR/conversation.json
+  src/renderer/services/i18n/locales/pt-BR/conversation.json
+  src/renderer/services/i18n/locales/ru-RU/conversation.json
+  src/renderer/services/i18n/locales/tr-TR/conversation.json
+  src/renderer/services/i18n/locales/uk-UA/conversation.json
+  src/renderer/services/i18n/locales/zh-CN/conversation.json
+  src/renderer/services/i18n/locales/zh-TW/conversation.json
   tests/unit/WebSocketManager.test.ts
+  tests/unit/AgentPillBar.dom.test.tsx
+  tests/unit/process/task/codexConfigEffort.test.ts
+  tests/unit/process/task/codexNativeSandbox.test.ts
+  tests/unit/renderer/AcpConfigSelector.dom.test.tsx
   tests/unit/renderer/GuidActionRow.dom.test.tsx
+  tests/unit/renderer/guid/firstSafeCuratedModel.test.ts
+  tests/unit/renderer/guidModelSelector.dom.test.tsx
+  tests/unit/useGuidSend.dom.test.ts
+  docs/README.md
+  docs/guides/atius-fork-runtime.md
 )
 cd "$ROOT"
 git rev-parse --verify "$BASE_REF" >/dev/null 2>&1 || {

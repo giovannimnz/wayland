@@ -16,7 +16,7 @@ type Props = {
   onChange: (level: EffortLevel) => void;
 };
 
-const LEVELS: EffortLevel[] = ['low', 'medium', 'high'];
+const LEVELS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh'];
 
 /**
  * Conditional "Effort: <level> >" sub-row shown only for effort-capable backends
@@ -46,6 +46,12 @@ const EffortSubRow: React.FC<Props> = ({ level, onChange }) => {
       name: t('conversation.modelSelector.effortHigh', { defaultValue: 'High' }),
       desc: t('conversation.modelSelector.effortHighDesc', {
         defaultValue: 'Greater reasoning depth for complex problems',
+      }),
+    },
+    xhigh: {
+      name: t('conversation.modelSelector.effortXhigh', { defaultValue: 'XHigh' }),
+      desc: t('conversation.modelSelector.effortXhighDesc', {
+        defaultValue: 'Maximum reasoning depth for the hardest work',
       }),
     },
   };

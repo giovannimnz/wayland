@@ -4,7 +4,7 @@ import { channelEventBus } from '@process/channels/agent/ChannelEventBus';
 import { teamEventBus } from '@process/team/teamEventBus';
 import { ipcBridge } from '@/common';
 import type { CronMessageMeta, TMessage } from '@/common/chat/chatLib';
-import { isCodexAutoApproveMode } from '@/common/types/codex/codexModes';
+import { isCodexAutoApproveMode, isCodexConfigTomlMode } from '@/common/types/codex/codexModes';
 import { isAutoGuardedMode, shouldAutoApproveAcpEdit } from '@/common/types/agentModes';
 import { classifyDestructiveToolCall } from '@/common/security/destructiveCommand';
 import type { SlashCommandItem } from '@/common/chat/slash/types';
@@ -111,7 +111,7 @@ interface AcpAgentManagerData {
   /** Pending config option selections from Guid page (applied after session creation) */
   pendingConfigOptions?: Record<string, string>;
   /** Per-conversation reasoning effort (codex/claude). Absent => backend default. */
-  effort?: 'low' | 'medium' | 'high';
+  effort?: 'low' | 'medium' | 'high' | 'xhigh';
   /** Per-conversation active MCP server ids (#348): undefined = all enabled, [] = none. */
   activeMcpServers?: string[];
 }
@@ -689,7 +689,9 @@ ${collectedResponses.join('\n')}`;
           // writes the connected flux key inline into the scoped config.
           mergedEnv.HERMES_HOME = await materializeFluxHermesHome(
             app.getPath('userData'),
-            decision.env.FLUX_API_KEY ?? ''
+            decision.env.FLUX_API_KEY ?? '',
+            undefined,
+            data.effort
           );
         } catch (err) {
           mainWarn('[AcpAgentManager]', 'materializeFluxHermesHome failed', err);
@@ -702,7 +704,11 @@ ${collectedResponses.join('\n')}`;
     // writing the user's own config.toml (#536). The clone copies their config
     // verbatim (model/provider/MCP/settings) + mirrors auth.json, overriding only
     // sandbox_mode. Flux-routed codex already got its own scoped CODEX_HOME above.
-    if (data.backend === 'codex' && decision.routing !== 'flux') {
+    if (
+      data.backend === 'codex' &&
+      decision.routing !== 'flux' &&
+      !isCodexConfigTomlMode(data.sessionMode || this.currentMode)
+    ) {
       try {
         const sandboxMode = normalizeCodexSandboxMode(data.sandboxMode);
         mergedEnv.CODEX_HOME = await materializeNativeCodexHome(app.getPath('userData'), sandboxMode);
@@ -949,14 +955,21 @@ ${collectedResponses.join('\n')}`;
     }
 
     if (data.backend === 'codex') {
-      // #536: resolve the sandbox mode for this session and carry it on `data`
-      // so resolveAgentCliConfig materializes a scoped CODEX_HOME with it. We no
-      // longer write the user's ~/.codex/config.toml. Default is read-only; only
-      // an explicit escalated session mode raises it (see codexConfig.ts).
-      data.sandboxMode = getCodexSandboxModeForSessionMode(
-        data.sessionMode || this.currentMode,
-        data.sandboxMode || codexConfig?.sandboxMode
-      );
+      const effectiveMode = data.sessionMode || this.currentMode;
+      if (isCodexConfigTomlMode(effectiveMode)) {
+        // User explicitly asked Codex to use its real config.toml as-is. Do not
+        // resolve a Wayland sandbox override for this spawn.
+        data.sandboxMode = undefined;
+      } else {
+        // #536: resolve the sandbox mode for this session and carry it on `data`
+        // so resolveAgentCliConfig materializes a scoped CODEX_HOME with it. We no
+        // longer write the user's ~/.codex/config.toml. Default is read-only; only
+        // an explicit escalated session mode raises it (see codexConfig.ts).
+        data.sandboxMode = getCodexSandboxModeForSessionMode(
+          effectiveMode,
+          data.sandboxMode || codexConfig?.sandboxMode
+        );
+      }
     }
 
     return { cliPath, customArgs, yoloMode };
@@ -1427,6 +1440,7 @@ ${collectedResponses.join('\n')}`;
           currentModelId: this.persistedModelId ?? undefined,
           sessionMode: this.currentMode,
           pendingConfigOptions: data.pendingConfigOptions,
+          effort: data.effort,
           // Per-conversation MCP scoping (#348): forward to loadBuiltinSessionMcpServers.
           activeMcpServers: data.activeMcpServers,
           // The read-only concierge diagnostics MCP server is Concierge-only.
@@ -2135,7 +2149,9 @@ ${collectedResponses.join('\n')}`;
       // spawn's scoped CODEX_HOME (materializeNativeCodexHome) carries it. We no
       // longer write the user's ~/.codex/config.toml. codex-acp has no live
       // set_mode, so the change applies on the next spawn regardless.
-      this.options.sandboxMode = getCodexSandboxModeForSessionMode(mode, this.options.sandboxMode);
+      this.options.sandboxMode = isCodexConfigTomlMode(mode)
+        ? undefined
+        : getCodexSandboxModeForSessionMode(mode, this.options.sandboxMode);
       this.saveSessionMode(mode);
 
       if (this.isYoloMode(prev) && !this.isYoloMode(mode)) {

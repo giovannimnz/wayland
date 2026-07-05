@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Brain, ChevronDown } from 'lucide-react';
+import { Brain, ChevronDown, Zap } from 'lucide-react';
 import { Button, Dropdown, Menu, Message, Tooltip } from '@arco-design/web-react';
 import { ipcBridge } from '@/common';
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
 import type { CuratedModel, ProviderId } from '@process/providers/types';
 import { FLUX_MODEL_DISPLAY, FLUX_MODEL_IDS, isFluxModelId, type FluxModelId } from '@/common/config/flux';
-import { getFluxCompat } from '@/common/types/acpTypes';
+import { getFluxCompat, type AcpSessionConfigOption } from '@/common/types/acpTypes';
 import { useFluxConnected } from '@/renderer/hooks/useFluxConnected';
 import { peekCuratedForAgent, useModelRegistry } from '@/renderer/hooks/useModelRegistry';
 import { useUsageTelemetry } from '@/renderer/hooks/usage/useUsageTelemetry';
@@ -43,7 +43,58 @@ type GuidModelSelectorProps = {
   currentAcpCachedModelInfo: AcpModelInfo | null;
   selectedAcpModel: string | null;
   setSelectedAcpModel: React.Dispatch<React.SetStateAction<string | null>>;
+  selectedAcpEffort?: GuidReasoningEffort | null;
+  setSelectedAcpEffort?: (effort: GuidReasoningEffort) => void;
+  cachedConfigOptions?: AcpSessionConfigOption[];
+  onConfigOptionSelect?: (configId: string, value: string) => void;
 };
+
+export type GuidReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+
+const GUID_REASONING_EFFORTS: GuidReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
+const REASONING_EFFORT_CONFIG_ID = 'reasoning_effort';
+const ACP_MODEL_EFFORT_SUFFIX = /\/(low|medium|high|xhigh)$/i;
+const ACP_MODEL_LABEL_EFFORT_SUFFIX = /\s+\((low|medium|high|xhigh)\)$/i;
+
+const isGuidReasoningEffort = (value: unknown): value is GuidReasoningEffort =>
+  typeof value === 'string' && GUID_REASONING_EFFORTS.includes(value.toLowerCase() as GuidReasoningEffort);
+
+const normalizeEffort = (value: unknown): GuidReasoningEffort | null =>
+  isGuidReasoningEffort(value) ? (value.toLowerCase() as GuidReasoningEffort) : null;
+
+export function splitAcpModelEffort(
+  modelId: string | null | undefined,
+  label?: string | null
+): { modelId: string | null; label?: string; effort?: GuidReasoningEffort } {
+  const idMatch = modelId?.match(ACP_MODEL_EFFORT_SUFFIX);
+  const labelMatch = label?.match(ACP_MODEL_LABEL_EFFORT_SUFFIX);
+  const effort = normalizeEffort(idMatch?.[1] ?? labelMatch?.[1]);
+  const baseModelId = idMatch ? modelId!.slice(0, -idMatch[0].length) : modelId || null;
+  const baseLabel = label ? label.replace(ACP_MODEL_LABEL_EFFORT_SUFFIX, '').trim() : undefined;
+  return { modelId: baseModelId, label: baseLabel, effort: effort ?? undefined };
+}
+
+export function normalizeAcpModelOptions(models: AcpModelInfo['availableModels']): AcpModelInfo['availableModels'] {
+  const byBaseId = new Map<string, { id: string; label: string }>();
+  for (const model of models) {
+    const normalized = splitAcpModelEffort(model.id, model.label);
+    const baseId = normalized.modelId || model.id;
+    if (!baseId || byBaseId.has(baseId)) continue;
+    byBaseId.set(baseId, { id: baseId, label: normalized.label || baseId });
+  }
+  return Array.from(byBaseId.values());
+}
+
+const getReasoningEffortOption = (options: AcpSessionConfigOption[] | undefined): AcpSessionConfigOption | undefined =>
+  options?.find(
+    (option) =>
+      option.id === REASONING_EFFORT_CONFIG_ID ||
+      option.category === 'thought_level' ||
+      option.name?.toLowerCase().includes('reasoning')
+  );
+
+const effortLabelKey = (effort: GuidReasoningEffort): string =>
+  `conversation.modelSelector.effort${effort === 'xhigh' ? 'Xhigh' : effort.charAt(0).toUpperCase() + effort.slice(1)}`;
 
 /**
  * Map a model's blended USD-per-million-token cost to a $ / $$ / $$$ tier.
@@ -101,20 +152,22 @@ export function resolveAcpSelectedLabel({
   acpModels: AcpModelInfo['availableModels'];
   currentAcpCachedModelInfo: AcpModelInfo | null;
 }): string {
-  if (isFluxModelId(selectedAcpModel)) return FLUX_MODEL_DISPLAY[selectedAcpModel as FluxModelId];
+  const normalizedSelected = splitAcpModelEffort(selectedAcpModel).modelId;
+  if (isFluxModelId(normalizedSelected)) return FLUX_MODEL_DISPLAY[normalizedSelected as FluxModelId];
 
-  const selectedModelLabel = selectedAcpModel
-    ? acpModels.find((model) => model.id === selectedAcpModel)?.label
+  const selectedModelLabel = normalizedSelected
+    ? acpModels.find((model) => model.id === normalizedSelected || model.id === selectedAcpModel)?.label
     : undefined;
 
-  if (selectedModelLabel) return selectedModelLabel;
-  if (selectedAcpModel) return selectedAcpModel;
+  if (selectedModelLabel)
+    return splitAcpModelEffort(normalizedSelected, selectedModelLabel).label || selectedModelLabel;
+  if (normalizedSelected) return normalizedSelected;
 
-  return (
-    currentAcpCachedModelInfo?.currentModelLabel ||
-    currentAcpCachedModelInfo?.currentModelId ||
-    ''
+  const current = splitAcpModelEffort(
+    currentAcpCachedModelInfo?.currentModelId,
+    currentAcpCachedModelInfo?.currentModelLabel
   );
+  return current.label || current.modelId || '';
 }
 
 const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
@@ -126,6 +179,10 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
   currentAcpCachedModelInfo,
   selectedAcpModel,
   setSelectedAcpModel,
+  selectedAcpEffort = null,
+  setSelectedAcpEffort,
+  cachedConfigOptions,
+  onConfigOptionSelect,
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -440,12 +497,69 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
   // live GPT models). For an enumerable CLI the curated `id` IS the model name
   // the CLI expects, so `setSelectedAcpModel(model.id)` reaches the send path
   // identically to a cached entry. This is what kills the cold-start dead-end.
-  const acpModels = React.useMemo<AcpModelInfo['availableModels']>(() => {
+  const rawAcpModels = React.useMemo<AcpModelInfo['availableModels']>(() => {
     if (currentAcpCachedModelInfo?.availableModels?.length) {
       return currentAcpCachedModelInfo.availableModels;
     }
     return (curated ?? []).map((m) => ({ id: m.id, label: m.displayName }));
   }, [currentAcpCachedModelInfo?.availableModels, curated]);
+
+  const acpModels = React.useMemo(() => normalizeAcpModelOptions(rawAcpModels), [rawAcpModels]);
+
+  const selectedBaseModelId = React.useMemo(
+    () => splitAcpModelEffort(selectedAcpModel || currentAcpCachedModelInfo?.currentModelId).modelId,
+    [currentAcpCachedModelInfo?.currentModelId, selectedAcpModel]
+  );
+
+  const reasoningEffortOption = React.useMemo(
+    () => getReasoningEffortOption(cachedConfigOptions),
+    [cachedConfigOptions]
+  );
+
+  const configEffort = React.useMemo(
+    () => normalizeEffort(reasoningEffortOption?.currentValue || reasoningEffortOption?.selectedValue),
+    [reasoningEffortOption]
+  );
+
+  const modelEffort = React.useMemo(
+    () => splitAcpModelEffort(selectedAcpModel || currentAcpCachedModelInfo?.currentModelId).effort ?? null,
+    [currentAcpCachedModelInfo?.currentModelId, selectedAcpModel]
+  );
+
+  const effortOptions = React.useMemo<GuidReasoningEffort[]>(() => {
+    const fromConfig = reasoningEffortOption?.options
+      ?.map((option) => normalizeEffort(option.value))
+      .filter((value): value is GuidReasoningEffort => Boolean(value));
+    if (fromConfig && fromConfig.length > 0) return Array.from(new Set(fromConfig));
+
+    const bySelectedModel = rawAcpModels
+      .filter((model) => splitAcpModelEffort(model.id, model.label).modelId === selectedBaseModelId)
+      .map((model) => splitAcpModelEffort(model.id, model.label).effort)
+      .filter((value): value is GuidReasoningEffort => Boolean(value));
+    if (bySelectedModel.length > 0) return Array.from(new Set(bySelectedModel));
+
+    if (agentKey === 'codex' || agentKey === 'hermes') return GUID_REASONING_EFFORTS;
+    return [];
+  }, [agentKey, rawAcpModels, reasoningEffortOption, selectedBaseModelId]);
+
+  const currentEffort =
+    selectedAcpEffort ||
+    configEffort ||
+    modelEffort ||
+    (effortOptions.includes('xhigh') ? 'xhigh' : (effortOptions[0] ?? null));
+
+  const handleSelectEffort = React.useCallback(
+    (effort: GuidReasoningEffort) => {
+      setSelectedAcpEffort?.(effort);
+      onConfigOptionSelect?.(REASONING_EFFORT_CONFIG_ID, effort);
+      recordTelemetry({
+        eventType: 'guid.model_selected',
+        cliBackend: agentKey,
+        metadata: { effort, source: 'acp-effort' },
+      });
+    },
+    [agentKey, onConfigOptionSelect, recordTelemetry, setSelectedAcpEffort]
+  );
 
   const acpSelectedLabel = React.useMemo(() => {
     return resolveAcpSelectedLabel({
@@ -471,6 +585,49 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
     () => formatAcpModelDisplayLabel(acpButtonLabel, acpSourceLabel),
     [acpButtonLabel, acpSourceLabel]
   );
+
+  const currentEffortLabel = currentEffort
+    ? t(effortLabelKey(currentEffort), {
+        defaultValue:
+          currentEffort === 'xhigh' ? 'XHigh' : currentEffort.charAt(0).toUpperCase() + currentEffort.slice(1),
+      })
+    : '';
+
+  const effortSelectorNode =
+    effortOptions.length > 0 && currentEffort ? (
+      <Dropdown
+        trigger='click'
+        droplist={
+          <Menu selectedKeys={[currentEffort]}>
+            <Menu.ItemGroup title={t('conversation.modelSelector.effort')}>
+              {effortOptions.map((effort) => {
+                const label = t(effortLabelKey(effort), {
+                  defaultValue: effort === 'xhigh' ? 'XHigh' : effort.charAt(0).toUpperCase() + effort.slice(1),
+                });
+                return (
+                  <Menu.Item key={effort} onClick={() => handleSelectEffort(effort)}>
+                    <div className='flex items-center gap-8px w-full'>
+                      {effort === currentEffort && <span className='text-primary shrink-0'>✓</span>}
+                      <span className={`flex-1 min-w-0 truncate ${effort !== currentEffort ? 'ml-16px' : ''}`}>
+                        {label}
+                      </span>
+                    </div>
+                  </Menu.Item>
+                );
+              })}
+            </Menu.ItemGroup>
+          </Menu>
+        }
+      >
+        <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
+          <span className='flex items-center gap-6px min-w-0'>
+            <Zap size={14} color={iconColors.secondary} className='shrink-0' />
+            <span className='truncate'>{currentEffortLabel}</span>
+            <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
+          </span>
+        </Button>
+      </Dropdown>
+    ) : null;
 
   // ── Provider-based agents (Gemini / Wayland Core) - three-tier picker ────
   if (isGeminiMode) {
@@ -518,72 +675,75 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
       </Menu.Item>
     );
     return (
-      <Dropdown
-        trigger='click'
-        droplist={
-          <Menu selectedKeys={selectedAcpModel ? [selectedAcpModel] : []}>
-            {showAcpFlux && (
-              <Menu.ItemGroup title={t('conversation.welcome.fluxGroupLabel')}>
-                {FLUX_MODEL_IDS.map((fluxId) => (
+      <>
+        <Dropdown
+          trigger='click'
+          droplist={
+            <Menu selectedKeys={selectedBaseModelId ? [selectedBaseModelId] : []}>
+              {showAcpFlux && (
+                <Menu.ItemGroup title={t('conversation.welcome.fluxGroupLabel')}>
+                  {FLUX_MODEL_IDS.map((fluxId) => (
+                    <Menu.Item
+                      key={fluxId}
+                      onClick={() => {
+                        setSelectedAcpModel(fluxId);
+                        recordTelemetry({
+                          eventType: 'guid.model_selected',
+                          cliBackend: agentKey,
+                          metadata: { modelId: fluxId, source: 'flux' },
+                        });
+                      }}
+                    >
+                      <div className='flex items-center gap-8px w-full'>
+                        <FluxRouterMark size={14} className='shrink-0' />
+                        <span className='flex-1 min-w-0 truncate'>{FLUX_MODEL_DISPLAY[fluxId]}</span>
+                      </div>
+                    </Menu.Item>
+                  ))}
+                </Menu.ItemGroup>
+              )}
+              {scopeCaptionItem}
+              {acpModels.map((model) => {
+                const tier = acpTierFor(model.id, model.label);
+                return (
                   <Menu.Item
-                    key={fluxId}
+                    key={model.id}
                     onClick={() => {
-                      setSelectedAcpModel(fluxId);
+                      setSelectedAcpModel(model.id);
                       recordTelemetry({
                         eventType: 'guid.model_selected',
                         cliBackend: agentKey,
-                        metadata: { modelId: fluxId, source: 'flux' },
+                        metadata: { modelId: model.id, source: 'acp' },
                       });
                     }}
                   >
                     <div className='flex items-center gap-8px w-full'>
-                      <FluxRouterMark size={14} className='shrink-0' />
-                      <span className='flex-1 min-w-0 truncate'>{FLUX_MODEL_DISPLAY[fluxId]}</span>
+                      <span className='flex-1 min-w-0 truncate'>{model.label}</span>
+                      {tier && (
+                        <span
+                          className='text-11px font-600 text-t-tertiary tracking-wider shrink-0'
+                          aria-label={t('settings.modelsPage.homePicker.priceTierAria', { tier })}
+                        >
+                          {tier}
+                        </span>
+                      )}
                     </div>
                   </Menu.Item>
-                ))}
-              </Menu.ItemGroup>
-            )}
-            {scopeCaptionItem}
-            {acpModels.map((model) => {
-              const tier = acpTierFor(model.id, model.label);
-              return (
-                <Menu.Item
-                  key={model.id}
-                  onClick={() => {
-                    setSelectedAcpModel(model.id);
-                    recordTelemetry({
-                      eventType: 'guid.model_selected',
-                      cliBackend: agentKey,
-                      metadata: { modelId: model.id, source: 'acp' },
-                    });
-                  }}
-                >
-                  <div className='flex items-center gap-8px w-full'>
-                    <span className='flex-1 min-w-0 truncate'>{model.label}</span>
-                    {tier && (
-                      <span
-                        className='text-11px font-600 text-t-tertiary tracking-wider shrink-0'
-                        aria-label={t('settings.modelsPage.homePicker.priceTierAria', { tier })}
-                      >
-                        {tier}
-                      </span>
-                    )}
-                  </div>
-                </Menu.Item>
-              );
-            })}
-          </Menu>
-        }
-      >
-        <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
-          <span className='flex items-center gap-6px min-w-0'>
-            <Brain size={14} color={iconColors.secondary} className='shrink-0' />
-            <span>{acpButtonDisplayLabel}</span>
-            <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
-          </span>
-        </Button>
-      </Dropdown>
+                );
+              })}
+            </Menu>
+          }
+        >
+          <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
+            <span className='flex items-center gap-6px min-w-0'>
+              <Brain size={14} color={iconColors.secondary} className='shrink-0' />
+              <span>{acpButtonDisplayLabel}</span>
+              <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
+            </span>
+          </Button>
+        </Dropdown>
+        {effortSelectorNode}
+      </>
     );
   }
 

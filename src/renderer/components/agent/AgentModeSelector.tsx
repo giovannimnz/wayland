@@ -7,6 +7,7 @@
 import { ChevronDown } from 'lucide-react';
 import { ipcBridge } from '@/common';
 import { ConfigStorage } from '@/common/config/storage';
+import { CODEX_MODE_CONFIG_TOML } from '@/common/types/codex/codexModes';
 import type { AcpSessionConfigOption } from '@/common/types/acpTypes';
 import { getAgentModes, supportsModeSwitch, type AgentModeOption } from '@/renderer/utils/model/agentModes';
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
@@ -136,9 +137,18 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
 
   // Priority: dynamicModes (runtime) > cachedModes (from cache) > getAgentModes (static fallback)
   const modes = useMemo(() => {
-    if (dynamicModes && dynamicModes.length > 0) return dynamicModes;
-    if (cachedModes.length > 0) return cachedModes;
-    return getAgentModes(backend);
+    const baseModes =
+      dynamicModes && dynamicModes.length > 0
+        ? dynamicModes
+        : cachedModes.length > 0
+          ? cachedModes
+          : getAgentModes(backend);
+
+    if (backend !== 'codex' || baseModes.some((mode) => mode.value === CODEX_MODE_CONFIG_TOML)) {
+      return baseModes;
+    }
+
+    return [...baseModes, { value: CODEX_MODE_CONFIG_TOML, label: 'Custom (config.toml)' }];
   }, [dynamicModes, cachedModes, backend]);
   const defaultMode = modes[0]?.value ?? 'default';
   // Validate initialMode against available modes; fall back to backend's default

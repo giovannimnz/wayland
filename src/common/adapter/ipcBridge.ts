@@ -1529,7 +1529,7 @@ export interface ICreateConversationParams {
      * (Codex / WCore / Claude-ACP). Persisted on the conversation and read by
      * each backend's config builder on the next turn. Absent => backend default.
      */
-    effort?: 'low' | 'medium' | 'high';
+    effort?: 'low' | 'medium' | 'high' | 'xhigh';
     /** Team ownership - conversations with teamId are hidden from the sidebar */
     teamId?: string;
     /** Project ownership - stamps extra.projectId so the conversation lives under a project umbrella. */
