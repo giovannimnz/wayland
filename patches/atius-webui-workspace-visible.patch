@@ -27,10 +27,10 @@ index a85d779cb..36b229afd 100644
  ## Where to put new docs
 diff --git a/docs/guides/atius-fork-runtime.md b/docs/guides/atius-fork-runtime.md
 new file mode 100644
-index 000000000..b1a24c05a
+index 000000000..5e0b81e60
 --- /dev/null
 +++ b/docs/guides/atius-fork-runtime.md
-@@ -0,0 +1,148 @@
+@@ -0,0 +1,185 @@
 +# Atius srv-3 fork/runtime guide
 +
 +This guide documents the ATIUS-managed source runtime served at
@@ -71,6 +71,13 @@ index 000000000..b1a24c05a
 +- `src/process/utils/shellEnv.ts`
 +- `src/process/webserver/routes/apiRoutes.ts`
 +- `src/process/webserver/websocket/WebSocketManager.ts`
++- `src/renderer/components/layout/Layout.tsx`
++- `src/renderer/components/layout/Sider/Sider.module.css`
++- `src/renderer/components/layout/Sider/SiderAccordion/SiderAccordionShell.module.css`
++- `src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.module.css`
++- `src/renderer/components/layout/Sider/SiderFooter.tsx`
++- `src/renderer/components/layout/Sider/SiderFooter/SiderFooterQuickActions.module.css`
++- `src/renderer/components/layout/Sider/index.tsx`
 +- `src/common/adapter/ipcBridge.ts`
 +- `src/common/config/storage.ts`
 +- `src/common/types/codex/codexModes.ts`
@@ -97,6 +104,7 @@ index 000000000..b1a24c05a
 +- `src/renderer/services/i18n/index.ts`
 +- `src/renderer/services/i18n/locales/*/agentMode.json`
 +- `src/renderer/services/i18n/locales/*/conversation.json`
++- `src/renderer/styles/layout.css`
 +- `src/renderer/utils/model/agentModes.ts`
 +
 +Generated artifacts are intentionally not tracked:
@@ -117,6 +125,8 @@ index 000000000..b1a24c05a
 +- Codex permission mode includes `Custom (config.toml)` / `Personalizado(config.toml)` to delegate sandbox defaults back to the service user's Codex config.
 +- The GUID agent pill bar exposes collapsed agents by accessible name so Hermes/Codex can be selected by keyboard and automation.
 +- Mobile GUID controls wrap visibly instead of hiding later model/effort/permission or intent options behind horizontal overflow.
++- The left sidebar never exposes a bottom horizontal scrollbar; long recents and footer controls truncate or compact inside the available width.
++- The desktop left sidebar divider is a real resize handle: drag persists `wayland:sidebar-width` while preserving the rail snap behavior below the collapse threshold.
 +
 +## Rebuild/update flow
 +
@@ -179,6 +189,33 @@ index 000000000..b1a24c05a
 +- Codex permission menu includes `Custom (config.toml)`;
 +- Hermes/Codex agent pills are accessible by name for keyboard/automation;
 +- mobile composer controls and intent pills wrap visibly.
++
++## 2026-07-06 left sidebar responsiveness QA
++
++Validated on `http://127.0.0.1:25808/#/guid` with Playwright/Chromium on
++`atius-srv-3`. The test session loaded only the `gsd-web-login` Vault profile
++for login automation; no secret values were printed or recorded.
++
++Viewports and states covered:
++
++- `1365x900` desktop at the default `280px` sidebar width.
++- `954x665` narrowed desktop with the sidebar expanded.
++- `495x889` and `390x900` mobile drawer states.
++- `1220x820` desktop with persisted sidebar width forced to `200px`.
++- Drag resize path from `281px` to `371px` (`wayland:sidebar-width=370`) and
++  back to `211px` (`wayland:sidebar-width=210`, not collapsed).
++
++Measured checks:
++
++- `200px` sidebar: content `200/200`, scroll zone `184/184`, footer `184/184`,
++  footer leaks `0`, root `html/body` horizontal overflow `0`.
++- `390px` mobile drawer: content `300/300`, scroll zone `284/284`, footer
++  `284/284`, footer leaks `0`, root `html/body` horizontal overflow `0`.
++- After drag shrink to `211px`: content `210/210`, footer `194/194`, footer
++  leaks `0`.
++
++Screenshots from the validated run were written to
++`out/atius-qa/sidebar-responsive-final/`.
 diff --git a/package.json b/package.json
 index 2f7e4d43b..b895002c1 100644
 --- a/package.json
@@ -353,10 +390,10 @@ index 000000000..171b72c4f
 +bash "$ROOT/scripts/atius-build-renderer-overlay.sh"
 diff --git a/scripts/atius-refresh-source-patch.sh b/scripts/atius-refresh-source-patch.sh
 new file mode 100755
-index 000000000..90a95f65b
+index 000000000..e602baeab
 --- /dev/null
 +++ b/scripts/atius-refresh-source-patch.sh
-@@ -0,0 +1,142 @@
+@@ -0,0 +1,150 @@
 +#!/usr/bin/env bash
 +set -euo pipefail
 +ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -398,6 +435,13 @@ index 000000000..90a95f65b
 +  src/process/utils/shellEnv.ts
 +  src/process/webserver/routes/apiRoutes.ts
 +  src/process/webserver/websocket/WebSocketManager.ts
++  src/renderer/components/layout/Layout.tsx
++  src/renderer/components/layout/Sider/Sider.module.css
++  src/renderer/components/layout/Sider/SiderAccordion/SiderAccordionShell.module.css
++  src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.module.css
++  src/renderer/components/layout/Sider/SiderFooter.tsx
++  src/renderer/components/layout/Sider/SiderFooter/SiderFooterQuickActions.module.css
++  src/renderer/components/layout/Sider/index.tsx
 +  src/renderer/components/agent/AgentModeSelector.tsx
 +  src/renderer/components/agent/MarqueePillLabel.tsx
 +  src/renderer/components/model/modelSelector/EffortSubRow.tsx
@@ -439,6 +483,7 @@ index 000000000..90a95f65b
 +  src/renderer/services/i18n/locales/uk-UA/conversation.json
 +  src/renderer/services/i18n/locales/zh-CN/conversation.json
 +  src/renderer/services/i18n/locales/zh-TW/conversation.json
++  src/renderer/styles/layout.css
 +  tests/unit/WebSocketManager.test.ts
 +  tests/unit/AgentPillBar.dom.test.tsx
 +  tests/unit/process/task/codexConfigEffort.test.ts
@@ -1541,6 +1586,358 @@ index a5880605d..41ce06751 100644
        {/* Marquee track: overlaid via absolute, visible only when active */}
        <span
          ref={marqueeRef}
+diff --git a/src/renderer/components/layout/Layout.tsx b/src/renderer/components/layout/Layout.tsx
+index d54741a50..60c2df9b5 100644
+--- a/src/renderer/components/layout/Layout.tsx
++++ b/src/renderer/components/layout/Layout.tsx
+@@ -26,6 +26,7 @@ import { cleanupSiderTooltips } from '@renderer/utils/ui/siderTooltip';
+ import { useConversationShortcuts } from '@renderer/hooks/ui/useConversationShortcuts';
+ import { useResponsive } from '@renderer/hooks/ui/useResponsive';
+ import { useSidebarWidth } from '@renderer/hooks/ui/useSidebarWidth';
++import { writeSidebarWidth } from '@renderer/utils/ui/sidebarWidth';
+ import { useGlobalKeybind } from '@renderer/hooks/settings/useGlobalKeybind';
+ import { CommandPalette } from '@renderer/components/cmdk';
+ import BudgetGateModal from '@renderer/components/cost/BudgetGateModal';
+@@ -217,10 +218,11 @@ const Layout: React.FC<{
+   const collapsedRef = useRef(collapsed);
+   const lastCssRef = useRef('');
+   const lastUiCssUpdateAtRef = useRef(0);
+-  const dragStateRef = useRef<{ active: boolean; startX: number; startWidth: number }>({
++  const dragStateRef = useRef<{ active: boolean; startX: number; startWidth: number; latestWidth: number }>({
+     active: false,
+     startX: 0,
+     startWidth: DEFAULT_SIDER_WIDTH,
++    latestWidth: DEFAULT_SIDER_WIDTH,
+   });
+
+   const loadAndHealCustomCss = useCallback(async () => {
+@@ -485,10 +487,12 @@ const Layout: React.FC<{
+     (event: React.MouseEvent<HTMLDivElement>) => {
+       if (isMobile) return;
+       event.preventDefault();
++      const startWidth = collapsedRef.current ? DESKTOP_COLLAPSED_WIDTH : desktopSiderWidth;
+       dragStateRef.current = {
+         active: true,
+         startX: event.clientX,
+-        startWidth: collapsedRef.current ? DESKTOP_COLLAPSED_WIDTH : desktopSiderWidth,
++        startWidth,
++        latestWidth: desktopSiderWidth,
+       };
+       document.body.style.cursor = 'col-resize';
+       document.body.style.userSelect = 'none';
+@@ -506,9 +510,15 @@ const Layout: React.FC<{
+       const shouldCollapse = collapsedRef.current
+         ? draggedWidth < SIDER_DRAG_SNAP_THRESHOLD + SIDER_DRAG_HYSTERESIS
+         : draggedWidth <= SIDER_DRAG_SNAP_THRESHOLD - SIDER_DRAG_HYSTERESIS;
++
+       if (shouldCollapse !== collapsedRef.current) {
++        collapsedRef.current = shouldCollapse;
+         setCollapsed(shouldCollapse);
+       }
++
++      if (!shouldCollapse) {
++        dragState.latestWidth = writeSidebarWidth(draggedWidth);
++      }
+     };
+
+     const endDrag = () => {
+@@ -669,10 +679,14 @@ const Layout: React.FC<{
+               </ArcoLayout.Content>
+               {!isMobile && (
+                 <div
+-                  className='absolute top-0 h-full w-8px z-20 cursor-col-resize group'
+-                  style={{ right: '-4px' }}
++                  className='layout-sider-resize-handle absolute top-0 h-full w-12px z-30 cursor-col-resize group'
++                  style={{ right: '-6px' }}
+                   onMouseDown={beginSiderResizeDrag}
+-                  aria-hidden='true'
++                  role='separator'
++                  aria-orientation='vertical'
++                  aria-label='Resize sidebar'
++                  aria-valuenow={collapsed ? DESKTOP_COLLAPSED_WIDTH : desktopSiderWidth}
++                  data-testid='sider-resize-handle'
+                 >
+                   <div className='absolute top-0 left-1/2 h-full w-1px -translate-x-1/2 bg-transparent group-hover:bg-[var(--color-border-2)] transition-colors duration-150' />
+                 </div>
+diff --git a/src/renderer/components/layout/Sider/Sider.module.css b/src/renderer/components/layout/Sider/Sider.module.css
+index 6f76e698d..d4d319677 100644
+--- a/src/renderer/components/layout/Sider/Sider.module.css
++++ b/src/renderer/components/layout/Sider/Sider.module.css
+@@ -37,6 +37,7 @@
+ .scrollArea {
+   scrollbar-width: thin; /* Firefox */
+   scrollbar-color: transparent transparent;
++  overflow-x: hidden !important;
+ }
+
+ .scrollArea:hover {
+@@ -52,6 +53,10 @@
+   background: transparent;
+ }
+
++.scrollArea::-webkit-scrollbar:horizontal {
++  height: 0;
++}
++
+ .scrollArea::-webkit-scrollbar-thumb {
+   background: transparent;
+   border-radius: 4px;
+@@ -89,6 +94,9 @@
+   grid-template-rows: auto 1fr auto;
+   min-height: 0;
+   height: 100%;
++  min-width: 0;
++  max-width: 100%;
++  overflow-x: hidden;
+ }
+
+ .topZone {
+@@ -98,12 +106,18 @@
+   padding: 0 8px 4px 8px;
+   border-bottom: 1px solid var(--color-border-1);
+   margin-bottom: 4px;
++  min-width: 0;
++  max-width: 100%;
++  overflow-x: hidden;
+ }
+
+ .scrollZone {
+   min-height: 0;
++  min-width: 0;
++  max-width: 100%;
+   display: flex;
+   flex-direction: column;
++  overflow-x: hidden;
+   padding: 0 8px 2px 8px;
+ }
+
+@@ -113,6 +127,9 @@
+   box-shadow: 0 -8px 16px -8px rgba(0, 0, 0, 0.6);
+   position: relative;
+   z-index: 5;
++  min-width: 0;
++  max-width: 100%;
++  overflow-x: hidden;
+ }
+
+ /* Right-click chat context menu (Pin / Rename / Schedule / Export / Add to
+diff --git a/src/renderer/components/layout/Sider/SiderAccordion/SiderAccordionShell.module.css b/src/renderer/components/layout/Sider/SiderAccordion/SiderAccordionShell.module.css
+index fa1586797..aaad00731 100644
+--- a/src/renderer/components/layout/Sider/SiderAccordion/SiderAccordionShell.module.css
++++ b/src/renderer/components/layout/Sider/SiderAccordion/SiderAccordionShell.module.css
+@@ -17,6 +17,8 @@
+   flex-shrink: 0;
+   overflow: visible;
+   margin-bottom: 6px;
++  min-width: 0;
++  max-width: 100%;
+ }
+ .acc:last-child {
+   margin-bottom: 0;
+@@ -30,6 +32,9 @@
+   color: var(--color-text-3);
+   border-radius: 7px;
+   transition: background 0.12s, color 0.12s;
++  min-width: 0;
++  max-width: 100%;
++  overflow: hidden;
+ }
+ .header:hover {
+   background: var(--color-fill-2);
+@@ -59,9 +64,13 @@
+ }
+ .label {
+   flex: 1;
++  min-width: 0;
+   font-weight: 600;
+   font-size: 10px;
+   text-transform: uppercase;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
+   letter-spacing: 0.06em;
+   line-height: 1.4;
+ }
+@@ -75,6 +84,7 @@
+   min-width: 18px;
+   text-align: center;
+   line-height: 1.4;
++  flex-shrink: 0;
+ }
+ .badge.live {
+   background: rgb(var(--primary-6));
+diff --git a/src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.module.css b/src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.module.css
+index 47f76b715..365e89683 100644
+--- a/src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.module.css
++++ b/src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.module.css
+@@ -11,6 +11,8 @@
+      section, so the scrollZone's overflow-y:auto is what scrolls when
+      the combined content exceeds available height. */
+   flex-shrink: 0;
++  min-width: 0;
++  max-width: 100%;
+ }
+ .header {
+   display: flex;
+@@ -19,6 +21,9 @@
+   padding: 6px 10px;
+   color: var(--color-text-3);
+   /* No cursor:pointer, no role=button - this is a label, not an interactive header. */
++  min-width: 0;
++  max-width: 100%;
++  overflow: hidden;
+ }
+ .icon {
+   width: 14px;
+@@ -30,9 +35,13 @@
+ }
+ .label {
+   flex: 1;
++  min-width: 0;
+   font-weight: 600;
+   font-size: 10px;
+   text-transform: uppercase;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
+   letter-spacing: 0.06em;
+   line-height: 1.4;
+ }
+@@ -46,6 +55,7 @@
+   min-width: 18px;
+   text-align: center;
+   line-height: 1.4;
++  flex-shrink: 0;
+ }
+ .fallback {
+   min-height: 200px;
+diff --git a/src/renderer/components/layout/Sider/SiderFooter.tsx b/src/renderer/components/layout/Sider/SiderFooter.tsx
+index cc221736d..23508f61e 100644
+--- a/src/renderer/components/layout/Sider/SiderFooter.tsx
++++ b/src/renderer/components/layout/Sider/SiderFooter.tsx
+@@ -52,14 +52,14 @@ const SiderFooter: React.FC<SiderFooterProps> = ({
+   const themeTooltip = theme === 'dark' ? t('settings.lightMode') : t('settings.darkMode');
+
+   return (
+-    <div className='shrink-0 sider-footer mt-auto pt-4px pb-8px'>
++    <div className='shrink-0 sider-footer mt-auto pt-4px pb-8px min-w-0 max-w-full overflow-hidden'>
+       <div
+         className={classNames(
+-          'flex',
++          'flex min-w-0 max-w-full overflow-hidden',
+           collapsed ? 'flex-col gap-2px' : 'items-center gap-2px',
+           // On a phone the single row (Settings + Logout + 3 action icons) runs
+           // out of width and truncates "Settings" to "Setti...". Stack so each
+-          // item gets the full drawer width.
++          // item gets the full drawer width and never creates a horizontal rail.
+           isMobile && !collapsed && '!flex-col !items-stretch'
+         )}
+       >
+@@ -67,8 +67,8 @@ const SiderFooter: React.FC<SiderFooterProps> = ({
+           <div
+             onClick={onSettingsClick}
+             className={classNames(
+-              'h-26px flex items-center rd-0.5rem cursor-pointer transition-colors',
+-              collapsed ? 'w-full justify-center' : 'flex-1 min-w-0 justify-start gap-8px px-8px',
++              'sider-footer__primary-btn h-26px flex items-center rd-0.5rem cursor-pointer transition-colors',
++              collapsed ? 'w-full justify-center' : 'flex-[1_1_0] min-w-0 justify-start gap-8px px-8px',
+               isMobile && 'sider-footer-btn-mobile',
+               {
+                 'bg-[rgba(var(--primary-6),0.12)] text-primary': isSettings,
+@@ -77,7 +77,7 @@ const SiderFooter: React.FC<SiderFooterProps> = ({
+             )}
+           >
+             <span className='w-20px h-20px flex items-center justify-center shrink-0'>{settingsIcon}</span>
+-            <span className='collapsed-hidden text-t-primary text-12px font-medium leading-20px truncate'>
++            <span className='sider-footer__label collapsed-hidden text-t-primary text-12px font-medium leading-20px truncate'>
+               {isSettings ? t('common.back') : t('common.settings')}
+             </span>
+           </div>
+@@ -87,15 +87,15 @@ const SiderFooter: React.FC<SiderFooterProps> = ({
+             <div
+               onClick={onLogoutClick}
+               className={classNames(
+-                'h-26px flex items-center rd-0.5rem cursor-pointer transition-colors hover:bg-[rgba(var(--primary-6),0.14)] active:bg-fill-2',
+-                collapsed ? 'w-full justify-center' : 'flex-1 min-w-0 justify-start gap-8px px-8px',
++                'sider-footer__primary-btn h-26px flex items-center rd-0.5rem cursor-pointer transition-colors hover:bg-[rgba(var(--primary-6),0.14)] active:bg-fill-2',
++                collapsed ? 'w-full justify-center' : 'flex-[1_1_0] min-w-0 justify-start gap-8px px-8px',
+                 isMobile && 'sider-footer-btn-mobile'
+               )}
+             >
+               <span className='w-20px h-20px flex items-center justify-center shrink-0'>
+                 <LogOut size={16} color={iconColors.primary} className='block leading-none' style={{ lineHeight: 0 }} />
+               </span>
+-              <span className='collapsed-hidden text-t-primary text-12px font-medium leading-20px truncate'>
++              <span className='sider-footer__label collapsed-hidden text-t-primary text-12px font-medium leading-20px truncate'>
+                 {t('settings.googleLogout')}
+               </span>
+             </div>
+diff --git a/src/renderer/components/layout/Sider/SiderFooter/SiderFooterQuickActions.module.css b/src/renderer/components/layout/Sider/SiderFooter/SiderFooterQuickActions.module.css
+index 1539371e8..f5a1339f8 100644
+--- a/src/renderer/components/layout/Sider/SiderFooter/SiderFooterQuickActions.module.css
++++ b/src/renderer/components/layout/Sider/SiderFooter/SiderFooterQuickActions.module.css
+@@ -1,9 +1,12 @@
+ .row {
+   display: flex;
+   align-items: center;
+-  justify-content: space-around;
+-  gap: 6px;
+-  padding: 4px 10px 8px 10px;
++  justify-content: flex-end;
++  flex: 0 0 auto;
++  min-width: 0;
++  max-width: 100%;
++  gap: 4px;
++  padding: 0 0 0 2px;
+ }
+
+ .rowCollapsed {
+@@ -11,11 +14,13 @@
+ }
+
+ .btn {
+-  flex: 1;
+-  height: 32px;
++  flex: 0 0 28px;
++  width: 28px;
++  height: 28px;
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
++  min-width: 0;
+   border-radius: 7px;
+   background: transparent;
+   color: var(--color-text-3);
+@@ -37,3 +42,16 @@
+ .btn.btnRunning {
+   color: rgb(var(--success-6));
+ }
++
++@media (max-width: 767px) {
++  .row {
++    width: 100%;
++    justify-content: flex-start;
++    padding: 2px 0 0 0;
++  }
++
++  .btn {
++    flex-basis: 32px;
++    width: 32px;
++  }
++}
+diff --git a/src/renderer/components/layout/Sider/index.tsx b/src/renderer/components/layout/Sider/index.tsx
+index 99457f81d..9e2ec94e9 100644
+--- a/src/renderer/components/layout/Sider/index.tsx
++++ b/src/renderer/components/layout/Sider/index.tsx
+@@ -223,7 +223,7 @@ const Sider: React.FC<SiderProps> = ({ onSessionClick, collapsed = false }) => {
+         {SIDER_NAV_ITEMS.filter((item) => !hiddenNavIds.has(item.id)).map((item) => item.render(navContext))}
+       </div>
+
+-      <div className={classNames('overflow-y-auto', siderStyles.scrollArea, siderStyles.scrollZone)}>
++      <div className={classNames('overflow-y-auto overflow-x-hidden min-w-0 max-w-full', siderStyles.scrollArea, siderStyles.scrollZone)}>
+         {/* v0.6.2 W2b - accordion sections replace SiderScheduledEntry / SiderWorkflowsEntry /
+             SiderTeamsEntry / SiderActiveTeams / TeamSiderSection / CronJobSiderSection.
+             Hidden entirely when collapsed: their list content cannot render cleanly
 diff --git a/src/renderer/components/model/modelSelector/EffortSubRow.tsx b/src/renderer/components/model/modelSelector/EffortSubRow.tsx
 index 1b7056f39..e13224722 100644
 --- a/src/renderer/components/model/modelSelector/EffortSubRow.tsx
@@ -3165,6 +3562,106 @@ index 8b2037463..7ef683233 100644
 +    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
    }
  }
+diff --git a/src/renderer/styles/layout.css b/src/renderer/styles/layout.css
+index e83fa9e3c..d3d1227d1 100644
+--- a/src/renderer/styles/layout.css
++++ b/src/renderer/styles/layout.css
+@@ -5,6 +5,8 @@
+   overflow-x: hidden;
+   box-shadow: none !important;
+   border-right: 1px solid var(--border-base);
++  min-width: 0 !important;
++  max-width: min(400px, 100vw) !important;
+ }
+
+ /* Arco Layout inner container needs flex layout so Header + Content + Footer
+@@ -16,16 +18,33 @@
+   flex: 1 !important;
+   min-height: 0 !important;
+   height: 100% !important;
++  min-width: 0 !important;
+ }
+
+ .layout-sider-header {
+   flex-shrink: 0 !important;
++  min-width: 0 !important;
++  max-width: 100% !important;
++  overflow-x: hidden !important;
+ }
+
+ .layout-sider-content {
+   flex: 1 !important;
+   min-height: 0 !important;
++  min-width: 0 !important;
++  max-width: 100% !important;
+   height: auto !important;
++  overflow-x: hidden !important;
++  box-sizing: border-box !important;
++}
++
++.layout-sider-resize-handle {
++  touch-action: none;
++}
++
++.layout-sider-resize-handle:hover,
++.layout-sider-resize-handle:focus-visible {
++  outline: none;
+ }
+
+ .layout-sider.collapsed .arco-layout-sider-children,
+@@ -39,12 +58,42 @@
+ }
+
+ /* Sidebar item transitions (shared by chat-history and settings-sider) */
++.chat-history,
++.chat-history__section,
++.settings-sider,
++.sider-footer {
++  min-width: 0;
++  max-width: 100%;
++}
++
++.sider-footer {
++  container-type: inline-size;
++}
++
++@container (max-width: 230px) {
++  .sider-footer__primary-btn {
++    flex: 0 0 28px !important;
++    width: 28px !important;
++    min-width: 28px !important;
++    justify-content: center !important;
++    gap: 0 !important;
++    padding-inline: 0 !important;
++  }
++
++  .sider-footer__label {
++    display: none !important;
++  }
++}
++
+ .chat-history__item,
+ .settings-sider__item {
+   transition:
+     padding 0.2s ease,
+     margin 0.2s ease,
+     background-color 0.2s ease;
++  min-width: 0;
++  max-width: 100%;
++  box-sizing: border-box;
+ }
+
+ .chat-history__item-name,
+@@ -195,6 +244,9 @@
+     flex-shrink: 0 !important;
+     /* Extra padding as fallback for iOS Chrome */
+     padding-bottom: 20px;
++    min-width: 0 !important;
++    max-width: 100% !important;
++    overflow-x: hidden !important;
+   }
+
+   /* Match the desktop sider density exactly (SiderItem = 26px row, 8px gap,
 diff --git a/src/renderer/utils/model/agentModes.ts b/src/renderer/utils/model/agentModes.ts
 index 3b9f8f839..480119ba5 100644
 --- a/src/renderer/utils/model/agentModes.ts

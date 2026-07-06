@@ -1,9 +1,12 @@
 .row {
   display: flex;
   align-items: center;
-  justify-content: space-around;
-  gap: 6px;
-  padding: 4px 10px 8px 10px;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 100%;
+  gap: 4px;
+  padding: 0 0 0 2px;
 }
 
 .rowCollapsed {
@@ -11,11 +14,13 @@
 }
 
 .btn {
-  flex: 1;
-  height: 32px;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  min-width: 0;
   border-radius: 7px;
   background: transparent;
   color: var(--color-text-3);
@@ -36,4 +41,17 @@
 
 .btn.btnRunning {
   color: rgb(var(--success-6));
+}
+
+@media (max-width: 767px) {
+  .row {
+    width: 100%;
+    justify-content: flex-start;
+    padding: 2px 0 0 0;
+  }
+
+  .btn {
+    flex-basis: 32px;
+    width: 32px;
+  }
 }

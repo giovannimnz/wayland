@@ -52,14 +52,14 @@ const SiderFooter: React.FC<SiderFooterProps> = ({
   const themeTooltip = theme === 'dark' ? t('settings.lightMode') : t('settings.darkMode');
 
   return (
-    <div className='shrink-0 sider-footer mt-auto pt-4px pb-8px'>
+    <div className='shrink-0 sider-footer mt-auto pt-4px pb-8px min-w-0 max-w-full overflow-hidden'>
       <div
         className={classNames(
-          'flex',
+          'flex min-w-0 max-w-full overflow-hidden',
           collapsed ? 'flex-col gap-2px' : 'items-center gap-2px',
           // On a phone the single row (Settings + Logout + 3 action icons) runs
           // out of width and truncates "Settings" to "Setti...". Stack so each
-          // item gets the full drawer width.
+          // item gets the full drawer width and never creates a horizontal rail.
           isMobile && !collapsed && '!flex-col !items-stretch'
         )}
       >
@@ -67,8 +67,8 @@ const SiderFooter: React.FC<SiderFooterProps> = ({
           <div
             onClick={onSettingsClick}
             className={classNames(
-              'h-26px flex items-center rd-0.5rem cursor-pointer transition-colors',
-              collapsed ? 'w-full justify-center' : 'flex-1 min-w-0 justify-start gap-8px px-8px',
+              'sider-footer__primary-btn h-26px flex items-center rd-0.5rem cursor-pointer transition-colors',
+              collapsed ? 'w-full justify-center' : 'flex-[1_1_0] min-w-0 justify-start gap-8px px-8px',
               isMobile && 'sider-footer-btn-mobile',
               {
                 'bg-[rgba(var(--primary-6),0.12)] text-primary': isSettings,
@@ -77,7 +77,7 @@ const SiderFooter: React.FC<SiderFooterProps> = ({
             )}
           >
             <span className='w-20px h-20px flex items-center justify-center shrink-0'>{settingsIcon}</span>
-            <span className='collapsed-hidden text-t-primary text-12px font-medium leading-20px truncate'>
+            <span className='sider-footer__label collapsed-hidden text-t-primary text-12px font-medium leading-20px truncate'>
               {isSettings ? t('common.back') : t('common.settings')}
             </span>
           </div>
@@ -87,15 +87,15 @@ const SiderFooter: React.FC<SiderFooterProps> = ({
             <div
               onClick={onLogoutClick}
               className={classNames(
-                'h-26px flex items-center rd-0.5rem cursor-pointer transition-colors hover:bg-[rgba(var(--primary-6),0.14)] active:bg-fill-2',
-                collapsed ? 'w-full justify-center' : 'flex-1 min-w-0 justify-start gap-8px px-8px',
+                'sider-footer__primary-btn h-26px flex items-center rd-0.5rem cursor-pointer transition-colors hover:bg-[rgba(var(--primary-6),0.14)] active:bg-fill-2',
+                collapsed ? 'w-full justify-center' : 'flex-[1_1_0] min-w-0 justify-start gap-8px px-8px',
                 isMobile && 'sider-footer-btn-mobile'
               )}
             >
               <span className='w-20px h-20px flex items-center justify-center shrink-0'>
                 <LogOut size={16} color={iconColors.primary} className='block leading-none' style={{ lineHeight: 0 }} />
               </span>
-              <span className='collapsed-hidden text-t-primary text-12px font-medium leading-20px truncate'>
+              <span className='sider-footer__label collapsed-hidden text-t-primary text-12px font-medium leading-20px truncate'>
                 {t('settings.googleLogout')}
               </span>
             </div>

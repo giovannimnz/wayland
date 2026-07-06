@@ -38,6 +38,13 @@ Tracked ATIUS source customizations live in these files:
 - `src/process/utils/shellEnv.ts`
 - `src/process/webserver/routes/apiRoutes.ts`
 - `src/process/webserver/websocket/WebSocketManager.ts`
+- `src/renderer/components/layout/Layout.tsx`
+- `src/renderer/components/layout/Sider/Sider.module.css`
+- `src/renderer/components/layout/Sider/SiderAccordion/SiderAccordionShell.module.css`
+- `src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.module.css`
+- `src/renderer/components/layout/Sider/SiderFooter.tsx`
+- `src/renderer/components/layout/Sider/SiderFooter/SiderFooterQuickActions.module.css`
+- `src/renderer/components/layout/Sider/index.tsx`
 - `src/common/adapter/ipcBridge.ts`
 - `src/common/config/storage.ts`
 - `src/common/types/codex/codexModes.ts`
@@ -64,6 +71,7 @@ Tracked ATIUS source customizations live in these files:
 - `src/renderer/services/i18n/index.ts`
 - `src/renderer/services/i18n/locales/*/agentMode.json`
 - `src/renderer/services/i18n/locales/*/conversation.json`
+- `src/renderer/styles/layout.css`
 - `src/renderer/utils/model/agentModes.ts`
 
 Generated artifacts are intentionally not tracked:
@@ -84,6 +92,8 @@ Generated artifacts are intentionally not tracked:
 - Codex permission mode includes `Custom (config.toml)` / `Personalizado(config.toml)` to delegate sandbox defaults back to the service user's Codex config.
 - The GUID agent pill bar exposes collapsed agents by accessible name so Hermes/Codex can be selected by keyboard and automation.
 - Mobile GUID controls wrap visibly instead of hiding later model/effort/permission or intent options behind horizontal overflow.
+- The left sidebar never exposes a bottom horizontal scrollbar; long recents and footer controls truncate or compact inside the available width.
+- The desktop left sidebar divider is a real resize handle: drag persists `wayland:sidebar-width` while preserving the rail snap behavior below the collapse threshold.
 
 ## Rebuild/update flow
 
@@ -146,3 +156,30 @@ Confirmed behaviors:
 - Codex permission menu includes `Custom (config.toml)`;
 - Hermes/Codex agent pills are accessible by name for keyboard/automation;
 - mobile composer controls and intent pills wrap visibly.
+
+## 2026-07-06 left sidebar responsiveness QA
+
+Validated on `http://127.0.0.1:25808/#/guid` with Playwright/Chromium on
+`atius-srv-3`. The test session loaded only the `gsd-web-login` Vault profile
+for login automation; no secret values were printed or recorded.
+
+Viewports and states covered:
+
+- `1365x900` desktop at the default `280px` sidebar width.
+- `954x665` narrowed desktop with the sidebar expanded.
+- `495x889` and `390x900` mobile drawer states.
+- `1220x820` desktop with persisted sidebar width forced to `200px`.
+- Drag resize path from `281px` to `371px` (`wayland:sidebar-width=370`) and
+  back to `211px` (`wayland:sidebar-width=210`, not collapsed).
+
+Measured checks:
+
+- `200px` sidebar: content `200/200`, scroll zone `184/184`, footer `184/184`,
+  footer leaks `0`, root `html/body` horizontal overflow `0`.
+- `390px` mobile drawer: content `300/300`, scroll zone `284/284`, footer
+  `284/284`, footer leaks `0`, root `html/body` horizontal overflow `0`.
+- After drag shrink to `211px`: content `210/210`, footer `194/194`, footer
+  leaks `0`.
+
+Screenshots from the validated run were written to
+`out/atius-qa/sidebar-responsive-final/`.

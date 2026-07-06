@@ -39,6 +39,13 @@ FILES=(
   src/process/utils/shellEnv.ts
   src/process/webserver/routes/apiRoutes.ts
   src/process/webserver/websocket/WebSocketManager.ts
+  src/renderer/components/layout/Layout.tsx
+  src/renderer/components/layout/Sider/Sider.module.css
+  src/renderer/components/layout/Sider/SiderAccordion/SiderAccordionShell.module.css
+  src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.module.css
+  src/renderer/components/layout/Sider/SiderFooter.tsx
+  src/renderer/components/layout/Sider/SiderFooter/SiderFooterQuickActions.module.css
+  src/renderer/components/layout/Sider/index.tsx
   src/renderer/components/agent/AgentModeSelector.tsx
   src/renderer/components/agent/MarqueePillLabel.tsx
   src/renderer/components/model/modelSelector/EffortSubRow.tsx
@@ -80,6 +87,7 @@ FILES=(
   src/renderer/services/i18n/locales/uk-UA/conversation.json
   src/renderer/services/i18n/locales/zh-CN/conversation.json
   src/renderer/services/i18n/locales/zh-TW/conversation.json
+  src/renderer/styles/layout.css
   tests/unit/WebSocketManager.test.ts
   tests/unit/AgentPillBar.dom.test.tsx
   tests/unit/process/task/codexConfigEffort.test.ts

@@ -5,6 +5,8 @@
   overflow-x: hidden;
   box-shadow: none !important;
   border-right: 1px solid var(--border-base);
+  min-width: 0 !important;
+  max-width: min(400px, 100vw) !important;
 }
 
 /* Arco Layout inner container needs flex layout so Header + Content + Footer
@@ -16,16 +18,33 @@
   flex: 1 !important;
   min-height: 0 !important;
   height: 100% !important;
+  min-width: 0 !important;
 }
 
 .layout-sider-header {
   flex-shrink: 0 !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow-x: hidden !important;
 }
 
 .layout-sider-content {
   flex: 1 !important;
   min-height: 0 !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
   height: auto !important;
+  overflow-x: hidden !important;
+  box-sizing: border-box !important;
+}
+
+.layout-sider-resize-handle {
+  touch-action: none;
+}
+
+.layout-sider-resize-handle:hover,
+.layout-sider-resize-handle:focus-visible {
+  outline: none;
 }
 
 .layout-sider.collapsed .arco-layout-sider-children,
@@ -39,12 +58,42 @@
 }
 
 /* Sidebar item transitions (shared by chat-history and settings-sider) */
+.chat-history,
+.chat-history__section,
+.settings-sider,
+.sider-footer {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.sider-footer {
+  container-type: inline-size;
+}
+
+@container (max-width: 230px) {
+  .sider-footer__primary-btn {
+    flex: 0 0 28px !important;
+    width: 28px !important;
+    min-width: 28px !important;
+    justify-content: center !important;
+    gap: 0 !important;
+    padding-inline: 0 !important;
+  }
+
+  .sider-footer__label {
+    display: none !important;
+  }
+}
+
 .chat-history__item,
 .settings-sider__item {
   transition:
     padding 0.2s ease,
     margin 0.2s ease,
     background-color 0.2s ease;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .chat-history__item-name,
@@ -195,6 +244,9 @@
     flex-shrink: 0 !important;
     /* Extra padding as fallback for iOS Chrome */
     padding-bottom: 20px;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow-x: hidden !important;
   }
 
   /* Match the desktop sider density exactly (SiderItem = 26px row, 8px gap,

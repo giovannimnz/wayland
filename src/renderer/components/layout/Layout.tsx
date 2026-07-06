@@ -26,6 +26,7 @@ import { cleanupSiderTooltips } from '@renderer/utils/ui/siderTooltip';
 import { useConversationShortcuts } from '@renderer/hooks/ui/useConversationShortcuts';
 import { useResponsive } from '@renderer/hooks/ui/useResponsive';
 import { useSidebarWidth } from '@renderer/hooks/ui/useSidebarWidth';
+import { writeSidebarWidth } from '@renderer/utils/ui/sidebarWidth';
 import { useGlobalKeybind } from '@renderer/hooks/settings/useGlobalKeybind';
 import { CommandPalette } from '@renderer/components/cmdk';
 import BudgetGateModal from '@renderer/components/cost/BudgetGateModal';
@@ -217,10 +218,11 @@ const Layout: React.FC<{
   const collapsedRef = useRef(collapsed);
   const lastCssRef = useRef('');
   const lastUiCssUpdateAtRef = useRef(0);
-  const dragStateRef = useRef<{ active: boolean; startX: number; startWidth: number }>({
+  const dragStateRef = useRef<{ active: boolean; startX: number; startWidth: number; latestWidth: number }>({
     active: false,
     startX: 0,
     startWidth: DEFAULT_SIDER_WIDTH,
+    latestWidth: DEFAULT_SIDER_WIDTH,
   });
 
   const loadAndHealCustomCss = useCallback(async () => {
@@ -485,10 +487,12 @@ const Layout: React.FC<{
     (event: React.MouseEvent<HTMLDivElement>) => {
       if (isMobile) return;
       event.preventDefault();
+      const startWidth = collapsedRef.current ? DESKTOP_COLLAPSED_WIDTH : desktopSiderWidth;
       dragStateRef.current = {
         active: true,
         startX: event.clientX,
-        startWidth: collapsedRef.current ? DESKTOP_COLLAPSED_WIDTH : desktopSiderWidth,
+        startWidth,
+        latestWidth: desktopSiderWidth,
       };
       document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
@@ -506,8 +510,14 @@ const Layout: React.FC<{
       const shouldCollapse = collapsedRef.current
         ? draggedWidth < SIDER_DRAG_SNAP_THRESHOLD + SIDER_DRAG_HYSTERESIS
         : draggedWidth <= SIDER_DRAG_SNAP_THRESHOLD - SIDER_DRAG_HYSTERESIS;
+
       if (shouldCollapse !== collapsedRef.current) {
+        collapsedRef.current = shouldCollapse;
         setCollapsed(shouldCollapse);
+      }
+
+      if (!shouldCollapse) {
+        dragState.latestWidth = writeSidebarWidth(draggedWidth);
       }
     };
 
@@ -669,10 +679,14 @@ const Layout: React.FC<{
               </ArcoLayout.Content>
               {!isMobile && (
                 <div
-                  className='absolute top-0 h-full w-8px z-20 cursor-col-resize group'
-                  style={{ right: '-4px' }}
+                  className='layout-sider-resize-handle absolute top-0 h-full w-12px z-30 cursor-col-resize group'
+                  style={{ right: '-6px' }}
                   onMouseDown={beginSiderResizeDrag}
-                  aria-hidden='true'
+                  role='separator'
+                  aria-orientation='vertical'
+                  aria-label='Resize sidebar'
+                  aria-valuenow={collapsed ? DESKTOP_COLLAPSED_WIDTH : desktopSiderWidth}
+                  data-testid='sider-resize-handle'
                 >
                   <div className='absolute top-0 left-1/2 h-full w-1px -translate-x-1/2 bg-transparent group-hover:bg-[var(--color-border-2)] transition-colors duration-150' />
                 </div>

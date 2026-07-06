@@ -223,7 +223,7 @@ const Sider: React.FC<SiderProps> = ({ onSessionClick, collapsed = false }) => {
         {SIDER_NAV_ITEMS.filter((item) => !hiddenNavIds.has(item.id)).map((item) => item.render(navContext))}
       </div>
 
-      <div className={classNames('overflow-y-auto', siderStyles.scrollArea, siderStyles.scrollZone)}>
+      <div className={classNames('overflow-y-auto overflow-x-hidden min-w-0 max-w-full', siderStyles.scrollArea, siderStyles.scrollZone)}>
         {/* v0.6.2 W2b - accordion sections replace SiderScheduledEntry / SiderWorkflowsEntry /
             SiderTeamsEntry / SiderActiveTeams / TeamSiderSection / CronJobSiderSection.
             Hidden entirely when collapsed: their list content cannot render cleanly

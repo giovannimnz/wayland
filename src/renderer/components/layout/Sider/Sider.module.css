@@ -37,6 +37,7 @@
 .scrollArea {
   scrollbar-width: thin; /* Firefox */
   scrollbar-color: transparent transparent;
+  overflow-x: hidden !important;
 }
 
 .scrollArea:hover {
@@ -50,6 +51,10 @@
 
 .scrollArea::-webkit-scrollbar-track {
   background: transparent;
+}
+
+.scrollArea::-webkit-scrollbar:horizontal {
+  height: 0;
 }
 
 .scrollArea::-webkit-scrollbar-thumb {
@@ -89,6 +94,9 @@
   grid-template-rows: auto 1fr auto;
   min-height: 0;
   height: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .topZone {
@@ -98,12 +106,18 @@
   padding: 0 8px 4px 8px;
   border-bottom: 1px solid var(--color-border-1);
   margin-bottom: 4px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .scrollZone {
   min-height: 0;
+  min-width: 0;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
+  overflow-x: hidden;
   padding: 0 8px 2px 8px;
 }
 
@@ -113,6 +127,9 @@
   box-shadow: 0 -8px 16px -8px rgba(0, 0, 0, 0.6);
   position: relative;
   z-index: 5;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 /* Right-click chat context menu (Pin / Rename / Schedule / Export / Add to
