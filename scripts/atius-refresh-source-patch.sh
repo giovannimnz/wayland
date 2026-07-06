@@ -23,6 +23,7 @@ FILES=(
   scripts/atius-refresh-source-patch.sh
   scripts/atius-reapply-renderer-overlay.sh
   scripts/atius-update.sh
+  scripts/atius-wayland-https-proxy.js
   src/common/adapter/ipcBridge.ts
   src/common/config/storage.ts
   src/common/types/codex/codexModes.ts

@@ -11,7 +11,8 @@ runs the source checkout directly:
 - repo: `/home/ubuntu/GitHub/wayland`
 - service: `wayland.service`
 - runtime entrypoint: `/home/ubuntu/GitHub/wayland/dist-server/server.mjs`
-- port: `25750`
+- HTTP port: `25750`
+- HTTPS VPN port: `25725`, terminated by `wayland-https-proxy.service`
 - service user: `wayland`
 
 The deployment is rebuilt from source after custom patch application instead of
@@ -28,6 +29,7 @@ Tracked ATIUS source customizations live in these files:
 - `scripts/atius-refresh-source-patch.sh`
 - `scripts/atius-reapply-renderer-overlay.sh`
 - `scripts/atius-update.sh`
+- `scripts/atius-wayland-https-proxy.js`
 - `scripts/install-ubuntu.sh`
 - `scripts/build-server.mjs`
 - `scripts/build-mcp-servers.js`
@@ -93,6 +95,8 @@ Generated artifacts are intentionally not tracked:
 - Codex and Hermes display a separate speed selector beside model/effort. `Padrão` maps to `service_tier=normal`; `Rápido` maps to Codex's `service_tier=priority` Fast tier.
 - Codex permission mode includes `Custom (config.toml)` / `Personalizado(config.toml)` to delegate sandbox defaults back to the service user's Codex config.
 - Direct VPN HTTP access uses `http://10.100.100.3:25750/`. Even with `SERVER_BASE_URL=https://wayland.atius.com.br` for the public entrypoint, request-scoped cookie options must not mark the session cookie as `Secure` on direct HTTP/VPN requests, otherwise login succeeds in JSON but the WebSocket reconnect has no `wayland-session` cookie and the GUID falls back to `wcore` / no model.
+- Direct VPN HTTPS access uses `https://10.100.100.3:25725/`. Port `25750` is plain HTTP, so `https://10.100.100.3:25750/` is expected to fail TLS. The `25725` listener is a local Node HTTPS reverse proxy with WebSocket upgrade support that forwards to `127.0.0.1:25750`.
+- The `25725` certificate lives under `/etc/wayland/tls/wayland-10.100.100.3.crt` and must include `IP:10.100.100.3` in SAN. On `GIOVANNI-W11-PC`, the public certificate was imported into the current user's trusted root store so Brave/Schannel can validate the direct IP URL without `-k`.
 - The GUID agent pill bar exposes collapsed agents by accessible name so Hermes/Codex can be selected by keyboard and automation.
 - Mobile GUID controls wrap visibly instead of hiding later model/effort/permission or intent options behind horizontal overflow.
 - The left sidebar never exposes a bottom horizontal scrollbar; long recents and footer controls truncate or compact inside the available width.
@@ -129,14 +133,18 @@ npm run typecheck
 bash scripts/atius-build-renderer-overlay.sh
 sudo systemctl restart wayland.service
 systemctl is-active wayland.service
+systemctl is-active wayland-https-proxy.service
 curl -fsS -o /dev/null -w "http=%{http_code}\n" http://127.0.0.1:25750/
+curl -fsS -o /dev/null -w "https=%{http_code}\n" https://10.100.100.3:25725/
 journalctl -u wayland.service --since "5 minutes ago" --no-pager | grep -E "AgentRegistry|found 4 agents|Serving renderer|WebUI running"
 ```
 
 Expected runtime signals:
 
 - `wayland.service` is `active`
+- `wayland-https-proxy.service` is `active`
 - local HTTP on `127.0.0.1:25750` returns `200`
+- direct VPN HTTPS on `10.100.100.3:25725` returns `200` from a trusted Windows client
 - startup logs include `found 4 agents: Wayland Core, Gemini CLI, Codex, Hermes Agent`
 
 ## Git/GitHub note

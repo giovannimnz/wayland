@@ -27,10 +27,10 @@ index a85d779cb..36b229afd 100644
  ## Where to put new docs
 diff --git a/docs/guides/atius-fork-runtime.md b/docs/guides/atius-fork-runtime.md
 new file mode 100644
-index 000000000..d895be085
+index 000000000..2187bd85b
 --- /dev/null
 +++ b/docs/guides/atius-fork-runtime.md
-@@ -0,0 +1,189 @@
+@@ -0,0 +1,197 @@
 +# Atius srv-3 fork/runtime guide
 +
 +This guide documents the ATIUS-managed source runtime served at
@@ -44,7 +44,8 @@ index 000000000..d895be085
 +- repo: `/home/ubuntu/GitHub/wayland`
 +- service: `wayland.service`
 +- runtime entrypoint: `/home/ubuntu/GitHub/wayland/dist-server/server.mjs`
-+- port: `25750`
++- HTTP port: `25750`
++- HTTPS VPN port: `25725`, terminated by `wayland-https-proxy.service`
 +- service user: `wayland`
 +
 +The deployment is rebuilt from source after custom patch application instead of
@@ -61,6 +62,7 @@ index 000000000..d895be085
 +- `scripts/atius-refresh-source-patch.sh`
 +- `scripts/atius-reapply-renderer-overlay.sh`
 +- `scripts/atius-update.sh`
++- `scripts/atius-wayland-https-proxy.js`
 +- `scripts/install-ubuntu.sh`
 +- `scripts/build-server.mjs`
 +- `scripts/build-mcp-servers.js`
@@ -126,6 +128,8 @@ index 000000000..d895be085
 +- Codex and Hermes display a separate speed selector beside model/effort. `Padrão` maps to `service_tier=normal`; `Rápido` maps to Codex's `service_tier=priority` Fast tier.
 +- Codex permission mode includes `Custom (config.toml)` / `Personalizado(config.toml)` to delegate sandbox defaults back to the service user's Codex config.
 +- Direct VPN HTTP access uses `http://10.100.100.3:25750/`. Even with `SERVER_BASE_URL=https://wayland.atius.com.br` for the public entrypoint, request-scoped cookie options must not mark the session cookie as `Secure` on direct HTTP/VPN requests, otherwise login succeeds in JSON but the WebSocket reconnect has no `wayland-session` cookie and the GUID falls back to `wcore` / no model.
++- Direct VPN HTTPS access uses `https://10.100.100.3:25725/`. Port `25750` is plain HTTP, so `https://10.100.100.3:25750/` is expected to fail TLS. The `25725` listener is a local Node HTTPS reverse proxy with WebSocket upgrade support that forwards to `127.0.0.1:25750`.
++- The `25725` certificate lives under `/etc/wayland/tls/wayland-10.100.100.3.crt` and must include `IP:10.100.100.3` in SAN. On `GIOVANNI-W11-PC`, the public certificate was imported into the current user's trusted root store so Brave/Schannel can validate the direct IP URL without `-k`.
 +- The GUID agent pill bar exposes collapsed agents by accessible name so Hermes/Codex can be selected by keyboard and automation.
 +- Mobile GUID controls wrap visibly instead of hiding later model/effort/permission or intent options behind horizontal overflow.
 +- The left sidebar never exposes a bottom horizontal scrollbar; long recents and footer controls truncate or compact inside the available width.
@@ -162,14 +166,18 @@ index 000000000..d895be085
 +bash scripts/atius-build-renderer-overlay.sh
 +sudo systemctl restart wayland.service
 +systemctl is-active wayland.service
++systemctl is-active wayland-https-proxy.service
 +curl -fsS -o /dev/null -w "http=%{http_code}\n" http://127.0.0.1:25750/
++curl -fsS -o /dev/null -w "https=%{http_code}\n" https://10.100.100.3:25725/
 +journalctl -u wayland.service --since "5 minutes ago" --no-pager | grep -E "AgentRegistry|found 4 agents|Serving renderer|WebUI running"
 +```
 +
 +Expected runtime signals:
 +
 +- `wayland.service` is `active`
++- `wayland-https-proxy.service` is `active`
 +- local HTTP on `127.0.0.1:25750` returns `200`
++- direct VPN HTTPS on `10.100.100.3:25725` returns `200` from a trusted Windows client
 +- startup logs include `found 4 agents: Wayland Core, Gemini CLI, Codex, Hermes Agent`
 +
 +## Git/GitHub note
@@ -344,14 +352,19 @@ index 000000000..8c9904dda
 +PY
 diff --git a/scripts/atius-postinstall-hook.sh b/scripts/atius-postinstall-hook.sh
 new file mode 100755
-index 000000000..b1b94032e
+index 000000000..4d093a8ad
 --- /dev/null
 +++ b/scripts/atius-postinstall-hook.sh
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,80 @@
 +#!/usr/bin/env bash
 +set -euo pipefail
 +ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 +BUN_BIN="/opt/Wayland/resources/bundled-bun/linux-arm64/bun"
++NODE_BIN="/usr/local/bin/node"
++WAYLAND_HTTP_PORT=25750
++WAYLAND_HTTPS_PORT=25725
++WAYLAND_TLS_CERT="/etc/wayland/tls/wayland-10.100.100.3.crt"
++WAYLAND_TLS_KEY="/etc/wayland/tls/wayland-10.100.100.3.key"
 +sudo setfacl -m u:wayland:rx /home/ubuntu
 +sudo setfacl -m u:wayland:rx /home/ubuntu/GitHub
 +sudo setfacl -R -m u:wayland:rx "$ROOT"
@@ -368,19 +381,61 @@ index 000000000..b1b94032e
 +Environment=LOGS_DIR=/var/lib/wayland/.config/Wayland/logs
 +Environment=NODE_ENV=production
 +Environment=ALLOW_REMOTE=true
-+Environment=PORT=25808
++Environment=PORT=${WAYLAND_HTTP_PORT}
 +Environment=SERVER_BASE_URL=https://wayland.atius.com.br
-+Environment=WAYLAND_ALLOWED_ORIGINS=https://wayland.atius.com.br
++Environment=WAYLAND_ALLOWED_ORIGINS=https://wayland.atius.com.br,http://10.100.100.3:${WAYLAND_HTTP_PORT},http://10.1.1.3:${WAYLAND_HTTP_PORT},http://10.1.1.7:${WAYLAND_HTTP_PORT},https://10.100.100.3:${WAYLAND_HTTPS_PORT},https://10.1.1.3:${WAYLAND_HTTPS_PORT},https://10.1.1.7:${WAYLAND_HTTPS_PORT}
 +Environment=WAYLAND_OPERATOR_CIDRS=10.1.1.1/32
 +Environment=WAYLAND_DISABLE_AUTO_UPDATE=1
 +Environment=PATH=/opt/Wayland/resources/bundled-bun/linux-arm64:/var/lib/wayland/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/snap/bin
 +ExecStart=${BUN_BIN} ${ROOT}/dist-server/server.mjs
 +TimeoutStartSec=180
 +CONF
++sudo install -d -m 0750 -o root -g wayland /etc/wayland/tls
++if [[ ! -f "$WAYLAND_TLS_CERT" ]] || ! sudo openssl x509 -in "$WAYLAND_TLS_CERT" -noout -ext subjectAltName 2>/dev/null | grep -q 'IP Address:10.100.100.3'; then
++  sudo openssl req -x509 -newkey rsa:2048 -sha256 -days 825 -nodes \
++    -keyout "$WAYLAND_TLS_KEY" \
++    -out "$WAYLAND_TLS_CERT" \
++    -subj '/CN=10.100.100.3' \
++    -addext 'subjectAltName=IP:10.100.100.3,DNS:atius-srv-3.atius.internal,DNS:wayland.atius.com.br' \
++    -addext 'basicConstraints=critical,CA:false' \
++    -addext 'keyUsage=critical,digitalSignature,keyEncipherment' \
++    -addext 'extendedKeyUsage=serverAuth'
++fi
++sudo chown root:wayland "$WAYLAND_TLS_KEY" "$WAYLAND_TLS_CERT"
++sudo chmod 0640 "$WAYLAND_TLS_KEY"
++sudo chmod 0644 "$WAYLAND_TLS_CERT"
++sudo install -m 0755 -o root -g root "$ROOT/scripts/atius-wayland-https-proxy.js" /usr/local/lib/wayland-https-proxy.js
++sudo tee /etc/systemd/system/wayland-https-proxy.service >/dev/null <<CONF
++[Unit]
++Description=Wayland HTTPS reverse proxy for VPN access
++After=network-online.target wayland.service
++Wants=network-online.target
++Requires=wayland.service
++
++[Service]
++Type=simple
++User=wayland
++Group=wayland
++Environment=NODE_ENV=production
++Environment=WAYLAND_HTTPS_HOST=0.0.0.0
++Environment=WAYLAND_HTTPS_PORT=${WAYLAND_HTTPS_PORT}
++Environment=WAYLAND_HTTP_HOST=127.0.0.1
++Environment=WAYLAND_HTTP_PORT=${WAYLAND_HTTP_PORT}
++Environment=WAYLAND_TLS_CERT=${WAYLAND_TLS_CERT}
++Environment=WAYLAND_TLS_KEY=${WAYLAND_TLS_KEY}
++ExecStart=${NODE_BIN} /usr/local/lib/wayland-https-proxy.js
++Restart=on-failure
++RestartSec=5
++
++[Install]
++WantedBy=multi-user.target
++CONF
 +sudo systemctl disable --now wayland-atius-overlay.path wayland-atius-overlay.service >/dev/null 2>&1 || true
 +sudo systemctl daemon-reload
 +bash "$ROOT/scripts/atius-build-renderer-overlay.sh"
 +sudo systemctl restart wayland.service
++sudo systemctl enable --now wayland-https-proxy.service
++sudo systemctl restart wayland-https-proxy.service
 diff --git a/scripts/atius-reapply-renderer-overlay.sh b/scripts/atius-reapply-renderer-overlay.sh
 new file mode 100755
 index 000000000..171b72c4f
@@ -394,10 +449,10 @@ index 000000000..171b72c4f
 +bash "$ROOT/scripts/atius-build-renderer-overlay.sh"
 diff --git a/scripts/atius-refresh-source-patch.sh b/scripts/atius-refresh-source-patch.sh
 new file mode 100755
-index 000000000..0d117c868
+index 000000000..4c4ba445c
 --- /dev/null
 +++ b/scripts/atius-refresh-source-patch.sh
-@@ -0,0 +1,153 @@
+@@ -0,0 +1,154 @@
 +#!/usr/bin/env bash
 +set -euo pipefail
 +ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -423,6 +478,7 @@ index 000000000..0d117c868
 +  scripts/atius-refresh-source-patch.sh
 +  scripts/atius-reapply-renderer-overlay.sh
 +  scripts/atius-update.sh
++  scripts/atius-wayland-https-proxy.js
 +  src/common/adapter/ipcBridge.ts
 +  src/common/config/storage.ts
 +  src/common/types/codex/codexModes.ts
