@@ -142,6 +142,25 @@ describe('materializeNativeCodexHome (#536 scoped CODEX_HOME)', () => {
     expect(parsedUser.sandbox_mode).toBe('read-only');
   });
 
+  it('can apply only service_tier while preserving Custom(config.toml) sandbox settings', async () => {
+    await writeFile(
+      userConfig,
+      ['model = "gpt-5.5"', 'sandbox_mode = "danger-full-access"', '', '[tools]', 'web_search = true', ''].join('\n'),
+      'utf8'
+    );
+
+    const home = await materializeNativeCodexHome(userDataDir, null, userConfig, userAuth, 'priority');
+    const parsed = parseToml(await readScopedConfig(home)) as {
+      sandbox_mode?: string;
+      service_tier?: string;
+      tools?: { web_search?: boolean };
+    };
+
+    expect(parsed.sandbox_mode).toBe('danger-full-access');
+    expect(parsed.service_tier).toBe('priority');
+    expect(parsed.tools?.web_search).toBe(true);
+  });
+
   it("symlinks the scoped auth.json at the user's real auth.json (native login survives)", async () => {
     await writeFile(userConfig, 'model = "gpt-5"\n', 'utf8');
     await writeFile(userAuth, JSON.stringify({ tokens: { access_token: 'acc' } }), 'utf8');

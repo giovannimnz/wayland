@@ -442,6 +442,11 @@
     "connectProvider": "Connect a provider",
     "manageModels": "Manage models",
     "effortXhigh": "XHigh",
-    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
+    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
+    "speed": "Speed",
+    "speedDefault": "Default",
+    "speedDefaultDescription": "Default speed",
+    "speedFast": "Fast",
+    "speedFastDescription": "1.5x speed, increased usage"
   }
 }

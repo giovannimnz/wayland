@@ -56,4 +56,26 @@ describe('materializeFluxCodexHome - per-conversation effort', () => {
     const config = await readConfig(home);
     expect(config).not.toContain('model_reasoning_effort');
   });
+
+  it('emits service_tier only for normalized Codex tiers', async () => {
+    const priorityHome = await materializeFluxCodexHome(
+      join(dir, 'priority'),
+      'workspace-write',
+      undefined,
+      noUserConfig,
+      undefined,
+      'priority'
+    );
+    expect(await readConfig(priorityHome)).toContain('service_tier = "priority"');
+
+    const invalidHome = await materializeFluxCodexHome(
+      join(dir, 'invalid'),
+      'workspace-write',
+      undefined,
+      noUserConfig,
+      undefined,
+      'fast' as never
+    );
+    expect(await readConfig(invalidHome)).not.toContain('service_tier');
+  });
 });

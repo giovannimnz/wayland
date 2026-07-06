@@ -217,6 +217,8 @@ const baseProps = {
   setSelectedAcpModel: vi.fn(),
   selectedAcpEffort: null,
   setSelectedAcpEffort: vi.fn(),
+  selectedAcpServiceTier: null,
+  setSelectedAcpServiceTier: vi.fn(),
   cachedConfigOptions: [],
   onConfigOptionSelect: vi.fn(),
 };
@@ -232,6 +234,7 @@ beforeEach(() => {
   baseProps.setCurrentModel.mockClear();
   baseProps.setSelectedAcpModel.mockClear();
   baseProps.setSelectedAcpEffort.mockClear();
+  baseProps.setSelectedAcpServiceTier.mockClear();
   baseProps.onConfigOptionSelect.mockClear();
 });
 
@@ -530,6 +533,7 @@ describe('GuidModelSelector home picker', () => {
     const fireEventClick = (await import('@testing-library/react')).fireEvent.click;
     const setSelectedAcpModel = vi.fn();
     const setSelectedAcpEffort = vi.fn();
+    const setSelectedAcpServiceTier = vi.fn();
     const onConfigOptionSelect = vi.fn();
     const acpInfo = {
       currentModelId: 'gpt-5.5/xhigh',
@@ -554,8 +558,10 @@ describe('GuidModelSelector home picker', () => {
         currentAcpCachedModelInfo={acpInfo}
         selectedAcpModel='gpt-5.5/xhigh'
         selectedAcpEffort='xhigh'
+        selectedAcpServiceTier='normal'
         setSelectedAcpModel={setSelectedAcpModel}
         setSelectedAcpEffort={setSelectedAcpEffort}
+        setSelectedAcpServiceTier={setSelectedAcpServiceTier}
         cachedConfigOptions={[
           {
             id: 'reasoning_effort',
@@ -567,6 +573,16 @@ describe('GuidModelSelector home picker', () => {
               { value: 'medium', name: 'Medium' },
               { value: 'high', name: 'High' },
               { value: 'xhigh', name: 'XHigh' },
+            ],
+          },
+          {
+            id: 'service_tier',
+            category: 'service_tier',
+            type: 'select',
+            currentValue: 'normal',
+            options: [
+              { value: 'normal', name: 'Default' },
+              { value: 'priority', name: 'Fast' },
             ],
           },
         ]}
@@ -584,6 +600,40 @@ describe('GuidModelSelector home picker', () => {
     fireEventClick(screen.getByText('conversation.modelSelector.effortLow'));
     expect(setSelectedAcpEffort).toHaveBeenCalledWith('low');
     expect(onConfigOptionSelect).toHaveBeenCalledWith('reasoning_effort', 'low');
+
+    expect(screen.getByText('conversation.modelSelector.speed')).toBeInTheDocument();
+    fireEventClick(screen.getByText('conversation.modelSelector.speedFast'));
+    expect(setSelectedAcpServiceTier).toHaveBeenCalledWith('priority');
+    expect(onConfigOptionSelect).toHaveBeenCalledWith('service_tier', 'priority');
+  });
+
+  it('does not show a Hermes speed selector unless the ACP backend advertises service_tier', async () => {
+    mockCuratedForAgent.mockResolvedValue([]);
+    const acpInfo = {
+      currentModelId: 'gpt-5.4',
+      currentModelLabel: 'gpt-5.4',
+      availableModels: [{ id: 'gpt-5.4', label: 'gpt-5.4' }],
+      canSwitch: true,
+      source: 'models' as const,
+      sourceDetail: 'hermes-stream' as const,
+    };
+
+    render(
+      <GuidModelSelector
+        {...baseProps}
+        isGeminiMode={false}
+        agentKey='hermes'
+        currentAcpCachedModelInfo={acpInfo}
+        selectedAcpModel='gpt-5.4'
+        selectedAcpEffort='xhigh'
+        selectedAcpServiceTier={null}
+        cachedConfigOptions={[]}
+      />
+    );
+
+    expect(await screen.findByText('gpt-5.4')).toBeInTheDocument();
+    expect(screen.queryByText('conversation.modelSelector.speedDefault')).not.toBeInTheDocument();
+    expect(screen.queryByText('conversation.modelSelector.speedFast')).not.toBeInTheDocument();
   });
 
   it('passes the non-secret chat-start handle through to setCurrentModel (audit C4)', async () => {

@@ -345,7 +345,7 @@
 .actionConfigGroup {
   display: inline-flex;
   align-items: center;
-  gap: 24px;
+  gap: 18px;
   min-width: 0;
   flex: 0 1 auto;
 }
@@ -358,7 +358,7 @@
   content: '';
   position: absolute;
   top: 50%;
-  right: -12px;
+  right: -9px;
   width: 1px;
   height: 18px;
   transform: translateY(-50%);
@@ -376,6 +376,12 @@
   min-height: 28px !important;
 }
 
+.actionConfigGroup :global(.guid-config-btn) {
+  max-width: clamp(72px, 18vw, 190px);
+  min-width: 0 !important;
+  font-size: 13px !important;
+}
+
 .actionTools :global(.sendbox-model-btn:hover) {
   background-color: transparent !important;
   border: none !important;
@@ -385,10 +391,15 @@
 
 .actionConfigGroup :global(.sendbox-model-btn .arco-btn-content) {
   gap: 0 !important;
+  min-width: 0 !important;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .actionConfigGroup :global(.sendbox-model-btn .arco-btn-content > span:first-child) {
   gap: 6px !important;
+  min-width: 0 !important;
+  max-width: 100%;
 }
 
 .actionConfigGroup :global([data-testid='mode-selector']) {
@@ -411,6 +422,15 @@
 }
 
 @media (max-width: 1200px) {
+  .actionConfigGroup {
+    gap: 14px;
+  }
+
+  .actionConfigGroup :global(.guid-config-btn) {
+    max-width: clamp(68px, 16vw, 168px);
+    padding-inline: 7px !important;
+  }
+
   .actionConfigGroup :global([data-testid='mode-selector']) {
     flex-basis: 240px;
     max-width: 240px;
@@ -520,8 +540,13 @@
   }
 
   .actionConfigGroup {
-    gap: 12px;
+    gap: 10px;
     max-width: 100%;
+  }
+
+  .actionConfigGroup :global(.guid-config-btn) {
+    max-width: min(178px, calc(100vw - 96px));
+    font-size: 12.5px !important;
   }
 
   .actionConfigGroup :global([data-testid='mode-selector']) {
@@ -530,7 +555,7 @@
   }
 
   .actionConfigGroupWithDivider > :first-child::after {
-    right: -6px;
+    right: -5px;
     height: 16px;
   }
 

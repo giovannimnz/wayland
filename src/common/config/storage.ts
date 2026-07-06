@@ -532,6 +532,8 @@ export type TChatConversation =
           projectId?: string;
           /** Per-conversation reasoning effort (Claude-ACP `effortLevel`). Absent => backend default. */
           effort?: 'low' | 'medium' | 'high' | 'xhigh';
+          /** Per-conversation service tier / speed. `normal` = default, `priority` = faster Codex tier. */
+          serviceTier?: 'normal' | 'priority';
         }
       >,
       'model'
@@ -569,6 +571,8 @@ export type TChatConversation =
           projectId?: string;
           /** Per-conversation reasoning effort (Codex `model_reasoning_effort`). Absent => backend default. */
           effort?: 'low' | 'medium' | 'high' | 'xhigh';
+          /** Per-conversation Codex service tier / speed. `normal` = default, `priority` = faster tier. */
+          serviceTier?: 'normal' | 'priority';
         }
       >,
       'model'

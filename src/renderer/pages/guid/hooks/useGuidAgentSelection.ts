@@ -9,7 +9,7 @@ import type { IProvider } from '@/common/config/storage';
 import { ConfigStorage } from '@/common/config/storage';
 import type { AcpBackendAll, AcpSessionConfigOption } from '@/common/types/acpTypes';
 import type { AcpBackend, AcpBackendConfig, AcpModelInfo, AvailableAgent, EffectiveAgentInfo } from '../types';
-import type { GuidReasoningEffort } from '../components/GuidModelSelector';
+import type { GuidReasoningEffort, GuidServiceTier } from '../components/GuidModelSelector';
 import { DETECTED_AGENTS_SWR_KEY, fetchDetectedAgents } from '@/renderer/utils/model/agentTypes';
 import { getAgentModes } from '@/renderer/utils/model/agentModes';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -42,6 +42,8 @@ export type GuidAgentSelectionResult = {
   setSelectedAcpModel: React.Dispatch<React.SetStateAction<string | null>>;
   selectedAcpEffort: GuidReasoningEffort | null;
   setSelectedAcpEffort: (effort: GuidReasoningEffort) => void;
+  selectedAcpServiceTier: GuidServiceTier | null;
+  setSelectedAcpServiceTier: (tier: GuidServiceTier) => void;
   currentAcpCachedModelInfo: AcpModelInfo | null;
   currentEffectiveAgentInfo: EffectiveAgentInfo;
   cachedConfigOptions: AcpSessionConfigOption[];
@@ -125,6 +127,7 @@ export const useGuidAgentSelection = ({
   const [acpCachedModels, setAcpCachedModels] = useState<Record<string, AcpModelInfo>>({});
   const [selectedAcpModel, _setSelectedAcpModel] = useState<string | null>(null);
   const [selectedAcpEffort, _setSelectedAcpEffort] = useState<GuidReasoningEffort | null>(null);
+  const [selectedAcpServiceTier, _setSelectedAcpServiceTier] = useState<GuidServiceTier | null>(null);
   const [cachedConfigOptions, setCachedConfigOptions] = useState<AcpSessionConfigOption[]>([]);
   const [pendingConfigOptions, setPendingConfigOptions] = useState<Record<string, string>>({});
 
@@ -157,6 +160,11 @@ export const useGuidAgentSelection = ({
   const setSelectedAcpEffort = useCallback((effort: GuidReasoningEffort) => {
     _setSelectedAcpEffort(effort);
     setPendingConfigOptions((prev) => ({ ...prev, reasoning_effort: effort }));
+  }, []);
+
+  const setSelectedAcpServiceTier = useCallback((tier: GuidServiceTier) => {
+    _setSelectedAcpServiceTier(tier);
+    setPendingConfigOptions((prev) => ({ ...prev, service_tier: tier }));
   }, []);
 
   // Wrap setSelectedAcpModel to also save preferred model to the agent's config
@@ -420,16 +428,18 @@ export const useGuidAgentSelection = ({
         const options = cached?.[backend];
         const typedOptions = Array.isArray(options) ? (options as AcpSessionConfigOption[]) : [];
         // Filter out model/mode categories - those are handled by AcpModelSelector / AgentModeSelector.
-        // Keep reasoning_effort here so the GUID can render it as a dedicated selector.
+        // Keep reasoning_effort and service_tier here so the GUID can render them as dedicated selectors.
         const filtered = typedOptions.filter((opt) => opt.category !== 'model' && opt.category !== 'mode');
         setCachedConfigOptions(filtered);
         _setSelectedAcpEffort(effortFromConfigOptions(typedOptions) ?? defaultEffortForBackend(backend));
+        _setSelectedAcpServiceTier(null);
         setPendingConfigOptions({});
       })
       .catch(() => {
         if (!isActive) return;
         setCachedConfigOptions([]);
         _setSelectedAcpEffort(defaultEffortForBackend(backend));
+        _setSelectedAcpServiceTier(null);
         setPendingConfigOptions({});
       });
     return () => {
@@ -503,6 +513,7 @@ export const useGuidAgentSelection = ({
       if (!cancelled) {
         _setSelectedAcpModel(null);
         _setSelectedAcpEffort(defaultEffortForBackend(backend));
+        _setSelectedAcpServiceTier(null);
       }
     };
 
@@ -665,6 +676,8 @@ export const useGuidAgentSelection = ({
     setSelectedAcpModel,
     selectedAcpEffort,
     setSelectedAcpEffort,
+    selectedAcpServiceTier,
+    setSelectedAcpServiceTier,
     currentAcpCachedModelInfo,
     currentEffectiveAgentInfo,
     cachedConfigOptions,

@@ -520,7 +520,12 @@
     "manageModels": "Manage models",
     "claudeSubscriptionNotice": "Claude Code runs on your Claude subscription (Anthropic), so this chat stays on Claude models. To use a different provider like ChatGPT or Gemini, start a new chat and pick that agent.",
     "effortXhigh": "XHigh",
-    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
+    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
+    "speed": "Speed",
+    "speedDefault": "Default",
+    "speedDefaultDescription": "Default speed",
+    "speedFast": "Fast",
+    "speedFastDescription": "1.5x speed, increased usage"
   },
   "tool": {
     "openGoogleConsent": "Open Google sign-in"

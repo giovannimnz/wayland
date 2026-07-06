@@ -18,6 +18,7 @@ import type { NavigateFunction } from 'react-router-dom';
 import type { AcpBackend, AvailableAgent, EffectiveAgentInfo } from '../types';
 
 type GuidReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+type GuidServiceTier = 'normal' | 'priority';
 
 export type GuidSendDeps = {
   // Input state
@@ -38,6 +39,7 @@ export type GuidSendDeps = {
   selectedMode: string;
   selectedAcpModel: string | null;
   selectedAcpEffort: GuidReasoningEffort | null;
+  selectedAcpServiceTier: GuidServiceTier | null;
   pendingConfigOptions: Record<string, string>;
   cachedConfigOptions: import('@/common/types/acpTypes').AcpSessionConfigOption[];
   currentModel: TProviderWithModel | undefined;
@@ -142,6 +144,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     selectedMode,
     selectedAcpModel,
     selectedAcpEffort,
+    selectedAcpServiceTier,
     pendingConfigOptions,
     cachedConfigOptions,
     currentModel,
@@ -462,9 +465,11 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
         console.warn(`${acpBackend} CLI not found, but proceeding to let conversation panel handle it.`);
       }
       const agentBackend = acpBackend || selectedAgent;
-      const effectivePendingConfigOptions = selectedAcpEffort
-        ? { ...pendingConfigOptions, reasoning_effort: selectedAcpEffort }
-        : pendingConfigOptions;
+      const effectivePendingConfigOptions: Record<string, string> = {
+        ...pendingConfigOptions,
+        ...(selectedAcpEffort ? { reasoning_effort: selectedAcpEffort } : {}),
+        ...(selectedAcpServiceTier ? { service_tier: selectedAcpServiceTier } : {}),
+      };
       const agentConversationParams = buildAgentConversationParams({
         backend: agentBackend,
         name: input,
@@ -492,6 +497,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
           ...sessionSkillsExtra,
           excludeBuiltinSkills,
           ...(selectedAcpEffort ? { effort: selectedAcpEffort } : {}),
+          ...(selectedAcpServiceTier ? { serviceTier: selectedAcpServiceTier } : {}),
         },
       });
 
@@ -559,6 +565,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     selectedMode,
     selectedAcpModel,
     selectedAcpEffort,
+    selectedAcpServiceTier,
     pendingConfigOptions,
     cachedConfigOptions,
     currentModel,

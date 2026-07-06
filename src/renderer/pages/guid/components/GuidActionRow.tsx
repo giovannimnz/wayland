@@ -20,6 +20,7 @@ import { iconColors } from '@/renderer/styles/colors';
 import { isElectronDesktop } from '@/renderer/utils/platform';
 import type { AcpBackend, AcpBackendConfig, AvailableAgent } from '../types';
 import PresetAgentTag, { type AgentSwitcherItem } from './PresetAgentTag';
+import { isServiceTierConfigOption } from './GuidModelSelector';
 import { Button, Message, Tooltip } from '@arco-design/web-react';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -116,7 +117,10 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
   const visibleConfigOptions = useMemo(
     () =>
       cachedConfigOptions?.filter(
-        (option) => option.id !== 'reasoning_effort' && option.category !== 'thought_level'
+        (option) =>
+          option.id !== 'reasoning_effort' &&
+          option.category !== 'thought_level' &&
+          !isServiceTierConfigOption(option)
       ) ?? [],
     [cachedConfigOptions]
   );

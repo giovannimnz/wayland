@@ -27,10 +27,10 @@ index a85d779cb..36b229afd 100644
  ## Where to put new docs
 diff --git a/docs/guides/atius-fork-runtime.md b/docs/guides/atius-fork-runtime.md
 new file mode 100644
-index 000000000..5e0b81e60
+index 000000000..7059c5407
 --- /dev/null
 +++ b/docs/guides/atius-fork-runtime.md
-@@ -0,0 +1,185 @@
+@@ -0,0 +1,186 @@
 +# Atius srv-3 fork/runtime guide
 +
 +This guide documents the ATIUS-managed source runtime served at
@@ -122,6 +122,7 @@ index 000000000..5e0b81e60
 +- ACP detection stays quiet for missing optional CLIs while detecting Codex and Hermes Agent.
 +- The GUID model picker keeps the selected Codex label even before `acp.cachedModels` exists.
 +- Codex and Hermes display model and reasoning effort as separate adjacent controls; model menus do not duplicate effort variants.
++- Codex and Hermes display a separate speed selector beside model/effort. `Padrão` maps to `service_tier=normal`; `Rápido` maps to Codex's `service_tier=priority` Fast tier.
 +- Codex permission mode includes `Custom (config.toml)` / `Personalizado(config.toml)` to delegate sandbox defaults back to the service user's Codex config.
 +- The GUID agent pill bar exposes collapsed agents by accessible name so Hermes/Codex can be selected by keyboard and automation.
 +- Mobile GUID controls wrap visibly instead of hiding later model/effort/permission or intent options behind horizontal overflow.
@@ -662,7 +663,7 @@ index d9ba0071b..6fd211ce2 100755
      print_summary
  }
 diff --git a/src/common/adapter/ipcBridge.ts b/src/common/adapter/ipcBridge.ts
-index 4f4c0a070..78fd74d64 100644
+index 4f4c0a070..7ce41c21d 100644
 --- a/src/common/adapter/ipcBridge.ts
 +++ b/src/common/adapter/ipcBridge.ts
 @@ -87,13 +87,6 @@ export type SkillStats = {
@@ -693,38 +694,47 @@ index 4f4c0a070..78fd74d64 100644
    import: {
      /** Import a skill from a local folder path. */
      folder: buildProvider<ImportResult, { srcPath: string }>('skills.import.folder'),
-@@ -1543,7 +1529,7 @@ export interface ICreateConversationParams {
+@@ -1543,7 +1529,12 @@ export interface ICreateConversationParams {
       * (Codex / WCore / Claude-ACP). Persisted on the conversation and read by
       * each backend's config builder on the next turn. Absent => backend default.
       */
 -    effort?: 'low' | 'medium' | 'high';
 +    effort?: 'low' | 'medium' | 'high' | 'xhigh';
++    /**
++     * Per-conversation Codex service tier / speed.
++     * `priority` maps to the Fast tier; absent preserves the backend default.
++     */
++    serviceTier?: 'normal' | 'priority';
      /** Team ownership - conversations with teamId are hidden from the sidebar */
      teamId?: string;
      /** Project ownership - stamps extra.projectId so the conversation lives under a project umbrella. */
 diff --git a/src/common/config/storage.ts b/src/common/config/storage.ts
-index 3d59005c5..1869dea41 100644
+index 3d59005c5..0b1562f4a 100644
 --- a/src/common/config/storage.ts
 +++ b/src/common/config/storage.ts
-@@ -531,7 +531,7 @@ export type TChatConversation =
+@@ -531,7 +531,9 @@ export type TChatConversation =
            /** Project ID this conversation belongs to (umbrella scoping). Mirrors cronJobId - read via json_extract(extra,'$.projectId'). */
            projectId?: string;
            /** Per-conversation reasoning effort (Claude-ACP `effortLevel`). Absent => backend default. */
 -          effort?: 'low' | 'medium' | 'high';
 +          effort?: 'low' | 'medium' | 'high' | 'xhigh';
++          /** Per-conversation service tier / speed. `normal` = default, `priority` = faster Codex tier. */
++          serviceTier?: 'normal' | 'priority';
          }
        >,
        'model'
-@@ -568,7 +568,7 @@ export type TChatConversation =
+@@ -568,7 +570,9 @@ export type TChatConversation =
            /** Project ID this conversation belongs to (umbrella scoping). Mirrors cronJobId - read via json_extract(extra,'$.projectId'). */
            projectId?: string;
            /** Per-conversation reasoning effort (Codex `model_reasoning_effort`). Absent => backend default. */
 -          effort?: 'low' | 'medium' | 'high';
 +          effort?: 'low' | 'medium' | 'high' | 'xhigh';
++          /** Per-conversation Codex service tier / speed. `normal` = default, `priority` = faster tier. */
++          serviceTier?: 'normal' | 'priority';
          }
        >,
        'model'
-@@ -720,7 +720,7 @@ export type TChatConversation =
+@@ -720,7 +724,7 @@ export type TChatConversation =
          /** Project ID this conversation belongs to (umbrella scoping). Mirrors cronJobId - read via json_extract(extra,'$.projectId'). */
          projectId?: string;
          /** Per-conversation reasoning effort (WCore `set_config.effort`). Absent => backend default. */
@@ -898,7 +908,7 @@ index d6e86a67a..3c2e6674a 100644
 
          let PluginClass = mod.default || mod.Plugin;
 diff --git a/src/process/task/AcpAgentManager.ts b/src/process/task/AcpAgentManager.ts
-index 09d5fa5d3..7468ee4a2 100644
+index 09d5fa5d3..1f9f4ab43 100644
 --- a/src/process/task/AcpAgentManager.ts
 +++ b/src/process/task/AcpAgentManager.ts
 @@ -4,7 +4,7 @@ import { channelEventBus } from '@process/channels/agent/ChannelEventBus';
@@ -910,16 +920,46 @@ index 09d5fa5d3..7468ee4a2 100644
  import { isAutoGuardedMode, shouldAutoApproveAcpEdit } from '@/common/types/agentModes';
  import { classifyDestructiveToolCall } from '@/common/security/destructiveCommand';
  import type { SlashCommandItem } from '@/common/chat/slash/types';
-@@ -111,7 +111,7 @@ interface AcpAgentManagerData {
+@@ -48,7 +48,9 @@ import {
+   materializeFluxCodexHome,
+   materializeNativeCodexHome,
+   normalizeCodexSandboxMode,
++  normalizeCodexServiceTier,
+   type CodexSandboxMode,
++  type CodexServiceTier,
+ } from '@process/task/codexConfig';
+ import { materializeFluxClaudeConfigDir } from '@process/task/claudeConfig';
+ import { materializeFluxHermesHome } from '@process/task/hermesConfig';
+@@ -111,7 +113,9 @@ interface AcpAgentManagerData {
    /** Pending config option selections from Guid page (applied after session creation) */
    pendingConfigOptions?: Record<string, string>;
    /** Per-conversation reasoning effort (codex/claude). Absent => backend default. */
 -  effort?: 'low' | 'medium' | 'high';
 +  effort?: 'low' | 'medium' | 'high' | 'xhigh';
++  /** Per-conversation Codex service tier / speed. `priority` selects the Fast tier. */
++  serviceTier?: CodexServiceTier;
    /** Per-conversation active MCP server ids (#348): undefined = all enabled, [] = none. */
    activeMcpServers?: string[];
  }
-@@ -689,7 +689,9 @@ ${collectedResponses.join('\n')}`;
+@@ -635,6 +639,7 @@ ${collectedResponses.join('\n')}`;
+     // surface; codex/codebuddy route separately).
+     const decision = await this.computeFluxRouting(data.backend, data.currentModelId ?? undefined);
+     this.lastRouting = decision.routing;
++    const serviceTier = normalizeCodexServiceTier(data.serviceTier);
+     if (decision.routing === 'flux') {
+       for (const k of decision.stripKeys) delete mergedEnv[k];
+       Object.assign(mergedEnv, decision.env);
+@@ -651,7 +656,8 @@ ${collectedResponses.join('\n')}`;
+             sandboxMode,
+             undefined,
+             undefined,
+-            data.effort
++            data.effort,
++            serviceTier
+           );
+           mergedEnv.CODEX_HOME = codexHome;
+         } catch (err) {
+@@ -689,7 +695,9 @@ ${collectedResponses.join('\n')}`;
            // writes the connected flux key inline into the scoped config.
            mergedEnv.HERMES_HOME = await materializeFluxHermesHome(
              app.getPath('userData'),
@@ -930,20 +970,36 @@ index 09d5fa5d3..7468ee4a2 100644
            );
          } catch (err) {
            mainWarn('[AcpAgentManager]', 'materializeFluxHermesHome failed', err);
-@@ -702,7 +704,11 @@ ${collectedResponses.join('\n')}`;
-     // writing the user's own config.toml (#536). The clone copies their config
-     // verbatim (model/provider/MCP/settings) + mirrors auth.json, overriding only
-     // sandbox_mode. Flux-routed codex already got its own scoped CODEX_HOME above.
--    if (data.backend === 'codex' && decision.routing !== 'flux') {
-+    if (
-+      data.backend === 'codex' &&
-+      decision.routing !== 'flux' &&
-+      !isCodexConfigTomlMode(data.sessionMode || this.currentMode)
-+    ) {
+@@ -698,14 +706,22 @@ ${collectedResponses.join('\n')}`;
+     }
+
+     // Native (non-Flux) codex spawns: point CODEX_HOME at a Wayland-scoped clone
+-    // of the user's ~/.codex so we can set the session sandbox mode WITHOUT ever
+-    // writing the user's own config.toml (#536). The clone copies their config
+-    // verbatim (model/provider/MCP/settings) + mirrors auth.json, overriding only
+-    // sandbox_mode. Flux-routed codex already got its own scoped CODEX_HOME above.
++    // when Wayland needs to apply a per-session sandbox or explicit speed
++    // override. In Custom(config.toml) mode, preserve the user's sandbox from the
++    // real config and materialize only `service_tier` when the user picked speed.
+     if (data.backend === 'codex' && decision.routing !== 'flux') {
++      const configTomlMode = isCodexConfigTomlMode(data.sessionMode || this.currentMode);
++      const sandboxMode = configTomlMode ? null : normalizeCodexSandboxMode(data.sandboxMode);
        try {
-         const sandboxMode = normalizeCodexSandboxMode(data.sandboxMode);
-         mergedEnv.CODEX_HOME = await materializeNativeCodexHome(app.getPath('userData'), sandboxMode);
-@@ -949,14 +955,21 @@ ${collectedResponses.join('\n')}`;
+-        const sandboxMode = normalizeCodexSandboxMode(data.sandboxMode);
+-        mergedEnv.CODEX_HOME = await materializeNativeCodexHome(app.getPath('userData'), sandboxMode);
++        if (!configTomlMode || serviceTier) {
++          mergedEnv.CODEX_HOME = await materializeNativeCodexHome(
++            app.getPath('userData'),
++            sandboxMode,
++            undefined,
++            undefined,
++            serviceTier
++          );
++        }
+       } catch (err) {
+         mainWarn('[AcpAgentManager]', 'materializeNativeCodexHome failed', err);
+       }
+@@ -949,14 +965,21 @@ ${collectedResponses.join('\n')}`;
      }
 
      if (data.backend === 'codex') {
@@ -973,15 +1029,24 @@ index 09d5fa5d3..7468ee4a2 100644
      }
 
      return { cliPath, customArgs, yoloMode };
-@@ -1427,6 +1440,7 @@ ${collectedResponses.join('\n')}`;
+@@ -1386,6 +1409,7 @@ ${collectedResponses.join('\n')}`;
+
+   initAgent(data: AcpAgentManagerData = this.options) {
+     if (this.bootstrap) return this.bootstrap;
++    data.serviceTier = normalizeCodexServiceTier(data.serviceTier) ?? undefined;
+
+     this.bootstrapping = true;
+     const bootstrapPromise = (async () => {
+@@ -1427,6 +1451,8 @@ ${collectedResponses.join('\n')}`;
            currentModelId: this.persistedModelId ?? undefined,
            sessionMode: this.currentMode,
            pendingConfigOptions: data.pendingConfigOptions,
 +          effort: data.effort,
++          serviceTier: data.serviceTier,
            // Per-conversation MCP scoping (#348): forward to loadBuiltinSessionMcpServers.
            activeMcpServers: data.activeMcpServers,
            // The read-only concierge diagnostics MCP server is Concierge-only.
-@@ -2135,7 +2149,9 @@ ${collectedResponses.join('\n')}`;
+@@ -2135,7 +2161,9 @@ ${collectedResponses.join('\n')}`;
        // spawn's scoped CODEX_HOME (materializeNativeCodexHome) carries it. We no
        // longer write the user's ~/.codex/config.toml. codex-acp has no live
        // set_mode, so the change applies on the next spawn regardless.
@@ -1055,7 +1120,7 @@ index 17ce3ae28..1cb8f3866 100644
    const configDir = join(userDataDir, 'flux-claude-home');
    const settingsPath = join(configDir, 'settings.json');
 diff --git a/src/process/task/codexConfig.ts b/src/process/task/codexConfig.ts
-index 2b5c2e30a..806ea5161 100644
+index 2b5c2e30a..abcf7fb5c 100644
 --- a/src/process/task/codexConfig.ts
 +++ b/src/process/task/codexConfig.ts
 @@ -4,7 +4,7 @@
@@ -1067,7 +1132,27 @@ index 2b5c2e30a..806ea5161 100644
  import { FLUX_AUTO_MODEL, FLUX_MODEL_DISPLAY, FLUX_MODEL_IDS, FLUX_SURFACE } from '@/common/config/flux';
  import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
  import { access, copyFile, mkdir, readFile, rm, symlink, writeFile } from 'fs/promises';
-@@ -54,6 +54,10 @@ export function getCodexSandboxModeForSessionMode(
+@@ -22,6 +22,7 @@ async function pathExists(path: string): Promise<boolean> {
+ }
+
+ export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
++export type CodexServiceTier = 'normal' | 'priority';
+
+ const isWindowsStylePath = (value: string): boolean => /^[a-zA-Z]:[\\/]/.test(value) || value.startsWith('\\\\');
+
+@@ -42,6 +43,11 @@ export function normalizeCodexSandboxMode(sandboxMode?: CodexSandboxMode | null)
+   return 'read-only';
+ }
+
++export function normalizeCodexServiceTier(serviceTier?: unknown): CodexServiceTier | null {
++  if (serviceTier === 'normal' || serviceTier === 'priority') return serviceTier;
++  return null;
++}
++
+ /**
+  * Resolve the sandbox mode for a Codex session mode. #536: with NO explicit
+  * session mode we return `read-only` (was `workspace-write`), so the app never
+@@ -54,6 +60,10 @@ export function getCodexSandboxModeForSessionMode(
    mode?: string | null,
    fallbackMode?: CodexSandboxMode | null
  ): CodexSandboxMode {
@@ -1078,15 +1163,90 @@ index 2b5c2e30a..806ea5161 100644
    if (mode) {
      return isCodexNoSandboxMode(mode) ? 'danger-full-access' : 'workspace-write';
    }
-@@ -292,7 +296,7 @@ export async function materializeFluxCodexHome(
+@@ -109,6 +119,33 @@ function setSandboxModeInConfig(content: string, sandboxMode: CodexSandboxMode):
+   return `${sandboxLine}${newline}`;
+ }
+
++/**
++ * Overwrite (or insert) top-level `service_tier` in a Wayland-owned scoped
++ * Codex config. `normal` is the default speed; `priority` matches Codex's
++ * advertised Fast tier for supported models.
++ */
++function setServiceTierInConfig(content: string, serviceTier: CodexServiceTier): string {
++  const newline = content.includes('\r\n') ? '\r\n' : '\n';
++  const tierLine = `service_tier = "${serviceTier}"`;
++
++  if (/^\s*service_tier\s*=.*$/m.test(content)) {
++    return content.replace(/^\s*service_tier\s*=.*$/m, tierLine);
++  }
++
++  const sectionIndex = content.search(/^\s*\[/m);
++  if (sectionIndex >= 0) {
++    const prefix = content.slice(0, sectionIndex).trimEnd();
++    const suffix = content.slice(sectionIndex);
++    return prefix
++      ? `${prefix}${newline}${tierLine}${newline}${newline}${suffix}`
++      : `${tierLine}${newline}${newline}${suffix}`;
++  }
++  if (content.trim().length > 0) {
++    return `${content.trimEnd()}${newline}${tierLine}${newline}`;
++  }
++  return `${tierLine}${newline}`;
++}
++
+ /**
+  * Materialize a Wayland-scoped CODEX_HOME for NATIVE (non-Flux) codex spawns and
+  * return its directory path. #536: Wayland must set the Codex sandbox mode
+@@ -142,9 +179,10 @@ function setSandboxModeInConfig(content: string, sandboxMode: CodexSandboxMode):
+  */
+ export async function materializeNativeCodexHome(
+   userDataDir: string,
+-  sandboxMode: CodexSandboxMode = 'read-only',
++  sandboxMode: CodexSandboxMode | null = 'read-only',
+   userConfigPath: string = getCodexConfigPath(),
+-  userAuthPath: string = getUserCodexAuthPath()
++  userAuthPath: string = getUserCodexAuthPath(),
++  serviceTier?: CodexServiceTier | null
+ ): Promise<string> {
+   const codexHomeDir = join(userDataDir, 'codex-home');
+   const configPath = join(codexHomeDir, 'config.toml');
+@@ -159,7 +197,11 @@ export async function materializeNativeCodexHome(
+     userConfig = '';
+   }
+
+-  const content = setSandboxModeInConfig(userConfig, sandboxMode);
++  const normalizedServiceTier = normalizeCodexServiceTier(serviceTier);
++  let content = sandboxMode ? setSandboxModeInConfig(userConfig, sandboxMode) : userConfig;
++  if (normalizedServiceTier) {
++    content = setServiceTierInConfig(content, normalizedServiceTier);
++  }
+
+   await mkdir(codexHomeDir, { recursive: true });
+   await writeFile(configPath, content, 'utf8');
+@@ -292,11 +334,14 @@ export async function materializeFluxCodexHome(
    baseURL: string = FLUX_SURFACE.responses,
    userConfigPath: string = getCodexConfigPath(),
    /** Per-conversation reasoning effort. When set, written as `model_reasoning_effort`. */
 -  effort?: 'low' | 'medium' | 'high'
-+  effort?: 'low' | 'medium' | 'high' | 'xhigh'
++  effort?: 'low' | 'medium' | 'high' | 'xhigh',
++  /** Per-conversation service tier / speed. When set, written as `service_tier`. */
++  serviceTier?: CodexServiceTier | null
  ): Promise<string> {
    const codexHomeDir = join(userDataDir, 'flux-codex-home');
    const configPath = join(codexHomeDir, 'config.toml');
+   const catalogPath = join(codexHomeDir, 'flux-model-catalog.json');
++  const normalizedServiceTier = normalizeCodexServiceTier(serviceTier);
+   let content = [
+     '# Wayland-managed CODEX_HOME for Flux-routed codex spawns.',
+     "# Selects Flux globally within this scoped home; the user's real ~/.codex",
+@@ -311,6 +356,7 @@ export async function materializeFluxCodexHome(
+     // Per-conversation reasoning effort (omitted => codex applies the model's
+     // default_reasoning_level from the catalog above).
+     ...(effort ? [`model_reasoning_effort = "${effort}"`] : []),
++    ...(normalizedServiceTier ? [`service_tier = "${normalizedServiceTier}"`] : []),
+     `sandbox_mode = "${sandboxMode}"`,
+     'suppress_unstable_features_warning = true',
+     '',
 diff --git a/src/process/task/hermesConfig.ts b/src/process/task/hermesConfig.ts
 index 4a8616bdc..1dd406778 100644
 --- a/src/process/task/hermesConfig.ts
@@ -2030,23 +2190,26 @@ index 267fd8679..fe547ec02 100644
        onCancel={handleCancel}
      />
 diff --git a/src/renderer/pages/guid/GuidPage.tsx b/src/renderer/pages/guid/GuidPage.tsx
-index 516b8989c..cdc7f9aed 100644
+index 516b8989c..fef0300ed 100644
 --- a/src/renderer/pages/guid/GuidPage.tsx
 +++ b/src/renderer/pages/guid/GuidPage.tsx
-@@ -239,6 +239,7 @@ const GuidPage: React.FC = () => {
+@@ -239,6 +239,8 @@ const GuidPage: React.FC = () => {
      isPresetAgent: agentSelection.isPresetAgent,
      selectedMode: agentSelection.selectedMode,
      selectedAcpModel: agentSelection.selectedAcpModel,
 +    selectedAcpEffort: agentSelection.selectedAcpEffort,
++    selectedAcpServiceTier: agentSelection.selectedAcpServiceTier,
      pendingConfigOptions: agentSelection.pendingConfigOptions,
      cachedConfigOptions: agentSelection.cachedConfigOptions,
      currentModel: modelSelection.currentModel,
-@@ -869,6 +870,10 @@ const GuidPage: React.FC = () => {
+@@ -869,6 +871,12 @@ const GuidPage: React.FC = () => {
        currentAcpCachedModelInfo={agentSelection.currentAcpCachedModelInfo}
        selectedAcpModel={agentSelection.selectedAcpModel}
        setSelectedAcpModel={agentSelection.setSelectedAcpModel}
 +      selectedAcpEffort={agentSelection.selectedAcpEffort}
 +      setSelectedAcpEffort={agentSelection.setSelectedAcpEffort}
++      selectedAcpServiceTier={agentSelection.selectedAcpServiceTier}
++      setSelectedAcpServiceTier={agentSelection.setSelectedAcpServiceTier}
 +      cachedConfigOptions={agentSelection.cachedConfigOptions}
 +      onConfigOptionSelect={agentSelection.setPendingConfigOption}
      />
@@ -2159,7 +2322,7 @@ index d89c8d316..d5d9c49bb 100644
            <div
              className='flex items-center justify-center cursor-pointer p-4px opacity-60 hover:opacity-100 self-center'
 diff --git a/src/renderer/pages/guid/components/GuidActionRow.tsx b/src/renderer/pages/guid/components/GuidActionRow.tsx
-index 9224d36b5..a7a2bdf5f 100644
+index 9224d36b5..b192c7ba9 100644
 --- a/src/renderer/pages/guid/components/GuidActionRow.tsx
 +++ b/src/renderer/pages/guid/components/GuidActionRow.tsx
 @@ -6,10 +6,13 @@
@@ -2177,7 +2340,15 @@ index 9224d36b5..a7a2bdf5f 100644
  import type { AcpSessionConfigOption } from '@/common/types/acpTypes';
  import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
  import { getCleanFileNames, FileService } from '@/renderer/services/FileService';
-@@ -110,11 +113,20 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -17,6 +20,7 @@ import { iconColors } from '@/renderer/styles/colors';
+ import { isElectronDesktop } from '@/renderer/utils/platform';
+ import type { AcpBackend, AcpBackendConfig, AvailableAgent } from '../types';
+ import PresetAgentTag, { type AgentSwitcherItem } from './PresetAgentTag';
++import { isServiceTierConfigOption } from './GuidModelSelector';
+ import { Button, Message, Tooltip } from '@arco-design/web-react';
+ import React, { useCallback, useMemo, useRef, useState } from 'react';
+ import { useTranslation } from 'react-i18next';
+@@ -110,11 +114,23 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
    const layout = useLayoutContext();
    const modeBackend = effectiveModeAgent || selectedAgent;
    const showModeSwitch = supportsModeSwitch(modeBackend);
@@ -2185,7 +2356,10 @@ index 9224d36b5..a7a2bdf5f 100644
 +  const visibleConfigOptions = useMemo(
 +    () =>
 +      cachedConfigOptions?.filter(
-+        (option) => option.id !== 'reasoning_effort' && option.category !== 'thought_level'
++        (option) =>
++          option.id !== 'reasoning_effort' &&
++          option.category !== 'thought_level' &&
++          !isServiceTierConfigOption(option)
 +      ) ?? [],
 +    [cachedConfigOptions]
 +  );
@@ -2199,7 +2373,7 @@ index 9224d36b5..a7a2bdf5f 100644
 
    const handleLocalFileChange = useCallback(
      async (e: React.ChangeEvent<HTMLInputElement>) => {
-@@ -165,6 +177,20 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -165,6 +181,20 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
      return [{ key: 'file', label: t('conversation.welcome.uploadFile'), onClick: openHostFilePicker }];
    }, [isWebUI, openHostFilePicker, t]);
 
@@ -2220,7 +2394,7 @@ index 9224d36b5..a7a2bdf5f 100644
    return (
      <div className={styles.actionRow}>
        <div className={styles.actionTools}>
-@@ -200,30 +226,14 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -200,30 +230,14 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
            )}
          </div>
 
@@ -2254,7 +2428,7 @@ index 9224d36b5..a7a2bdf5f 100644
 
          <div
            className={`${styles.actionConfigGroup} ${configOptionCount > 1 ? styles.actionConfigGroupWithDivider : ''}`}
-@@ -245,7 +255,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -245,7 +259,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
            <AcpConfigSelector
              backend={configOptionsBackend}
              buttonClassName='guid-config-btn'
@@ -2263,7 +2437,7 @@ index 9224d36b5..a7a2bdf5f 100644
              leadingIcon={<Brain size={14} color={iconColors.secondary} />}
              onOptionSelect={onConfigOptionSelect}
            />
-@@ -291,6 +301,17 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -291,6 +305,17 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
            </span>
          </Tooltip>
        </div>
@@ -2282,7 +2456,7 @@ index 9224d36b5..a7a2bdf5f 100644
    );
  };
 diff --git a/src/renderer/pages/guid/components/GuidModelSelector.tsx b/src/renderer/pages/guid/components/GuidModelSelector.tsx
-index d2bfc8f43..01dcade93 100644
+index d2bfc8f43..df01eced3 100644
 --- a/src/renderer/pages/guid/components/GuidModelSelector.tsx
 +++ b/src/renderer/pages/guid/components/GuidModelSelector.tsx
 @@ -4,13 +4,13 @@
@@ -2290,7 +2464,7 @@ index d2bfc8f43..01dcade93 100644
   */
 
 -import { Brain, ChevronDown } from 'lucide-react';
-+import { Brain, ChevronDown, Zap } from 'lucide-react';
++import { Brain, ChevronDown, Gauge, Zap } from 'lucide-react';
  import { Button, Dropdown, Menu, Message, Tooltip } from '@arco-design/web-react';
  import { ipcBridge } from '@/common';
  import type { IProvider, TProviderWithModel } from '@/common/config/storage';
@@ -2301,20 +2475,25 @@ index d2bfc8f43..01dcade93 100644
  import { useFluxConnected } from '@/renderer/hooks/useFluxConnected';
  import { peekCuratedForAgent, useModelRegistry } from '@/renderer/hooks/useModelRegistry';
  import { useUsageTelemetry } from '@/renderer/hooks/usage/useUsageTelemetry';
-@@ -43,8 +43,59 @@ type GuidModelSelectorProps = {
+@@ -43,8 +43,87 @@ type GuidModelSelectorProps = {
    currentAcpCachedModelInfo: AcpModelInfo | null;
    selectedAcpModel: string | null;
    setSelectedAcpModel: React.Dispatch<React.SetStateAction<string | null>>;
 +  selectedAcpEffort?: GuidReasoningEffort | null;
 +  setSelectedAcpEffort?: (effort: GuidReasoningEffort) => void;
++  selectedAcpServiceTier?: GuidServiceTier | null;
++  setSelectedAcpServiceTier?: (tier: GuidServiceTier) => void;
 +  cachedConfigOptions?: AcpSessionConfigOption[];
 +  onConfigOptionSelect?: (configId: string, value: string) => void;
  };
 
 +export type GuidReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
++export type GuidServiceTier = 'normal' | 'priority';
 +
 +const GUID_REASONING_EFFORTS: GuidReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
++const GUID_SERVICE_TIERS: GuidServiceTier[] = ['normal', 'priority'];
 +const REASONING_EFFORT_CONFIG_ID = 'reasoning_effort';
++const SERVICE_TIER_CONFIG_ID = 'service_tier';
 +const ACP_MODEL_EFFORT_SUFFIX = /\/(low|medium|high|xhigh)$/i;
 +const ACP_MODEL_LABEL_EFFORT_SUFFIX = /\s+\((low|medium|high|xhigh)\)$/i;
 +
@@ -2323,6 +2502,14 @@ index d2bfc8f43..01dcade93 100644
 +
 +const normalizeEffort = (value: unknown): GuidReasoningEffort | null =>
 +  isGuidReasoningEffort(value) ? (value.toLowerCase() as GuidReasoningEffort) : null;
++
++const normalizeServiceTier = (value: unknown): GuidServiceTier | null => {
++  if (typeof value !== 'string') return null;
++  const normalized = value.toLowerCase();
++  if (normalized === 'normal' || normalized === 'default' || normalized === 'standard') return 'normal';
++  if (normalized === 'priority' || normalized === 'fast') return 'priority';
++  return null;
++};
 +
 +export function splitAcpModelEffort(
 +  modelId: string | null | undefined,
@@ -2355,13 +2542,28 @@ index d2bfc8f43..01dcade93 100644
 +      option.name?.toLowerCase().includes('reasoning')
 +  );
 +
++export const isServiceTierConfigOption = (option: AcpSessionConfigOption): boolean =>
++  option.id === SERVICE_TIER_CONFIG_ID ||
++  option.category === 'service_tier' ||
++  option.name?.toLowerCase().includes('speed') === true ||
++  option.name?.toLowerCase().includes('service tier') === true;
++
++const getServiceTierOption = (options: AcpSessionConfigOption[] | undefined): AcpSessionConfigOption | undefined =>
++  options?.find(isServiceTierConfigOption);
++
 +const effortLabelKey = (effort: GuidReasoningEffort): string =>
 +  `conversation.modelSelector.effort${effort === 'xhigh' ? 'Xhigh' : effort.charAt(0).toUpperCase() + effort.slice(1)}`;
++
++const serviceTierLabelKey = (tier: GuidServiceTier): string =>
++  `conversation.modelSelector.speed${tier === 'priority' ? 'Fast' : 'Default'}`;
++
++const serviceTierDescriptionKey = (tier: GuidServiceTier): string =>
++  `conversation.modelSelector.speed${tier === 'priority' ? 'Fast' : 'Default'}Description`;
 +
  /**
   * Map a model's blended USD-per-million-token cost to a $ / $$ / $$$ tier.
   *
-@@ -92,6 +143,33 @@ export const firstSafeCuratedModel = (list: CuratedModel[]): CuratedModel | unde
+@@ -92,6 +171,33 @@ export const firstSafeCuratedModel = (list: CuratedModel[]): CuratedModel | unde
    list.find((m) => m.enabled && !isExperimentalCurated(m)) ??
    list.find((m) => !isExperimentalCurated(m));
 
@@ -2395,18 +2597,20 @@ index d2bfc8f43..01dcade93 100644
  const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
    isGeminiMode,
    modelList,
-@@ -101,6 +179,10 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -101,6 +207,12 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
    currentAcpCachedModelInfo,
    selectedAcpModel,
    setSelectedAcpModel,
 +  selectedAcpEffort = null,
 +  setSelectedAcpEffort,
++  selectedAcpServiceTier = null,
++  setSelectedAcpServiceTier,
 +  cachedConfigOptions,
 +  onConfigOptionSelect,
  }) => {
    const { t } = useTranslation();
    const navigate = useNavigate();
-@@ -415,27 +497,77 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -415,27 +527,111 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
    // live GPT models). For an enumerable CLI the curated `id` IS the model name
    // the CLI expects, so `setSelectedAcpModel(model.id)` reaches the send path
    // identically to a cached entry. This is what kills the cold-start dead-end.
@@ -2430,9 +2634,16 @@ index d2bfc8f43..01dcade93 100644
 +    [cachedConfigOptions]
 +  );
 +
++  const serviceTierOption = React.useMemo(() => getServiceTierOption(cachedConfigOptions), [cachedConfigOptions]);
++
 +  const configEffort = React.useMemo(
 +    () => normalizeEffort(reasoningEffortOption?.currentValue || reasoningEffortOption?.selectedValue),
 +    [reasoningEffortOption]
++  );
++
++  const configServiceTier = React.useMemo(
++    () => normalizeServiceTier(serviceTierOption?.currentValue || serviceTierOption?.selectedValue),
++    [serviceTierOption]
 +  );
 +
 +  const modelEffort = React.useMemo(
@@ -2462,6 +2673,20 @@ index d2bfc8f43..01dcade93 100644
 +    modelEffort ||
 +    (effortOptions.includes('xhigh') ? 'xhigh' : (effortOptions[0] ?? null));
 +
++  const serviceTierOptions = React.useMemo<GuidServiceTier[]>(() => {
++    const fromConfig = serviceTierOption?.options
++      ?.map((option) => normalizeServiceTier(option.value))
++      .filter((value): value is GuidServiceTier => Boolean(value));
++    if (fromConfig && fromConfig.length > 0) return Array.from(new Set(fromConfig));
++    if (agentKey === 'codex') return GUID_SERVICE_TIERS;
++    return [];
++  }, [agentKey, serviceTierOption]);
++
++  const currentServiceTier =
++    selectedAcpServiceTier ||
++    configServiceTier ||
++    (serviceTierOptions.includes('normal') ? 'normal' : (serviceTierOptions[0] ?? null));
++
 +  const handleSelectEffort = React.useCallback(
 +    (effort: GuidReasoningEffort) => {
 +      setSelectedAcpEffort?.(effort);
@@ -2473,6 +2698,19 @@ index d2bfc8f43..01dcade93 100644
 +      });
 +    },
 +    [agentKey, onConfigOptionSelect, recordTelemetry, setSelectedAcpEffort]
++  );
++
++  const handleSelectServiceTier = React.useCallback(
++    (tier: GuidServiceTier) => {
++      setSelectedAcpServiceTier?.(tier);
++      onConfigOptionSelect?.(SERVICE_TIER_CONFIG_ID, tier);
++      recordTelemetry({
++        eventType: 'guid.model_selected',
++        cliBackend: agentKey,
++        metadata: { serviceTier: tier, source: 'acp-service-tier' },
++      });
++    },
++    [agentKey, onConfigOptionSelect, recordTelemetry, setSelectedAcpServiceTier]
 +  );
 +
    const acpSelectedLabel = React.useMemo(() => {
@@ -2498,7 +2736,7 @@ index d2bfc8f43..01dcade93 100644
 
    const acpButtonLabel = React.useMemo(() => {
      return getModelDisplayLabel({
-@@ -454,6 +586,49 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -454,6 +650,95 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
      [acpButtonLabel, acpSourceLabel]
    );
 
@@ -2506,6 +2744,12 @@ index d2bfc8f43..01dcade93 100644
 +    ? t(effortLabelKey(currentEffort), {
 +        defaultValue:
 +          currentEffort === 'xhigh' ? 'XHigh' : currentEffort.charAt(0).toUpperCase() + currentEffort.slice(1),
++      })
++    : '';
++
++  const currentServiceTierLabel = currentServiceTier
++    ? t(serviceTierLabelKey(currentServiceTier), {
++        defaultValue: currentServiceTier === 'priority' ? 'Fast' : 'Default',
 +      })
 +    : '';
 +
@@ -2545,10 +2789,59 @@ index d2bfc8f43..01dcade93 100644
 +      </Dropdown>
 +    ) : null;
 +
++  const speedSelectorNode =
++    serviceTierOptions.length > 0 && currentServiceTier ? (
++      <Dropdown
++        trigger='click'
++        droplist={
++          <Menu selectedKeys={[currentServiceTier]}>
++            <Menu.ItemGroup title={t('conversation.modelSelector.speed')}>
++              {serviceTierOptions.map((tier) => {
++                const label = t(serviceTierLabelKey(tier), {
++                  defaultValue: tier === 'priority' ? 'Fast' : 'Default',
++                });
++                const description = t(serviceTierDescriptionKey(tier), {
++                  defaultValue: tier === 'priority' ? '1.5x speed, increased usage' : 'Default speed',
++                });
++                return (
++                  <Menu.Item key={tier} onClick={() => handleSelectServiceTier(tier)}>
++                    <div className='flex items-start gap-8px w-full'>
++                      {tier === currentServiceTier && <span className='text-primary shrink-0 mt-2px'>✓</span>}
++                      <span className={`flex flex-col min-w-0 ${tier !== currentServiceTier ? 'ml-16px' : ''}`}>
++                        <span className='truncate'>{label}</span>
++                        <span className='text-12px text-t-tertiary truncate'>{description}</span>
++                      </span>
++                    </div>
++                  </Menu.Item>
++                );
++              })}
++            </Menu.ItemGroup>
++          </Menu>
++        }
++      >
++        <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
++          <span className='flex items-center gap-6px min-w-0'>
++            <Gauge size={14} color={iconColors.secondary} className='shrink-0' />
++            <span className='truncate'>{currentServiceTierLabel}</span>
++            <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
++          </span>
++        </Button>
++      </Dropdown>
++    ) : null;
++
    // ── Provider-based agents (Gemini / Wayland Core) - three-tier picker ────
    if (isGeminiMode) {
      return (
-@@ -500,72 +675,75 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -479,7 +764,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+         <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
+           <span className='flex items-center gap-6px min-w-0'>
+             <Brain size={14} color={iconColors.secondary} className='shrink-0' />
+-            <span>{curatedButtonLabel}</span>
++            <span className='truncate min-w-0'>{curatedButtonLabel}</span>
+             <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
+           </span>
+         </Button>
+@@ -500,72 +785,76 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
        </Menu.Item>
      );
      return (
@@ -2669,12 +2962,13 @@ index d2bfc8f43..01dcade93 100644
 +          <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
 +            <span className='flex items-center gap-6px min-w-0'>
 +              <Brain size={14} color={iconColors.secondary} className='shrink-0' />
-+              <span>{acpButtonDisplayLabel}</span>
++              <span className='truncate min-w-0'>{acpButtonDisplayLabel}</span>
 +              <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
 +            </span>
 +          </Button>
 +        </Dropdown>
 +        {effortSelectorNode}
++        {speedSelectorNode}
 +      </>
      );
    }
@@ -2732,27 +3026,29 @@ index 5f8854113..5246d3351 100644
    }
  }
 diff --git a/src/renderer/pages/guid/hooks/useGuidAgentSelection.ts b/src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
-index 2628b8146..73f4e2870 100644
+index 2628b8146..5f51d876f 100644
 --- a/src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
 +++ b/src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
 @@ -9,6 +9,7 @@ import type { IProvider } from '@/common/config/storage';
  import { ConfigStorage } from '@/common/config/storage';
  import type { AcpBackendAll, AcpSessionConfigOption } from '@/common/types/acpTypes';
  import type { AcpBackend, AcpBackendConfig, AcpModelInfo, AvailableAgent, EffectiveAgentInfo } from '../types';
-+import type { GuidReasoningEffort } from '../components/GuidModelSelector';
++import type { GuidReasoningEffort, GuidServiceTier } from '../components/GuidModelSelector';
  import { DETECTED_AGENTS_SWR_KEY, fetchDetectedAgents } from '@/renderer/utils/model/agentTypes';
  import { getAgentModes } from '@/renderer/utils/model/agentModes';
  import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-@@ -39,6 +40,8 @@ export type GuidAgentSelectionResult = {
+@@ -39,6 +40,10 @@ export type GuidAgentSelectionResult = {
    acpCachedModels: Record<string, AcpModelInfo>;
    selectedAcpModel: string | null;
    setSelectedAcpModel: React.Dispatch<React.SetStateAction<string | null>>;
 +  selectedAcpEffort: GuidReasoningEffort | null;
 +  setSelectedAcpEffort: (effort: GuidReasoningEffort) => void;
++  selectedAcpServiceTier: GuidServiceTier | null;
++  setSelectedAcpServiceTier: (tier: GuidServiceTier) => void;
    currentAcpCachedModelInfo: AcpModelInfo | null;
    currentEffectiveAgentInfo: EffectiveAgentInfo;
    cachedConfigOptions: AcpSessionConfigOption[];
-@@ -65,6 +68,34 @@ export type GuidAgentSelectionResult = {
+@@ -65,6 +70,34 @@ export type GuidAgentSelectionResult = {
    customAgentAvatarMap: Map<string, string | undefined>;
  };
 
@@ -2787,21 +3083,27 @@ index 2628b8146..73f4e2870 100644
  type UseGuidAgentSelectionOptions = {
    modelList: IProvider[];
    isGoogleAuth: boolean;
-@@ -93,6 +124,7 @@ export const useGuidAgentSelection = ({
+@@ -93,6 +126,8 @@ export const useGuidAgentSelection = ({
    const initialRestoreDoneRef = useRef(false);
    const [acpCachedModels, setAcpCachedModels] = useState<Record<string, AcpModelInfo>>({});
    const [selectedAcpModel, _setSelectedAcpModel] = useState<string | null>(null);
 +  const [selectedAcpEffort, _setSelectedAcpEffort] = useState<GuidReasoningEffort | null>(null);
++  const [selectedAcpServiceTier, _setSelectedAcpServiceTier] = useState<GuidServiceTier | null>(null);
    const [cachedConfigOptions, setCachedConfigOptions] = useState<AcpSessionConfigOption[]>([]);
    const [pendingConfigOptions, setPendingConfigOptions] = useState<Record<string, string>>({});
 
-@@ -122,10 +154,17 @@ export const useGuidAgentSelection = ({
+@@ -122,10 +157,22 @@ export const useGuidAgentSelection = ({
      setPendingConfigOptions((prev) => ({ ...prev, [configId]: value }));
    }, []);
 
 +  const setSelectedAcpEffort = useCallback((effort: GuidReasoningEffort) => {
 +    _setSelectedAcpEffort(effort);
 +    setPendingConfigOptions((prev) => ({ ...prev, reasoning_effort: effort }));
++  }, []);
++
++  const setSelectedAcpServiceTier = useCallback((tier: GuidServiceTier) => {
++    _setSelectedAcpServiceTier(tier);
++    setPendingConfigOptions((prev) => ({ ...prev, service_tier: tier }));
 +  }, []);
 +
    // Wrap setSelectedAcpModel to also save preferred model to the agent's config
@@ -2814,7 +3116,7 @@ index 2628b8146..73f4e2870 100644
        const agentKey = selectedAgentRef.current;
        if (agentKey && agentKey !== 'gemini' && agentKey !== 'custom' && newModelId) {
          void savePreferredModelId(agentKey, newModelId);
-@@ -379,18 +418,18 @@ export const useGuidAgentSelection = ({
+@@ -379,18 +426,20 @@ export const useGuidAgentSelection = ({
        .then((cached) => {
          if (!isActive) return;
          const options = cached?.[backend];
@@ -2827,20 +3129,22 @@ index 2628b8146..73f4e2870 100644
 -        setCachedConfigOptions(filtered as AcpSessionConfigOption[]);
 +        const typedOptions = Array.isArray(options) ? (options as AcpSessionConfigOption[]) : [];
 +        // Filter out model/mode categories - those are handled by AcpModelSelector / AgentModeSelector.
-+        // Keep reasoning_effort here so the GUID can render it as a dedicated selector.
++        // Keep reasoning_effort and service_tier here so the GUID can render them as dedicated selectors.
 +        const filtered = typedOptions.filter((opt) => opt.category !== 'model' && opt.category !== 'mode');
 +        setCachedConfigOptions(filtered);
 +        _setSelectedAcpEffort(effortFromConfigOptions(typedOptions) ?? defaultEffortForBackend(backend));
++        _setSelectedAcpServiceTier(null);
          setPendingConfigOptions({});
        })
        .catch(() => {
          if (!isActive) return;
          setCachedConfigOptions([]);
 +        _setSelectedAcpEffort(defaultEffortForBackend(backend));
++        _setSelectedAcpServiceTier(null);
          setPendingConfigOptions({});
        });
      return () => {
-@@ -425,7 +464,9 @@ export const useGuidAgentSelection = ({
+@@ -425,7 +474,9 @@ export const useGuidAgentSelection = ({
            | string
            | undefined;
          if (preferred) {
@@ -2851,7 +3155,7 @@ index 2628b8146..73f4e2870 100644
            return;
          }
        } catch {
-@@ -436,7 +477,9 @@ export const useGuidAgentSelection = ({
+@@ -436,7 +487,9 @@ export const useGuidAgentSelection = ({
        // 2. Last model the ACP bridge cached for this backend.
        const cachedModelId = acpCachedModels[backend]?.currentModelId;
        if (cachedModelId) {
@@ -2862,7 +3166,7 @@ index 2628b8146..73f4e2870 100644
          return;
        }
 
-@@ -457,7 +500,10 @@ export const useGuidAgentSelection = ({
+@@ -457,7 +510,11 @@ export const useGuidAgentSelection = ({
        }
 
        // 4. No signal (non-claude backend, or claude without a native login).
@@ -2870,67 +3174,76 @@ index 2628b8146..73f4e2870 100644
 +      if (!cancelled) {
 +        _setSelectedAcpModel(null);
 +        _setSelectedAcpEffort(defaultEffortForBackend(backend));
++        _setSelectedAcpServiceTier(null);
 +      }
      };
 
      void resolveAcpModel();
-@@ -617,6 +663,8 @@ export const useGuidAgentSelection = ({
+@@ -617,6 +674,10 @@ export const useGuidAgentSelection = ({
      acpCachedModels,
      selectedAcpModel,
      setSelectedAcpModel,
 +    selectedAcpEffort,
 +    setSelectedAcpEffort,
++    selectedAcpServiceTier,
++    setSelectedAcpServiceTier,
      currentAcpCachedModelInfo,
      currentEffectiveAgentInfo,
      cachedConfigOptions,
 diff --git a/src/renderer/pages/guid/hooks/useGuidSend.ts b/src/renderer/pages/guid/hooks/useGuidSend.ts
-index e5c063be6..1091d6b03 100644
+index e5c063be6..dd7eb7dd3 100644
 --- a/src/renderer/pages/guid/hooks/useGuidSend.ts
 +++ b/src/renderer/pages/guid/hooks/useGuidSend.ts
-@@ -17,6 +17,8 @@ import { type TFunction } from 'i18next';
+@@ -17,6 +17,9 @@ import { type TFunction } from 'i18next';
  import type { NavigateFunction } from 'react-router-dom';
  import type { AcpBackend, AvailableAgent, EffectiveAgentInfo } from '../types';
 
 +type GuidReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
++type GuidServiceTier = 'normal' | 'priority';
 +
  export type GuidSendDeps = {
    // Input state
    input: string;
-@@ -35,6 +37,7 @@ export type GuidSendDeps = {
+@@ -35,6 +38,8 @@ export type GuidSendDeps = {
    isPresetAgent: boolean;
    selectedMode: string;
    selectedAcpModel: string | null;
 +  selectedAcpEffort: GuidReasoningEffort | null;
++  selectedAcpServiceTier: GuidServiceTier | null;
    pendingConfigOptions: Record<string, string>;
    cachedConfigOptions: import('@/common/types/acpTypes').AcpSessionConfigOption[];
    currentModel: TProviderWithModel | undefined;
-@@ -138,6 +141,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+@@ -138,6 +143,8 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
      isPresetAgent,
      selectedMode,
      selectedAcpModel,
 +    selectedAcpEffort,
++    selectedAcpServiceTier,
      pendingConfigOptions,
      cachedConfigOptions,
      currentModel,
-@@ -458,6 +462,9 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+@@ -458,6 +465,11 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
          console.warn(`${acpBackend} CLI not found, but proceeding to let conversation panel handle it.`);
        }
        const agentBackend = acpBackend || selectedAgent;
-+      const effectivePendingConfigOptions = selectedAcpEffort
-+        ? { ...pendingConfigOptions, reasoning_effort: selectedAcpEffort }
-+        : pendingConfigOptions;
++      const effectivePendingConfigOptions: Record<string, string> = {
++        ...pendingConfigOptions,
++        ...(selectedAcpEffort ? { reasoning_effort: selectedAcpEffort } : {}),
++        ...(selectedAcpServiceTier ? { service_tier: selectedAcpServiceTier } : {}),
++      };
        const agentConversationParams = buildAgentConversationParams({
          backend: agentBackend,
          name: input,
-@@ -484,6 +491,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+@@ -484,6 +496,8 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
            ...projectExtra,
            ...sessionSkillsExtra,
            excludeBuiltinSkills,
 +          ...(selectedAcpEffort ? { effort: selectedAcpEffort } : {}),
++          ...(selectedAcpServiceTier ? { serviceTier: selectedAcpServiceTier } : {}),
          },
        });
 
-@@ -491,9 +499,9 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+@@ -491,9 +505,9 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
          // Merge pending selections into cached options so the UI shows the user's choice immediately
          const mergedCachedConfigOptions =
            cachedConfigOptions.length > 0
@@ -2942,7 +3255,7 @@ index e5c063be6..1091d6b03 100644
                    return pending ? { ...opt, currentValue: pending, selectedValue: pending } : opt;
                  })
                : cachedConfigOptions
-@@ -506,8 +514,11 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+@@ -506,8 +520,11 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
              cachedConfigOptions: mergedCachedConfigOptions,
            };
          }
@@ -2956,15 +3269,16 @@ index e5c063be6..1091d6b03 100644
          }
 
          const conversation = await ipcBridge.conversation.create.invoke(agentConversationParams);
-@@ -547,6 +558,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+@@ -547,6 +564,8 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
      isPresetAgent,
      selectedMode,
      selectedAcpModel,
 +    selectedAcpEffort,
++    selectedAcpServiceTier,
      pendingConfigOptions,
      cachedConfigOptions,
      currentModel,
-@@ -565,42 +577,45 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+@@ -565,42 +584,45 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
      projectWorkspace,
    ]);
 
@@ -3047,13 +3361,55 @@ index e5c063be6..1091d6b03 100644
    // No usable model configured. Mirrors the send-time validation: only the
    // model-backed backends actually reject on a missing model - the Gemini path
 diff --git a/src/renderer/pages/guid/index.module.css b/src/renderer/pages/guid/index.module.css
-index d4f57919e..29cf9a341 100644
+index d4f57919e..81affaaea 100644
 --- a/src/renderer/pages/guid/index.module.css
 +++ b/src/renderer/pages/guid/index.module.css
-@@ -391,6 +391,36 @@
-   gap: 6px !important;
+@@ -345,7 +345,7 @@
+ .actionConfigGroup {
+   display: inline-flex;
+   align-items: center;
+-  gap: 24px;
++  gap: 18px;
+   min-width: 0;
+   flex: 0 1 auto;
+ }
+@@ -358,7 +358,7 @@
+   content: '';
+   position: absolute;
+   top: 50%;
+-  right: -12px;
++  right: -9px;
+   width: 1px;
+   height: 18px;
+   transform: translateY(-50%);
+@@ -376,6 +376,12 @@
+   min-height: 28px !important;
  }
 
++.actionConfigGroup :global(.guid-config-btn) {
++  max-width: clamp(72px, 18vw, 190px);
++  min-width: 0 !important;
++  font-size: 13px !important;
++}
++
+ .actionTools :global(.sendbox-model-btn:hover) {
+   background-color: transparent !important;
+   border: none !important;
+@@ -385,10 +391,54 @@
+
+ .actionConfigGroup :global(.sendbox-model-btn .arco-btn-content) {
+   gap: 0 !important;
++  min-width: 0 !important;
++  max-width: 100%;
++  overflow: hidden;
+ }
+
+ .actionConfigGroup :global(.sendbox-model-btn .arco-btn-content > span:first-child) {
+   gap: 6px !important;
++  min-width: 0 !important;
++  max-width: 100%;
++}
++
 +.actionConfigGroup :global([data-testid='mode-selector']) {
 +  flex: 0 1 240px;
 +  max-width: 240px;
@@ -3074,6 +3430,15 @@ index d4f57919e..29cf9a341 100644
 +}
 +
 +@media (max-width: 1200px) {
++  .actionConfigGroup {
++    gap: 14px;
++  }
++
++  .actionConfigGroup :global(.guid-config-btn) {
++    max-width: clamp(68px, 16vw, 168px);
++    padding-inline: 7px !important;
++  }
++
 +  .actionConfigGroup :global([data-testid='mode-selector']) {
 +    flex-basis: 240px;
 +    max-width: 240px;
@@ -3082,12 +3447,10 @@ index d4f57919e..29cf9a341 100644
 +  .actionConfigGroup :global([data-testid='mode-selector'] .agent-mode-compact-prefix) {
 +    display: none;
 +  }
-+}
-+
+ }
+
  .actionSubmit {
-   display: flex;
-   align-items: center;
-@@ -454,27 +484,35 @@
+@@ -454,27 +504,35 @@
    }
 
    .actionRow {
@@ -3135,11 +3498,18 @@ index d4f57919e..29cf9a341 100644
    }
 
    .actionEntry {
-@@ -483,6 +521,12 @@
+@@ -482,11 +540,22 @@
+   }
 
    .actionConfigGroup {
-     gap: 12px;
+-    gap: 12px;
++    gap: 10px;
 +    max-width: 100%;
++  }
++
++  .actionConfigGroup :global(.guid-config-btn) {
++    max-width: min(178px, calc(100vw - 96px));
++    font-size: 12.5px !important;
 +  }
 +
 +  .actionConfigGroup :global([data-testid='mode-selector']) {
@@ -3148,7 +3518,12 @@ index d4f57919e..29cf9a341 100644
    }
 
    .actionConfigGroupWithDivider > :first-child::after {
-@@ -694,30 +738,28 @@
+-    right: -6px;
++    right: -5px;
+     height: 16px;
+   }
+
+@@ -694,30 +763,28 @@
 
    .actionTools {
      gap: 6px;
@@ -3191,7 +3566,7 @@ index d4f57919e..29cf9a341 100644
 
    .actionSubmit {
 diff --git a/src/renderer/services/i18n/i18n-keys.d.ts b/src/renderer/services/i18n/i18n-keys.d.ts
-index d56ab7cfa..941cf099d 100644
+index d56ab7cfa..172eb3916 100644
 --- a/src/renderer/services/i18n/i18n-keys.d.ts
 +++ b/src/renderer/services/i18n/i18n-keys.d.ts
 @@ -48,6 +48,7 @@ export type I18nKey =
@@ -3211,7 +3586,19 @@ index d56ab7cfa..941cf099d 100644
    | 'conversation.modelSelector.emptyBody'
    | 'conversation.modelSelector.emptyFlux'
    | 'conversation.modelSelector.emptySub'
-@@ -4653,7 +4656,6 @@ export type I18nKey =
+@@ -575,6 +578,11 @@ export type I18nKey =
+   | 'conversation.modelSelector.resultsN'
+   | 'conversation.modelSelector.resultsOne'
+   | 'conversation.modelSelector.searchPlaceholder'
++  | 'conversation.modelSelector.speed'
++  | 'conversation.modelSelector.speedDefault'
++  | 'conversation.modelSelector.speedDefaultDescription'
++  | 'conversation.modelSelector.speedFast'
++  | 'conversation.modelSelector.speedFastDescription'
+   | 'conversation.modelSelector.subtitle'
+   | 'conversation.modelSelector.title'
+   | 'conversation.modelSelector.unavailable'
+@@ -4653,7 +4661,6 @@ export type I18nKey =
    | 'skills.import.zip.placeholder'
    | 'skills.scanLibrary.done'
    | 'skills.scanLibrary.failed'
@@ -3262,17 +3649,22 @@ index 0a50e4e0f..fcc11caf6 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/de-DE/conversation.json b/src/renderer/services/i18n/locales/de-DE/conversation.json
-index 3c332357c..56e81537f 100644
+index 3c332357c..cedbef2ba 100644
 --- a/src/renderer/services/i18n/locales/de-DE/conversation.json
 +++ b/src/renderer/services/i18n/locales/de-DE/conversation.json
-@@ -438,6 +438,8 @@
+@@ -438,6 +438,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
-+    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
++    "speed": "Speed",
++    "speedDefault": "Default",
++    "speedDefaultDescription": "Default speed",
++    "speedFast": "Fast",
++    "speedFastDescription": "1.5x speed, increased usage"
    }
  }
 diff --git a/src/renderer/services/i18n/locales/en-US/agentMode.json b/src/renderer/services/i18n/locales/en-US/agentMode.json
@@ -3288,17 +3680,22 @@ index 630a23ccd..9537a0ea6 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/en-US/conversation.json b/src/renderer/services/i18n/locales/en-US/conversation.json
-index a49f73fb0..bef7c7c9b 100644
+index a49f73fb0..d9ecd1c33 100644
 --- a/src/renderer/services/i18n/locales/en-US/conversation.json
 +++ b/src/renderer/services/i18n/locales/en-US/conversation.json
-@@ -518,7 +518,9 @@
+@@ -518,7 +518,14 @@
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
      "manageModels": "Manage models",
 -    "claudeSubscriptionNotice": "Claude Code runs on your Claude subscription (Anthropic), so this chat stays on Claude models. To use a different provider like ChatGPT or Gemini, start a new chat and pick that agent."
 +    "claudeSubscriptionNotice": "Claude Code runs on your Claude subscription (Anthropic), so this chat stays on Claude models. To use a different provider like ChatGPT or Gemini, start a new chat and pick that agent.",
 +    "effortXhigh": "XHigh",
-+    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
++    "speed": "Speed",
++    "speedDefault": "Default",
++    "speedDefaultDescription": "Default speed",
++    "speedFast": "Fast",
++    "speedFastDescription": "1.5x speed, increased usage"
    },
    "tool": {
      "openGoogleConsent": "Open Google sign-in"
@@ -3315,17 +3712,22 @@ index ed394efb5..383fc30ae 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/es-ES/conversation.json b/src/renderer/services/i18n/locales/es-ES/conversation.json
-index 56776d2a8..ec0c67d11 100644
+index 56776d2a8..1dd782048 100644
 --- a/src/renderer/services/i18n/locales/es-ES/conversation.json
 +++ b/src/renderer/services/i18n/locales/es-ES/conversation.json
-@@ -438,6 +438,8 @@
+@@ -438,6 +438,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
-+    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
++    "speed": "Speed",
++    "speedDefault": "Default",
++    "speedDefaultDescription": "Default speed",
++    "speedFast": "Fast",
++    "speedFastDescription": "1.5x speed, increased usage"
    }
  }
 diff --git a/src/renderer/services/i18n/locales/fr-FR/agentMode.json b/src/renderer/services/i18n/locales/fr-FR/agentMode.json
@@ -3341,17 +3743,22 @@ index c7e51e1a7..4a4683862 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/fr-FR/conversation.json b/src/renderer/services/i18n/locales/fr-FR/conversation.json
-index a8f429a3e..2a13b74bd 100644
+index a8f429a3e..f8fc36198 100644
 --- a/src/renderer/services/i18n/locales/fr-FR/conversation.json
 +++ b/src/renderer/services/i18n/locales/fr-FR/conversation.json
-@@ -438,6 +438,8 @@
+@@ -438,6 +438,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
-+    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
++    "speed": "Speed",
++    "speedDefault": "Default",
++    "speedDefaultDescription": "Default speed",
++    "speedFast": "Fast",
++    "speedFastDescription": "1.5x speed, increased usage"
    }
  }
 diff --git a/src/renderer/services/i18n/locales/ja-JP/agentMode.json b/src/renderer/services/i18n/locales/ja-JP/agentMode.json
@@ -3367,17 +3774,22 @@ index e329de963..a3cfc59ec 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/ja-JP/conversation.json b/src/renderer/services/i18n/locales/ja-JP/conversation.json
-index edac437f5..2de5b7767 100644
+index edac437f5..3a2b9e2e2 100644
 --- a/src/renderer/services/i18n/locales/ja-JP/conversation.json
 +++ b/src/renderer/services/i18n/locales/ja-JP/conversation.json
-@@ -438,6 +438,8 @@
+@@ -438,6 +438,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
-+    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
++    "speed": "Speed",
++    "speedDefault": "Default",
++    "speedDefaultDescription": "Default speed",
++    "speedFast": "Fast",
++    "speedFastDescription": "1.5x speed, increased usage"
    }
  }
 diff --git a/src/renderer/services/i18n/locales/ko-KR/agentMode.json b/src/renderer/services/i18n/locales/ko-KR/agentMode.json
@@ -3393,17 +3805,22 @@ index bcb972f24..8b6cee311 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/ko-KR/conversation.json b/src/renderer/services/i18n/locales/ko-KR/conversation.json
-index 9cdb43fac..2827ca09a 100644
+index 9cdb43fac..d8be5ca9b 100644
 --- a/src/renderer/services/i18n/locales/ko-KR/conversation.json
 +++ b/src/renderer/services/i18n/locales/ko-KR/conversation.json
-@@ -438,6 +438,8 @@
+@@ -438,6 +438,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
-+    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
++    "speed": "Speed",
++    "speedDefault": "Default",
++    "speedDefaultDescription": "Default speed",
++    "speedFast": "Fast",
++    "speedFastDescription": "1.5x speed, increased usage"
    }
  }
 diff --git a/src/renderer/services/i18n/locales/pt-BR/agentMode.json b/src/renderer/services/i18n/locales/pt-BR/agentMode.json
@@ -3419,17 +3836,22 @@ index dc4d40471..c23cb0a42 100644
 +  "configToml": "Personalizado(config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/pt-BR/conversation.json b/src/renderer/services/i18n/locales/pt-BR/conversation.json
-index fe91def75..c6cc7ac3b 100644
+index fe91def75..61366d0b1 100644
 --- a/src/renderer/services/i18n/locales/pt-BR/conversation.json
 +++ b/src/renderer/services/i18n/locales/pt-BR/conversation.json
-@@ -438,6 +438,8 @@
+@@ -438,6 +438,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
-+    "effortXhighDesc": "Raciocínio máximo para trabalhos difíceis"
++    "effortXhighDesc": "Raciocínio máximo para trabalhos difíceis",
++    "speed": "Velocidade",
++    "speedDefault": "Padrão",
++    "speedDefaultDescription": "Velocidade padrão",
++    "speedFast": "Rápido",
++    "speedFastDescription": "1.5x velocidade, maior uso"
    }
  }
 diff --git a/src/renderer/services/i18n/locales/ru-RU/agentMode.json b/src/renderer/services/i18n/locales/ru-RU/agentMode.json
@@ -3445,17 +3867,22 @@ index 69d8c1e7e..ab6851b1e 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/ru-RU/conversation.json b/src/renderer/services/i18n/locales/ru-RU/conversation.json
-index e183cc063..3c24f4675 100644
+index e183cc063..5703ce7f1 100644
 --- a/src/renderer/services/i18n/locales/ru-RU/conversation.json
 +++ b/src/renderer/services/i18n/locales/ru-RU/conversation.json
-@@ -438,6 +438,8 @@
+@@ -438,6 +438,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
-+    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
++    "speed": "Speed",
++    "speedDefault": "Default",
++    "speedDefaultDescription": "Default speed",
++    "speedFast": "Fast",
++    "speedFastDescription": "1.5x speed, increased usage"
    }
  }
 diff --git a/src/renderer/services/i18n/locales/tr-TR/agentMode.json b/src/renderer/services/i18n/locales/tr-TR/agentMode.json
@@ -3471,17 +3898,22 @@ index 49a50bf27..49a863104 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/tr-TR/conversation.json b/src/renderer/services/i18n/locales/tr-TR/conversation.json
-index 9ef78e4a1..7bc5f8aa0 100644
+index 9ef78e4a1..974e66e19 100644
 --- a/src/renderer/services/i18n/locales/tr-TR/conversation.json
 +++ b/src/renderer/services/i18n/locales/tr-TR/conversation.json
-@@ -440,6 +440,8 @@
+@@ -440,6 +440,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
-+    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
++    "speed": "Speed",
++    "speedDefault": "Default",
++    "speedDefaultDescription": "Default speed",
++    "speedFast": "Fast",
++    "speedFastDescription": "1.5x speed, increased usage"
    }
  }
 diff --git a/src/renderer/services/i18n/locales/uk-UA/agentMode.json b/src/renderer/services/i18n/locales/uk-UA/agentMode.json
@@ -3497,17 +3929,22 @@ index 791226d9b..ff7507c19 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/uk-UA/conversation.json b/src/renderer/services/i18n/locales/uk-UA/conversation.json
-index ac75f08af..18a16f670 100644
+index ac75f08af..7f6a6e1e1 100644
 --- a/src/renderer/services/i18n/locales/uk-UA/conversation.json
 +++ b/src/renderer/services/i18n/locales/uk-UA/conversation.json
-@@ -438,6 +438,8 @@
+@@ -438,6 +438,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
-+    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
++    "speed": "Speed",
++    "speedDefault": "Default",
++    "speedDefaultDescription": "Default speed",
++    "speedFast": "Fast",
++    "speedFastDescription": "1.5x speed, increased usage"
    }
  }
 diff --git a/src/renderer/services/i18n/locales/zh-CN/agentMode.json b/src/renderer/services/i18n/locales/zh-CN/agentMode.json
@@ -3523,17 +3960,22 @@ index c5a74cbc0..4d4235325 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/zh-CN/conversation.json b/src/renderer/services/i18n/locales/zh-CN/conversation.json
-index 75a7a2626..7c59e76e1 100644
+index 75a7a2626..073d29c6e 100644
 --- a/src/renderer/services/i18n/locales/zh-CN/conversation.json
 +++ b/src/renderer/services/i18n/locales/zh-CN/conversation.json
-@@ -438,6 +438,8 @@
+@@ -438,6 +438,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
-+    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
++    "speed": "Speed",
++    "speedDefault": "Default",
++    "speedDefaultDescription": "Default speed",
++    "speedFast": "Fast",
++    "speedFastDescription": "1.5x speed, increased usage"
    }
  }
 diff --git a/src/renderer/services/i18n/locales/zh-TW/agentMode.json b/src/renderer/services/i18n/locales/zh-TW/agentMode.json
@@ -3549,17 +3991,22 @@ index 9801fe1e1..17ee6c11c 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/zh-TW/conversation.json b/src/renderer/services/i18n/locales/zh-TW/conversation.json
-index 8b2037463..7ef683233 100644
+index 8b2037463..4ce993bdd 100644
 --- a/src/renderer/services/i18n/locales/zh-TW/conversation.json
 +++ b/src/renderer/services/i18n/locales/zh-TW/conversation.json
-@@ -438,6 +438,8 @@
+@@ -438,6 +438,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
-+    "effortXhighDesc": "Maximum reasoning depth for the hardest work"
++    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
++    "speed": "Speed",
++    "speedDefault": "Default",
++    "speedDefaultDescription": "Default speed",
++    "speedFast": "Fast",
++    "speedFastDescription": "1.5x speed, increased usage"
    }
  }
 diff --git a/src/renderer/styles/layout.css b/src/renderer/styles/layout.css
@@ -3746,7 +4193,7 @@ index a837db695..872d740a8 100644
 +
  });
 diff --git a/tests/unit/process/task/codexConfigEffort.test.ts b/tests/unit/process/task/codexConfigEffort.test.ts
-index 3df770204..6acf2ec5b 100644
+index 3df770204..3c95fb1c4 100644
 --- a/tests/unit/process/task/codexConfigEffort.test.ts
 +++ b/tests/unit/process/task/codexConfigEffort.test.ts
 @@ -32,10 +32,10 @@ describe('materializeFluxCodexHome - per-conversation effort', () => {
@@ -3762,8 +4209,35 @@ index 3df770204..6acf2ec5b 100644
          const home = await materializeFluxCodexHome(
            join(dir, effort),
            'workspace-write',
+@@ -56,4 +56,26 @@ describe('materializeFluxCodexHome - per-conversation effort', () => {
+     const config = await readConfig(home);
+     expect(config).not.toContain('model_reasoning_effort');
+   });
++
++  it('emits service_tier only for normalized Codex tiers', async () => {
++    const priorityHome = await materializeFluxCodexHome(
++      join(dir, 'priority'),
++      'workspace-write',
++      undefined,
++      noUserConfig,
++      undefined,
++      'priority'
++    );
++    expect(await readConfig(priorityHome)).toContain('service_tier = "priority"');
++
++    const invalidHome = await materializeFluxCodexHome(
++      join(dir, 'invalid'),
++      'workspace-write',
++      undefined,
++      noUserConfig,
++      undefined,
++      'fast' as never
++    );
++    expect(await readConfig(invalidHome)).not.toContain('service_tier');
++  });
+ });
 diff --git a/tests/unit/process/task/codexNativeSandbox.test.ts b/tests/unit/process/task/codexNativeSandbox.test.ts
-index 22e16db68..1f6b0439b 100644
+index 22e16db68..4e8fa31c1 100644
 --- a/tests/unit/process/task/codexNativeSandbox.test.ts
 +++ b/tests/unit/process/task/codexNativeSandbox.test.ts
 @@ -61,6 +61,11 @@ describe('getCodexSandboxModeForSessionMode (#536)', () => {
@@ -3778,6 +4252,32 @@ index 22e16db68..1f6b0439b 100644
    it('maps an explicit no-sandbox (yolo) session mode to danger-full-access', () => {
      expect(getCodexSandboxModeForSessionMode('yoloNoSandbox')).toBe('danger-full-access');
    });
+@@ -137,6 +142,25 @@ describe('materializeNativeCodexHome (#536 scoped CODEX_HOME)', () => {
+     expect(parsedUser.sandbox_mode).toBe('read-only');
+   });
+
++  it('can apply only service_tier while preserving Custom(config.toml) sandbox settings', async () => {
++    await writeFile(
++      userConfig,
++      ['model = "gpt-5.5"', 'sandbox_mode = "danger-full-access"', '', '[tools]', 'web_search = true', ''].join('\n'),
++      'utf8'
++    );
++
++    const home = await materializeNativeCodexHome(userDataDir, null, userConfig, userAuth, 'priority');
++    const parsed = parseToml(await readScopedConfig(home)) as {
++      sandbox_mode?: string;
++      service_tier?: string;
++      tools?: { web_search?: boolean };
++    };
++
++    expect(parsed.sandbox_mode).toBe('danger-full-access');
++    expect(parsed.service_tier).toBe('priority');
++    expect(parsed.tools?.web_search).toBe(true);
++  });
++
+   it("symlinks the scoped auth.json at the user's real auth.json (native login survives)", async () => {
+     await writeFile(userConfig, 'model = "gpt-5"\n', 'utf8');
+     await writeFile(userAuth, JSON.stringify({ tokens: { access_token: 'acc' } }), 'utf8');
 diff --git a/tests/unit/renderer/GuidActionRow.dom.test.tsx b/tests/unit/renderer/GuidActionRow.dom.test.tsx
 index 6f2bb3023..c249c30bc 100644
 --- a/tests/unit/renderer/GuidActionRow.dom.test.tsx
@@ -3862,31 +4362,34 @@ index 62e56ae1b..4b3f1f41a 100644
 +  });
 +});
 diff --git a/tests/unit/renderer/guidModelSelector.dom.test.tsx b/tests/unit/renderer/guidModelSelector.dom.test.tsx
-index 1f90ee674..917ca2067 100644
+index 1f90ee674..12a7850c7 100644
 --- a/tests/unit/renderer/guidModelSelector.dom.test.tsx
 +++ b/tests/unit/renderer/guidModelSelector.dom.test.tsx
-@@ -215,6 +215,10 @@ const baseProps = {
+@@ -215,6 +215,12 @@ const baseProps = {
    currentAcpCachedModelInfo: null,
    selectedAcpModel: null,
    setSelectedAcpModel: vi.fn(),
 +  selectedAcpEffort: null,
 +  setSelectedAcpEffort: vi.fn(),
++  selectedAcpServiceTier: null,
++  setSelectedAcpServiceTier: vi.fn(),
 +  cachedConfigOptions: [],
 +  onConfigOptionSelect: vi.fn(),
  };
 
  beforeEach(() => {
-@@ -226,6 +230,9 @@ beforeEach(() => {
+@@ -226,6 +232,10 @@ beforeEach(() => {
    // resolves cleanly and stays silent in tests that don't exercise it.
    mockResolveForChatStart.mockResolvedValue({ ok: false, error: 'not-connected' });
    baseProps.setCurrentModel.mockClear();
 +  baseProps.setSelectedAcpModel.mockClear();
 +  baseProps.setSelectedAcpEffort.mockClear();
++  baseProps.setSelectedAcpServiceTier.mockClear();
 +  baseProps.onConfigOptionSelect.mockClear();
  });
 
  afterEach(() => {
-@@ -518,6 +525,67 @@ describe('GuidModelSelector home picker', () => {
+@@ -518,6 +528,114 @@ describe('GuidModelSelector home picker', () => {
      expect(screen.getByText('$')).toBeInTheDocument();
    });
 
@@ -3895,6 +4398,7 @@ index 1f90ee674..917ca2067 100644
 +    const fireEventClick = (await import('@testing-library/react')).fireEvent.click;
 +    const setSelectedAcpModel = vi.fn();
 +    const setSelectedAcpEffort = vi.fn();
++    const setSelectedAcpServiceTier = vi.fn();
 +    const onConfigOptionSelect = vi.fn();
 +    const acpInfo = {
 +      currentModelId: 'gpt-5.5/xhigh',
@@ -3919,8 +4423,10 @@ index 1f90ee674..917ca2067 100644
 +        currentAcpCachedModelInfo={acpInfo}
 +        selectedAcpModel='gpt-5.5/xhigh'
 +        selectedAcpEffort='xhigh'
++        selectedAcpServiceTier='normal'
 +        setSelectedAcpModel={setSelectedAcpModel}
 +        setSelectedAcpEffort={setSelectedAcpEffort}
++        setSelectedAcpServiceTier={setSelectedAcpServiceTier}
 +        cachedConfigOptions={[
 +          {
 +            id: 'reasoning_effort',
@@ -3932,6 +4438,16 @@ index 1f90ee674..917ca2067 100644
 +              { value: 'medium', name: 'Medium' },
 +              { value: 'high', name: 'High' },
 +              { value: 'xhigh', name: 'XHigh' },
++            ],
++          },
++          {
++            id: 'service_tier',
++            category: 'service_tier',
++            type: 'select',
++            currentValue: 'normal',
++            options: [
++              { value: 'normal', name: 'Default' },
++              { value: 'priority', name: 'Fast' },
 +            ],
 +          },
 +        ]}
@@ -3949,33 +4465,69 @@ index 1f90ee674..917ca2067 100644
 +    fireEventClick(screen.getByText('conversation.modelSelector.effortLow'));
 +    expect(setSelectedAcpEffort).toHaveBeenCalledWith('low');
 +    expect(onConfigOptionSelect).toHaveBeenCalledWith('reasoning_effort', 'low');
++
++    expect(screen.getByText('conversation.modelSelector.speed')).toBeInTheDocument();
++    fireEventClick(screen.getByText('conversation.modelSelector.speedFast'));
++    expect(setSelectedAcpServiceTier).toHaveBeenCalledWith('priority');
++    expect(onConfigOptionSelect).toHaveBeenCalledWith('service_tier', 'priority');
++  });
++
++  it('does not show a Hermes speed selector unless the ACP backend advertises service_tier', async () => {
++    mockCuratedForAgent.mockResolvedValue([]);
++    const acpInfo = {
++      currentModelId: 'gpt-5.4',
++      currentModelLabel: 'gpt-5.4',
++      availableModels: [{ id: 'gpt-5.4', label: 'gpt-5.4' }],
++      canSwitch: true,
++      source: 'models' as const,
++      sourceDetail: 'hermes-stream' as const,
++    };
++
++    render(
++      <GuidModelSelector
++        {...baseProps}
++        isGeminiMode={false}
++        agentKey='hermes'
++        currentAcpCachedModelInfo={acpInfo}
++        selectedAcpModel='gpt-5.4'
++        selectedAcpEffort='xhigh'
++        selectedAcpServiceTier={null}
++        cachedConfigOptions={[]}
++      />
++    );
++
++    expect(await screen.findByText('gpt-5.4')).toBeInTheDocument();
++    expect(screen.queryByText('conversation.modelSelector.speedDefault')).not.toBeInTheDocument();
++    expect(screen.queryByText('conversation.modelSelector.speedFast')).not.toBeInTheDocument();
 +  });
 +
    it('passes the non-secret chat-start handle through to setCurrentModel (audit C4)', async () => {
      // The resolver hands back the NON-SECRET handle (platform + baseUrl +
      // account binding) - no decrypted key. The picker writes the binding into
 diff --git a/tests/unit/useGuidSend.dom.test.ts b/tests/unit/useGuidSend.dom.test.ts
-index 0ce473483..ec97ccd1e 100644
+index 0ce473483..b32962ce8 100644
 --- a/tests/unit/useGuidSend.dom.test.ts
 +++ b/tests/unit/useGuidSend.dom.test.ts
-@@ -69,6 +69,7 @@ function makeDeps(overrides: Partial<GuidSendDeps> = {}): GuidSendDeps {
+@@ -69,6 +69,8 @@ function makeDeps(overrides: Partial<GuidSendDeps> = {}): GuidSendDeps {
      isPresetAgent: false,
      selectedMode: 'default',
      selectedAcpModel: null,
 +    selectedAcpEffort: null,
++    selectedAcpServiceTier: null,
      pendingConfigOptions: {},
      cachedConfigOptions: [],
      currentModel: undefined,
-@@ -213,6 +214,49 @@ describe('useGuidSend', () => {
+@@ -213,6 +215,58 @@ describe('useGuidSend', () => {
      });
    });
 
-+  it('stores selected reasoning effort as ACP pending config and conversation extra', async () => {
++  it('stores selected reasoning effort and speed as ACP pending config and conversation extra', async () => {
 +    const deps = makeDeps({
 +      selectedAgent: 'codex',
 +      selectedAgentKey: 'codex',
 +      selectedAcpModel: 'gpt-5.5',
 +      selectedAcpEffort: 'xhigh',
++      selectedAcpServiceTier: 'priority',
 +      cachedConfigOptions: [
 +        {
 +          id: 'reasoning_effort',
@@ -3985,6 +4537,16 @@ index 0ce473483..ec97ccd1e 100644
 +          options: [
 +            { value: 'medium', name: 'Medium' },
 +            { value: 'xhigh', name: 'XHigh' },
++          ],
++        },
++        {
++          id: 'service_tier',
++          category: 'service_tier',
++          type: 'select',
++          currentValue: 'normal',
++          options: [
++            { value: 'normal', name: 'Default' },
++            { value: 'priority', name: 'Fast' },
 +          ],
 +        },
 +      ],
@@ -4000,14 +4562,12 @@ index 0ce473483..ec97ccd1e 100644
 +        type: 'acp',
 +        extra: expect.objectContaining({
 +          effort: 'xhigh',
-+          pendingConfigOptions: { reasoning_effort: 'xhigh' },
-+          cachedConfigOptions: [
-+            expect.objectContaining({
-+              id: 'reasoning_effort',
-+              currentValue: 'xhigh',
-+              selectedValue: 'xhigh',
-+            }),
-+          ],
++          serviceTier: 'priority',
++          pendingConfigOptions: { reasoning_effort: 'xhigh', service_tier: 'priority' },
++          cachedConfigOptions: expect.arrayContaining([
++            expect.objectContaining({ id: 'reasoning_effort', currentValue: 'xhigh', selectedValue: 'xhigh' }),
++            expect.objectContaining({ id: 'service_tier', currentValue: 'priority', selectedValue: 'priority' }),
++          ]),
 +        }),
 +      })
 +    );

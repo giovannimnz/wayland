@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Brain, ChevronDown, Zap } from 'lucide-react';
+import { Brain, ChevronDown, Gauge, Zap } from 'lucide-react';
 import { Button, Dropdown, Menu, Message, Tooltip } from '@arco-design/web-react';
 import { ipcBridge } from '@/common';
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
@@ -45,14 +45,19 @@ type GuidModelSelectorProps = {
   setSelectedAcpModel: React.Dispatch<React.SetStateAction<string | null>>;
   selectedAcpEffort?: GuidReasoningEffort | null;
   setSelectedAcpEffort?: (effort: GuidReasoningEffort) => void;
+  selectedAcpServiceTier?: GuidServiceTier | null;
+  setSelectedAcpServiceTier?: (tier: GuidServiceTier) => void;
   cachedConfigOptions?: AcpSessionConfigOption[];
   onConfigOptionSelect?: (configId: string, value: string) => void;
 };
 
 export type GuidReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+export type GuidServiceTier = 'normal' | 'priority';
 
 const GUID_REASONING_EFFORTS: GuidReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
+const GUID_SERVICE_TIERS: GuidServiceTier[] = ['normal', 'priority'];
 const REASONING_EFFORT_CONFIG_ID = 'reasoning_effort';
+const SERVICE_TIER_CONFIG_ID = 'service_tier';
 const ACP_MODEL_EFFORT_SUFFIX = /\/(low|medium|high|xhigh)$/i;
 const ACP_MODEL_LABEL_EFFORT_SUFFIX = /\s+\((low|medium|high|xhigh)\)$/i;
 
@@ -61,6 +66,14 @@ const isGuidReasoningEffort = (value: unknown): value is GuidReasoningEffort =>
 
 const normalizeEffort = (value: unknown): GuidReasoningEffort | null =>
   isGuidReasoningEffort(value) ? (value.toLowerCase() as GuidReasoningEffort) : null;
+
+const normalizeServiceTier = (value: unknown): GuidServiceTier | null => {
+  if (typeof value !== 'string') return null;
+  const normalized = value.toLowerCase();
+  if (normalized === 'normal' || normalized === 'default' || normalized === 'standard') return 'normal';
+  if (normalized === 'priority' || normalized === 'fast') return 'priority';
+  return null;
+};
 
 export function splitAcpModelEffort(
   modelId: string | null | undefined,
@@ -93,8 +106,23 @@ const getReasoningEffortOption = (options: AcpSessionConfigOption[] | undefined)
       option.name?.toLowerCase().includes('reasoning')
   );
 
+export const isServiceTierConfigOption = (option: AcpSessionConfigOption): boolean =>
+  option.id === SERVICE_TIER_CONFIG_ID ||
+  option.category === 'service_tier' ||
+  option.name?.toLowerCase().includes('speed') === true ||
+  option.name?.toLowerCase().includes('service tier') === true;
+
+const getServiceTierOption = (options: AcpSessionConfigOption[] | undefined): AcpSessionConfigOption | undefined =>
+  options?.find(isServiceTierConfigOption);
+
 const effortLabelKey = (effort: GuidReasoningEffort): string =>
   `conversation.modelSelector.effort${effort === 'xhigh' ? 'Xhigh' : effort.charAt(0).toUpperCase() + effort.slice(1)}`;
+
+const serviceTierLabelKey = (tier: GuidServiceTier): string =>
+  `conversation.modelSelector.speed${tier === 'priority' ? 'Fast' : 'Default'}`;
+
+const serviceTierDescriptionKey = (tier: GuidServiceTier): string =>
+  `conversation.modelSelector.speed${tier === 'priority' ? 'Fast' : 'Default'}Description`;
 
 /**
  * Map a model's blended USD-per-million-token cost to a $ / $$ / $$$ tier.
@@ -181,6 +209,8 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
   setSelectedAcpModel,
   selectedAcpEffort = null,
   setSelectedAcpEffort,
+  selectedAcpServiceTier = null,
+  setSelectedAcpServiceTier,
   cachedConfigOptions,
   onConfigOptionSelect,
 }) => {
@@ -516,9 +546,16 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
     [cachedConfigOptions]
   );
 
+  const serviceTierOption = React.useMemo(() => getServiceTierOption(cachedConfigOptions), [cachedConfigOptions]);
+
   const configEffort = React.useMemo(
     () => normalizeEffort(reasoningEffortOption?.currentValue || reasoningEffortOption?.selectedValue),
     [reasoningEffortOption]
+  );
+
+  const configServiceTier = React.useMemo(
+    () => normalizeServiceTier(serviceTierOption?.currentValue || serviceTierOption?.selectedValue),
+    [serviceTierOption]
   );
 
   const modelEffort = React.useMemo(
@@ -548,6 +585,20 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
     modelEffort ||
     (effortOptions.includes('xhigh') ? 'xhigh' : (effortOptions[0] ?? null));
 
+  const serviceTierOptions = React.useMemo<GuidServiceTier[]>(() => {
+    const fromConfig = serviceTierOption?.options
+      ?.map((option) => normalizeServiceTier(option.value))
+      .filter((value): value is GuidServiceTier => Boolean(value));
+    if (fromConfig && fromConfig.length > 0) return Array.from(new Set(fromConfig));
+    if (agentKey === 'codex') return GUID_SERVICE_TIERS;
+    return [];
+  }, [agentKey, serviceTierOption]);
+
+  const currentServiceTier =
+    selectedAcpServiceTier ||
+    configServiceTier ||
+    (serviceTierOptions.includes('normal') ? 'normal' : (serviceTierOptions[0] ?? null));
+
   const handleSelectEffort = React.useCallback(
     (effort: GuidReasoningEffort) => {
       setSelectedAcpEffort?.(effort);
@@ -559,6 +610,19 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
       });
     },
     [agentKey, onConfigOptionSelect, recordTelemetry, setSelectedAcpEffort]
+  );
+
+  const handleSelectServiceTier = React.useCallback(
+    (tier: GuidServiceTier) => {
+      setSelectedAcpServiceTier?.(tier);
+      onConfigOptionSelect?.(SERVICE_TIER_CONFIG_ID, tier);
+      recordTelemetry({
+        eventType: 'guid.model_selected',
+        cliBackend: agentKey,
+        metadata: { serviceTier: tier, source: 'acp-service-tier' },
+      });
+    },
+    [agentKey, onConfigOptionSelect, recordTelemetry, setSelectedAcpServiceTier]
   );
 
   const acpSelectedLabel = React.useMemo(() => {
@@ -590,6 +654,12 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
     ? t(effortLabelKey(currentEffort), {
         defaultValue:
           currentEffort === 'xhigh' ? 'XHigh' : currentEffort.charAt(0).toUpperCase() + currentEffort.slice(1),
+      })
+    : '';
+
+  const currentServiceTierLabel = currentServiceTier
+    ? t(serviceTierLabelKey(currentServiceTier), {
+        defaultValue: currentServiceTier === 'priority' ? 'Fast' : 'Default',
       })
     : '';
 
@@ -629,6 +699,46 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
       </Dropdown>
     ) : null;
 
+  const speedSelectorNode =
+    serviceTierOptions.length > 0 && currentServiceTier ? (
+      <Dropdown
+        trigger='click'
+        droplist={
+          <Menu selectedKeys={[currentServiceTier]}>
+            <Menu.ItemGroup title={t('conversation.modelSelector.speed')}>
+              {serviceTierOptions.map((tier) => {
+                const label = t(serviceTierLabelKey(tier), {
+                  defaultValue: tier === 'priority' ? 'Fast' : 'Default',
+                });
+                const description = t(serviceTierDescriptionKey(tier), {
+                  defaultValue: tier === 'priority' ? '1.5x speed, increased usage' : 'Default speed',
+                });
+                return (
+                  <Menu.Item key={tier} onClick={() => handleSelectServiceTier(tier)}>
+                    <div className='flex items-start gap-8px w-full'>
+                      {tier === currentServiceTier && <span className='text-primary shrink-0 mt-2px'>✓</span>}
+                      <span className={`flex flex-col min-w-0 ${tier !== currentServiceTier ? 'ml-16px' : ''}`}>
+                        <span className='truncate'>{label}</span>
+                        <span className='text-12px text-t-tertiary truncate'>{description}</span>
+                      </span>
+                    </div>
+                  </Menu.Item>
+                );
+              })}
+            </Menu.ItemGroup>
+          </Menu>
+        }
+      >
+        <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
+          <span className='flex items-center gap-6px min-w-0'>
+            <Gauge size={14} color={iconColors.secondary} className='shrink-0' />
+            <span className='truncate'>{currentServiceTierLabel}</span>
+            <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
+          </span>
+        </Button>
+      </Dropdown>
+    ) : null;
+
   // ── Provider-based agents (Gemini / Wayland Core) - three-tier picker ────
   if (isGeminiMode) {
     return (
@@ -654,7 +764,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
         <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
           <span className='flex items-center gap-6px min-w-0'>
             <Brain size={14} color={iconColors.secondary} className='shrink-0' />
-            <span>{curatedButtonLabel}</span>
+            <span className='truncate min-w-0'>{curatedButtonLabel}</span>
             <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
           </span>
         </Button>
@@ -737,12 +847,13 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
           <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
             <span className='flex items-center gap-6px min-w-0'>
               <Brain size={14} color={iconColors.secondary} className='shrink-0' />
-              <span>{acpButtonDisplayLabel}</span>
+              <span className='truncate min-w-0'>{acpButtonDisplayLabel}</span>
               <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
             </span>
           </Button>
         </Dropdown>
         {effortSelectorNode}
+        {speedSelectorNode}
       </>
     );
   }

@@ -22,6 +22,7 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
+export type CodexServiceTier = 'normal' | 'priority';
 
 const isWindowsStylePath = (value: string): boolean => /^[a-zA-Z]:[\\/]/.test(value) || value.startsWith('\\\\');
 
@@ -40,6 +41,11 @@ export function normalizeCodexSandboxMode(sandboxMode?: CodexSandboxMode | null)
   if (sandboxMode === 'danger-full-access') return 'danger-full-access';
   if (sandboxMode === 'workspace-write') return 'workspace-write';
   return 'read-only';
+}
+
+export function normalizeCodexServiceTier(serviceTier?: unknown): CodexServiceTier | null {
+  if (serviceTier === 'normal' || serviceTier === 'priority') return serviceTier;
+  return null;
 }
 
 /**
@@ -114,6 +120,33 @@ function setSandboxModeInConfig(content: string, sandboxMode: CodexSandboxMode):
 }
 
 /**
+ * Overwrite (or insert) top-level `service_tier` in a Wayland-owned scoped
+ * Codex config. `normal` is the default speed; `priority` matches Codex's
+ * advertised Fast tier for supported models.
+ */
+function setServiceTierInConfig(content: string, serviceTier: CodexServiceTier): string {
+  const newline = content.includes('\r\n') ? '\r\n' : '\n';
+  const tierLine = `service_tier = "${serviceTier}"`;
+
+  if (/^\s*service_tier\s*=.*$/m.test(content)) {
+    return content.replace(/^\s*service_tier\s*=.*$/m, tierLine);
+  }
+
+  const sectionIndex = content.search(/^\s*\[/m);
+  if (sectionIndex >= 0) {
+    const prefix = content.slice(0, sectionIndex).trimEnd();
+    const suffix = content.slice(sectionIndex);
+    return prefix
+      ? `${prefix}${newline}${tierLine}${newline}${newline}${suffix}`
+      : `${tierLine}${newline}${newline}${suffix}`;
+  }
+  if (content.trim().length > 0) {
+    return `${content.trimEnd()}${newline}${tierLine}${newline}`;
+  }
+  return `${tierLine}${newline}`;
+}
+
+/**
  * Materialize a Wayland-scoped CODEX_HOME for NATIVE (non-Flux) codex spawns and
  * return its directory path. #536: Wayland must set the Codex sandbox mode
  * WITHOUT ever mutating the user's own `~/.codex/config.toml` (a file outside
@@ -146,9 +179,10 @@ function setSandboxModeInConfig(content: string, sandboxMode: CodexSandboxMode):
  */
 export async function materializeNativeCodexHome(
   userDataDir: string,
-  sandboxMode: CodexSandboxMode = 'read-only',
+  sandboxMode: CodexSandboxMode | null = 'read-only',
   userConfigPath: string = getCodexConfigPath(),
-  userAuthPath: string = getUserCodexAuthPath()
+  userAuthPath: string = getUserCodexAuthPath(),
+  serviceTier?: CodexServiceTier | null
 ): Promise<string> {
   const codexHomeDir = join(userDataDir, 'codex-home');
   const configPath = join(codexHomeDir, 'config.toml');
@@ -163,7 +197,11 @@ export async function materializeNativeCodexHome(
     userConfig = '';
   }
 
-  const content = setSandboxModeInConfig(userConfig, sandboxMode);
+  const normalizedServiceTier = normalizeCodexServiceTier(serviceTier);
+  let content = sandboxMode ? setSandboxModeInConfig(userConfig, sandboxMode) : userConfig;
+  if (normalizedServiceTier) {
+    content = setServiceTierInConfig(content, normalizedServiceTier);
+  }
 
   await mkdir(codexHomeDir, { recursive: true });
   await writeFile(configPath, content, 'utf8');
@@ -296,11 +334,14 @@ export async function materializeFluxCodexHome(
   baseURL: string = FLUX_SURFACE.responses,
   userConfigPath: string = getCodexConfigPath(),
   /** Per-conversation reasoning effort. When set, written as `model_reasoning_effort`. */
-  effort?: 'low' | 'medium' | 'high' | 'xhigh'
+  effort?: 'low' | 'medium' | 'high' | 'xhigh',
+  /** Per-conversation service tier / speed. When set, written as `service_tier`. */
+  serviceTier?: CodexServiceTier | null
 ): Promise<string> {
   const codexHomeDir = join(userDataDir, 'flux-codex-home');
   const configPath = join(codexHomeDir, 'config.toml');
   const catalogPath = join(codexHomeDir, 'flux-model-catalog.json');
+  const normalizedServiceTier = normalizeCodexServiceTier(serviceTier);
   let content = [
     '# Wayland-managed CODEX_HOME for Flux-routed codex spawns.',
     "# Selects Flux globally within this scoped home; the user's real ~/.codex",
@@ -315,6 +356,7 @@ export async function materializeFluxCodexHome(
     // Per-conversation reasoning effort (omitted => codex applies the model's
     // default_reasoning_level from the catalog above).
     ...(effort ? [`model_reasoning_effort = "${effort}"`] : []),
+    ...(normalizedServiceTier ? [`service_tier = "${normalizedServiceTier}"`] : []),
     `sandbox_mode = "${sandboxMode}"`,
     'suppress_unstable_features_warning = true',
     '',

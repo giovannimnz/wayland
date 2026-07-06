@@ -48,7 +48,9 @@ import {
   materializeFluxCodexHome,
   materializeNativeCodexHome,
   normalizeCodexSandboxMode,
+  normalizeCodexServiceTier,
   type CodexSandboxMode,
+  type CodexServiceTier,
 } from '@process/task/codexConfig';
 import { materializeFluxClaudeConfigDir } from '@process/task/claudeConfig';
 import { materializeFluxHermesHome } from '@process/task/hermesConfig';
@@ -112,6 +114,8 @@ interface AcpAgentManagerData {
   pendingConfigOptions?: Record<string, string>;
   /** Per-conversation reasoning effort (codex/claude). Absent => backend default. */
   effort?: 'low' | 'medium' | 'high' | 'xhigh';
+  /** Per-conversation Codex service tier / speed. `priority` selects the Fast tier. */
+  serviceTier?: CodexServiceTier;
   /** Per-conversation active MCP server ids (#348): undefined = all enabled, [] = none. */
   activeMcpServers?: string[];
 }
@@ -635,6 +639,7 @@ ${collectedResponses.join('\n')}`;
     // surface; codex/codebuddy route separately).
     const decision = await this.computeFluxRouting(data.backend, data.currentModelId ?? undefined);
     this.lastRouting = decision.routing;
+    const serviceTier = normalizeCodexServiceTier(data.serviceTier);
     if (decision.routing === 'flux') {
       for (const k of decision.stripKeys) delete mergedEnv[k];
       Object.assign(mergedEnv, decision.env);
@@ -651,7 +656,8 @@ ${collectedResponses.join('\n')}`;
             sandboxMode,
             undefined,
             undefined,
-            data.effort
+            data.effort,
+            serviceTier
           );
           mergedEnv.CODEX_HOME = codexHome;
         } catch (err) {
@@ -700,18 +706,22 @@ ${collectedResponses.join('\n')}`;
     }
 
     // Native (non-Flux) codex spawns: point CODEX_HOME at a Wayland-scoped clone
-    // of the user's ~/.codex so we can set the session sandbox mode WITHOUT ever
-    // writing the user's own config.toml (#536). The clone copies their config
-    // verbatim (model/provider/MCP/settings) + mirrors auth.json, overriding only
-    // sandbox_mode. Flux-routed codex already got its own scoped CODEX_HOME above.
-    if (
-      data.backend === 'codex' &&
-      decision.routing !== 'flux' &&
-      !isCodexConfigTomlMode(data.sessionMode || this.currentMode)
-    ) {
+    // when Wayland needs to apply a per-session sandbox or explicit speed
+    // override. In Custom(config.toml) mode, preserve the user's sandbox from the
+    // real config and materialize only `service_tier` when the user picked speed.
+    if (data.backend === 'codex' && decision.routing !== 'flux') {
+      const configTomlMode = isCodexConfigTomlMode(data.sessionMode || this.currentMode);
+      const sandboxMode = configTomlMode ? null : normalizeCodexSandboxMode(data.sandboxMode);
       try {
-        const sandboxMode = normalizeCodexSandboxMode(data.sandboxMode);
-        mergedEnv.CODEX_HOME = await materializeNativeCodexHome(app.getPath('userData'), sandboxMode);
+        if (!configTomlMode || serviceTier) {
+          mergedEnv.CODEX_HOME = await materializeNativeCodexHome(
+            app.getPath('userData'),
+            sandboxMode,
+            undefined,
+            undefined,
+            serviceTier
+          );
+        }
       } catch (err) {
         mainWarn('[AcpAgentManager]', 'materializeNativeCodexHome failed', err);
       }
@@ -1399,6 +1409,7 @@ ${collectedResponses.join('\n')}`;
 
   initAgent(data: AcpAgentManagerData = this.options) {
     if (this.bootstrap) return this.bootstrap;
+    data.serviceTier = normalizeCodexServiceTier(data.serviceTier) ?? undefined;
 
     this.bootstrapping = true;
     const bootstrapPromise = (async () => {
@@ -1441,6 +1452,7 @@ ${collectedResponses.join('\n')}`;
           sessionMode: this.currentMode,
           pendingConfigOptions: data.pendingConfigOptions,
           effort: data.effort,
+          serviceTier: data.serviceTier,
           // Per-conversation MCP scoping (#348): forward to loadBuiltinSessionMcpServers.
           activeMcpServers: data.activeMcpServers,
           // The read-only concierge diagnostics MCP server is Concierge-only.

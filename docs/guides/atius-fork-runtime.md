@@ -89,6 +89,7 @@ Generated artifacts are intentionally not tracked:
 - ACP detection stays quiet for missing optional CLIs while detecting Codex and Hermes Agent.
 - The GUID model picker keeps the selected Codex label even before `acp.cachedModels` exists.
 - Codex and Hermes display model and reasoning effort as separate adjacent controls; model menus do not duplicate effort variants.
+- Codex and Hermes display a separate speed selector beside model/effort. `Padrão` maps to `service_tier=normal`; `Rápido` maps to Codex's `service_tier=priority` Fast tier.
 - Codex permission mode includes `Custom (config.toml)` / `Personalizado(config.toml)` to delegate sandbox defaults back to the service user's Codex config.
 - The GUID agent pill bar exposes collapsed agents by accessible name so Hermes/Codex can be selected by keyboard and automation.
 - Mobile GUID controls wrap visibly instead of hiding later model/effort/permission or intent options behind horizontal overflow.

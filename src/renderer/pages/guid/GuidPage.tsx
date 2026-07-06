@@ -240,6 +240,7 @@ const GuidPage: React.FC = () => {
     selectedMode: agentSelection.selectedMode,
     selectedAcpModel: agentSelection.selectedAcpModel,
     selectedAcpEffort: agentSelection.selectedAcpEffort,
+    selectedAcpServiceTier: agentSelection.selectedAcpServiceTier,
     pendingConfigOptions: agentSelection.pendingConfigOptions,
     cachedConfigOptions: agentSelection.cachedConfigOptions,
     currentModel: modelSelection.currentModel,
@@ -872,6 +873,8 @@ const GuidPage: React.FC = () => {
       setSelectedAcpModel={agentSelection.setSelectedAcpModel}
       selectedAcpEffort={agentSelection.selectedAcpEffort}
       setSelectedAcpEffort={agentSelection.setSelectedAcpEffort}
+      selectedAcpServiceTier={agentSelection.selectedAcpServiceTier}
+      setSelectedAcpServiceTier={agentSelection.setSelectedAcpServiceTier}
       cachedConfigOptions={agentSelection.cachedConfigOptions}
       onConfigOptionSelect={agentSelection.setPendingConfigOption}
     />

@@ -70,6 +70,7 @@ function makeDeps(overrides: Partial<GuidSendDeps> = {}): GuidSendDeps {
     selectedMode: 'default',
     selectedAcpModel: null,
     selectedAcpEffort: null,
+    selectedAcpServiceTier: null,
     pendingConfigOptions: {},
     cachedConfigOptions: [],
     currentModel: undefined,
@@ -214,12 +215,13 @@ describe('useGuidSend', () => {
     });
   });
 
-  it('stores selected reasoning effort as ACP pending config and conversation extra', async () => {
+  it('stores selected reasoning effort and speed as ACP pending config and conversation extra', async () => {
     const deps = makeDeps({
       selectedAgent: 'codex',
       selectedAgentKey: 'codex',
       selectedAcpModel: 'gpt-5.5',
       selectedAcpEffort: 'xhigh',
+      selectedAcpServiceTier: 'priority',
       cachedConfigOptions: [
         {
           id: 'reasoning_effort',
@@ -229,6 +231,16 @@ describe('useGuidSend', () => {
           options: [
             { value: 'medium', name: 'Medium' },
             { value: 'xhigh', name: 'XHigh' },
+          ],
+        },
+        {
+          id: 'service_tier',
+          category: 'service_tier',
+          type: 'select',
+          currentValue: 'normal',
+          options: [
+            { value: 'normal', name: 'Default' },
+            { value: 'priority', name: 'Fast' },
           ],
         },
       ],
@@ -244,14 +256,12 @@ describe('useGuidSend', () => {
         type: 'acp',
         extra: expect.objectContaining({
           effort: 'xhigh',
-          pendingConfigOptions: { reasoning_effort: 'xhigh' },
-          cachedConfigOptions: [
-            expect.objectContaining({
-              id: 'reasoning_effort',
-              currentValue: 'xhigh',
-              selectedValue: 'xhigh',
-            }),
-          ],
+          serviceTier: 'priority',
+          pendingConfigOptions: { reasoning_effort: 'xhigh', service_tier: 'priority' },
+          cachedConfigOptions: expect.arrayContaining([
+            expect.objectContaining({ id: 'reasoning_effort', currentValue: 'xhigh', selectedValue: 'xhigh' }),
+            expect.objectContaining({ id: 'service_tier', currentValue: 'priority', selectedValue: 'priority' }),
+          ]),
         }),
       })
     );

@@ -1530,6 +1530,11 @@ export interface ICreateConversationParams {
      * each backend's config builder on the next turn. Absent => backend default.
      */
     effort?: 'low' | 'medium' | 'high' | 'xhigh';
+    /**
+     * Per-conversation Codex service tier / speed.
+     * `priority` maps to the Fast tier; absent preserves the backend default.
+     */
+    serviceTier?: 'normal' | 'priority';
     /** Team ownership - conversations with teamId are hidden from the sidebar */
     teamId?: string;
     /** Project ownership - stamps extra.projectId so the conversation lives under a project umbrella. */
