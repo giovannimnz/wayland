@@ -78,6 +78,18 @@ describe('getCookieOptions', () => {
     });
   });
 
+  it('does not issue Secure cookies to a direct HTTP VPN request when SERVER_BASE_URL is https', () => {
+    process.env.SERVER_BASE_URL = 'https://aion.example.com';
+    SERVER_CONFIG._currentConfig.allowRemote = true;
+    const req = buildRequest({ secure: false });
+
+    expect(getCookieOptions(req)).toEqual({
+      httpOnly: true,
+      secure: false,
+      sameSite: 'lax',
+    });
+  });
+
   it('honours req.secure for deployments that enable Express trust proxy', () => {
     const req = buildRequest({ secure: true });
 

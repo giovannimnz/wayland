@@ -27,10 +27,10 @@ index a85d779cb..36b229afd 100644
  ## Where to put new docs
 diff --git a/docs/guides/atius-fork-runtime.md b/docs/guides/atius-fork-runtime.md
 new file mode 100644
-index 000000000..7059c5407
+index 000000000..d895be085
 --- /dev/null
 +++ b/docs/guides/atius-fork-runtime.md
-@@ -0,0 +1,186 @@
+@@ -0,0 +1,189 @@
 +# Atius srv-3 fork/runtime guide
 +
 +This guide documents the ATIUS-managed source runtime served at
@@ -44,7 +44,7 @@ index 000000000..7059c5407
 +- repo: `/home/ubuntu/GitHub/wayland`
 +- service: `wayland.service`
 +- runtime entrypoint: `/home/ubuntu/GitHub/wayland/dist-server/server.mjs`
-+- port: `25808`
++- port: `25750`
 +- service user: `wayland`
 +
 +The deployment is rebuilt from source after custom patch application instead of
@@ -69,6 +69,7 @@ index 000000000..7059c5407
 +- `src/process/extensions/resolvers/ChannelPluginResolver.ts`
 +- `src/process/utils/initStorage.ts`
 +- `src/process/utils/shellEnv.ts`
++- `src/process/webserver/config/constants.ts`
 +- `src/process/webserver/routes/apiRoutes.ts`
 +- `src/process/webserver/websocket/WebSocketManager.ts`
 +- `src/renderer/components/layout/Layout.tsx`
@@ -124,6 +125,7 @@ index 000000000..7059c5407
 +- Codex and Hermes display model and reasoning effort as separate adjacent controls; model menus do not duplicate effort variants.
 +- Codex and Hermes display a separate speed selector beside model/effort. `Padrão` maps to `service_tier=normal`; `Rápido` maps to Codex's `service_tier=priority` Fast tier.
 +- Codex permission mode includes `Custom (config.toml)` / `Personalizado(config.toml)` to delegate sandbox defaults back to the service user's Codex config.
++- Direct VPN HTTP access uses `http://10.100.100.3:25750/`. Even with `SERVER_BASE_URL=https://wayland.atius.com.br` for the public entrypoint, request-scoped cookie options must not mark the session cookie as `Secure` on direct HTTP/VPN requests, otherwise login succeeds in JSON but the WebSocket reconnect has no `wayland-session` cookie and the GUID falls back to `wcore` / no model.
 +- The GUID agent pill bar exposes collapsed agents by accessible name so Hermes/Codex can be selected by keyboard and automation.
 +- Mobile GUID controls wrap visibly instead of hiding later model/effort/permission or intent options behind horizontal overflow.
 +- The left sidebar never exposes a bottom horizontal scrollbar; long recents and footer controls truncate or compact inside the available width.
@@ -155,18 +157,19 @@ index 000000000..7059c5407
 +```bash
 +NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/renderer/guid/firstSafeCuratedModel.test.ts
 +NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/AgentPillBar.dom.test.tsx tests/unit/renderer/guidModelSelector.dom.test.tsx tests/unit/useGuidSend.dom.test.ts tests/unit/process/task/codexNativeSandbox.test.ts tests/unit/process/task/codexConfigEffort.test.ts
++bun test tests/unit/webserver/cookieOptions.test.ts tests/unit/webserver/detectNetworkContext.test.ts
 +npm run typecheck
 +bash scripts/atius-build-renderer-overlay.sh
 +sudo systemctl restart wayland.service
 +systemctl is-active wayland.service
-+curl -fsS -o /dev/null -w "http=%{http_code}\n" http://127.0.0.1:25808/
++curl -fsS -o /dev/null -w "http=%{http_code}\n" http://127.0.0.1:25750/
 +journalctl -u wayland.service --since "5 minutes ago" --no-pager | grep -E "AgentRegistry|found 4 agents|Serving renderer|WebUI running"
 +```
 +
 +Expected runtime signals:
 +
 +- `wayland.service` is `active`
-+- local HTTP on `127.0.0.1:25808` returns `200`
++- local HTTP on `127.0.0.1:25750` returns `200`
 +- startup logs include `found 4 agents: Wayland Core, Gemini CLI, Codex, Hermes Agent`
 +
 +## Git/GitHub note
@@ -391,10 +394,10 @@ index 000000000..171b72c4f
 +bash "$ROOT/scripts/atius-build-renderer-overlay.sh"
 diff --git a/scripts/atius-refresh-source-patch.sh b/scripts/atius-refresh-source-patch.sh
 new file mode 100755
-index 000000000..e602baeab
+index 000000000..0d117c868
 --- /dev/null
 +++ b/scripts/atius-refresh-source-patch.sh
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,153 @@
 +#!/usr/bin/env bash
 +set -euo pipefail
 +ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -434,6 +437,7 @@ index 000000000..e602baeab
 +  src/process/task/hermesConfig.ts
 +  src/process/utils/initStorage.ts
 +  src/process/utils/shellEnv.ts
++  src/process/webserver/config/constants.ts
 +  src/process/webserver/routes/apiRoutes.ts
 +  src/process/webserver/websocket/WebSocketManager.ts
 +  src/renderer/components/layout/Layout.tsx
@@ -494,6 +498,8 @@ index 000000000..e602baeab
 +  tests/unit/renderer/guid/firstSafeCuratedModel.test.ts
 +  tests/unit/renderer/guidModelSelector.dom.test.tsx
 +  tests/unit/useGuidSend.dom.test.ts
++  tests/unit/webserver/cookieOptions.test.ts
++  tests/unit/webserver/detectNetworkContext.test.ts
 +  docs/README.md
 +  docs/guides/atius-fork-runtime.md
 +)
@@ -1530,6 +1536,42 @@ index 08940a733..c14dc87f6 100644
      ...process.env,
      ...shellEnv,
      ...customEnv,
+diff --git a/src/process/webserver/config/constants.ts b/src/process/webserver/config/constants.ts
+index 31e2c9210..58fcddebf 100644
+--- a/src/process/webserver/config/constants.ts
++++ b/src/process/webserver/config/constants.ts
+@@ -128,22 +128,25 @@ export const SERVER_CONFIG = {
+  *
+  * Signals (by priority):
+  * 1. WAYLAND_HTTPS=true / NODE_ENV=production + HTTPS=true (explicit opt-in)
+- * 2. SERVER_BASE_URL starts with https:// (explicit public entrypoint, e.g. nginx TLS)
+- * 3. req.secure === true (only meaningful once Express trust proxy is configured)
++ * 2. req.secure === true (only meaningful once Express trust proxy is configured)
++ * 3. SERVER_BASE_URL starts with https:// when no request context is available
+  *
+  * X-Forwarded-Proto is intentionally NOT read directly: without trust proxy it
+- * would be spoofable. Use SERVER_BASE_URL or trust proxy + req.secure instead.
++ * would be spoofable. For request-scoped decisions such as cookie attributes,
++ * use trust proxy + req.secure instead of a global public entrypoint: this lets
++ * the same process serve https://wayland.example.com and direct HTTP VPN origins
++ * without issuing unusable Secure cookies to the HTTP origin.
+  */
+ export function detectHttps(req?: Request): boolean {
+   if (process.env.WAYLAND_HTTPS === 'true' || (process.env.NODE_ENV === 'production' && process.env.HTTPS === 'true')) {
+     return true;
+   }
+
+-  if (process.env.SERVER_BASE_URL?.startsWith('https://')) {
+-    return true;
++  if (req) {
++    return req.secure === true;
+   }
+
+-  if (req?.secure) {
++  if (process.env.SERVER_BASE_URL?.startsWith('https://')) {
+     return true;
+   }
+
 diff --git a/src/process/webserver/routes/apiRoutes.ts b/src/process/webserver/routes/apiRoutes.ts
 index 08bfeb17c..1b5ca4bd1 100644
 --- a/src/process/webserver/routes/apiRoutes.ts
@@ -4576,3 +4618,63 @@ index 0ce473483..b32962ce8 100644
    describe('sendMessageHandler', () => {
      it('resets input state after successful send', async () => {
        const deps = makeDeps();
+diff --git a/tests/unit/webserver/cookieOptions.test.ts b/tests/unit/webserver/cookieOptions.test.ts
+index 1d0ebb96c..745609345 100644
+--- a/tests/unit/webserver/cookieOptions.test.ts
++++ b/tests/unit/webserver/cookieOptions.test.ts
+@@ -78,6 +78,18 @@ describe('getCookieOptions', () => {
+     });
+   });
+
++  it('does not issue Secure cookies to a direct HTTP VPN request when SERVER_BASE_URL is https', () => {
++    process.env.SERVER_BASE_URL = 'https://aion.example.com';
++    SERVER_CONFIG._currentConfig.allowRemote = true;
++    const req = buildRequest({ secure: false });
++
++    expect(getCookieOptions(req)).toEqual({
++      httpOnly: true,
++      secure: false,
++      sameSite: 'lax',
++    });
++  });
++
+   it('honours req.secure for deployments that enable Express trust proxy', () => {
+     const req = buildRequest({ secure: true });
+
+diff --git a/tests/unit/webserver/detectNetworkContext.test.ts b/tests/unit/webserver/detectNetworkContext.test.ts
+index b27262693..e1508766d 100644
+--- a/tests/unit/webserver/detectNetworkContext.test.ts
++++ b/tests/unit/webserver/detectNetworkContext.test.ts
+@@ -1,4 +1,5 @@
+-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import os from 'os';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+ import type { Request } from 'express';
+ import {
+   detectNetworkContext,
+@@ -28,10 +29,12 @@ describe('detectNetworkContext', () => {
+     delete process.env.SERVER_BASE_URL;
+     delete process.env.HTTPS;
+     process.env.NODE_ENV = 'test';
++    vi.spyOn(os, 'networkInterfaces').mockReturnValue({});
+     __resetTailscaleIfaceCacheForTests();
+   });
+
+   afterEach(() => {
++    vi.restoreAllMocks();
+     for (const [k, v] of Object.entries(saved)) {
+       if (v === undefined) delete process.env[k];
+       else process.env[k] = v;
+@@ -44,10 +47,10 @@ describe('detectNetworkContext', () => {
+     expect(ctx.isHttps).toBe(true);
+   });
+
+-  it('isHttps reflects SERVER_BASE_URL https://', () => {
++  it('does not treat SERVER_BASE_URL https:// as proof that a direct HTTP request is secure', () => {
+     process.env.SERVER_BASE_URL = 'https://box.example.com';
+     const ctx = detectNetworkContext(makeReq({ hostname: 'box.example.com', peer: '203.0.113.5' }));
+-    expect(ctx.isHttps).toBe(true);
++    expect(ctx.isHttps).toBe(false);
+   });
+
+   it('isHttps reflects req.secure (trust-proxy resolved)', () => {

@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import os from 'os';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Request } from 'express';
 import {
   detectNetworkContext,
@@ -28,10 +29,12 @@ describe('detectNetworkContext', () => {
     delete process.env.SERVER_BASE_URL;
     delete process.env.HTTPS;
     process.env.NODE_ENV = 'test';
+    vi.spyOn(os, 'networkInterfaces').mockReturnValue({});
     __resetTailscaleIfaceCacheForTests();
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     for (const [k, v] of Object.entries(saved)) {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
@@ -44,10 +47,10 @@ describe('detectNetworkContext', () => {
     expect(ctx.isHttps).toBe(true);
   });
 
-  it('isHttps reflects SERVER_BASE_URL https://', () => {
+  it('does not treat SERVER_BASE_URL https:// as proof that a direct HTTP request is secure', () => {
     process.env.SERVER_BASE_URL = 'https://box.example.com';
     const ctx = detectNetworkContext(makeReq({ hostname: 'box.example.com', peer: '203.0.113.5' }));
-    expect(ctx.isHttps).toBe(true);
+    expect(ctx.isHttps).toBe(false);
   });
 
   it('isHttps reflects req.secure (trust-proxy resolved)', () => {

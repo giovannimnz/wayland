@@ -11,7 +11,7 @@ runs the source checkout directly:
 - repo: `/home/ubuntu/GitHub/wayland`
 - service: `wayland.service`
 - runtime entrypoint: `/home/ubuntu/GitHub/wayland/dist-server/server.mjs`
-- port: `25808`
+- port: `25750`
 - service user: `wayland`
 
 The deployment is rebuilt from source after custom patch application instead of
@@ -36,6 +36,7 @@ Tracked ATIUS source customizations live in these files:
 - `src/process/extensions/resolvers/ChannelPluginResolver.ts`
 - `src/process/utils/initStorage.ts`
 - `src/process/utils/shellEnv.ts`
+- `src/process/webserver/config/constants.ts`
 - `src/process/webserver/routes/apiRoutes.ts`
 - `src/process/webserver/websocket/WebSocketManager.ts`
 - `src/renderer/components/layout/Layout.tsx`
@@ -91,6 +92,7 @@ Generated artifacts are intentionally not tracked:
 - Codex and Hermes display model and reasoning effort as separate adjacent controls; model menus do not duplicate effort variants.
 - Codex and Hermes display a separate speed selector beside model/effort. `Padrão` maps to `service_tier=normal`; `Rápido` maps to Codex's `service_tier=priority` Fast tier.
 - Codex permission mode includes `Custom (config.toml)` / `Personalizado(config.toml)` to delegate sandbox defaults back to the service user's Codex config.
+- Direct VPN HTTP access uses `http://10.100.100.3:25750/`. Even with `SERVER_BASE_URL=https://wayland.atius.com.br` for the public entrypoint, request-scoped cookie options must not mark the session cookie as `Secure` on direct HTTP/VPN requests, otherwise login succeeds in JSON but the WebSocket reconnect has no `wayland-session` cookie and the GUID falls back to `wcore` / no model.
 - The GUID agent pill bar exposes collapsed agents by accessible name so Hermes/Codex can be selected by keyboard and automation.
 - Mobile GUID controls wrap visibly instead of hiding later model/effort/permission or intent options behind horizontal overflow.
 - The left sidebar never exposes a bottom horizontal scrollbar; long recents and footer controls truncate or compact inside the available width.
@@ -122,18 +124,19 @@ bash scripts/atius-update.sh
 ```bash
 NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/renderer/guid/firstSafeCuratedModel.test.ts
 NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/AgentPillBar.dom.test.tsx tests/unit/renderer/guidModelSelector.dom.test.tsx tests/unit/useGuidSend.dom.test.ts tests/unit/process/task/codexNativeSandbox.test.ts tests/unit/process/task/codexConfigEffort.test.ts
+bun test tests/unit/webserver/cookieOptions.test.ts tests/unit/webserver/detectNetworkContext.test.ts
 npm run typecheck
 bash scripts/atius-build-renderer-overlay.sh
 sudo systemctl restart wayland.service
 systemctl is-active wayland.service
-curl -fsS -o /dev/null -w "http=%{http_code}\n" http://127.0.0.1:25808/
+curl -fsS -o /dev/null -w "http=%{http_code}\n" http://127.0.0.1:25750/
 journalctl -u wayland.service --since "5 minutes ago" --no-pager | grep -E "AgentRegistry|found 4 agents|Serving renderer|WebUI running"
 ```
 
 Expected runtime signals:
 
 - `wayland.service` is `active`
-- local HTTP on `127.0.0.1:25808` returns `200`
+- local HTTP on `127.0.0.1:25750` returns `200`
 - startup logs include `found 4 agents: Wayland Core, Gemini CLI, Codex, Hermes Agent`
 
 ## Git/GitHub note

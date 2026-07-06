@@ -37,6 +37,7 @@ FILES=(
   src/process/task/hermesConfig.ts
   src/process/utils/initStorage.ts
   src/process/utils/shellEnv.ts
+  src/process/webserver/config/constants.ts
   src/process/webserver/routes/apiRoutes.ts
   src/process/webserver/websocket/WebSocketManager.ts
   src/renderer/components/layout/Layout.tsx
@@ -97,6 +98,8 @@ FILES=(
   tests/unit/renderer/guid/firstSafeCuratedModel.test.ts
   tests/unit/renderer/guidModelSelector.dom.test.tsx
   tests/unit/useGuidSend.dom.test.ts
+  tests/unit/webserver/cookieOptions.test.ts
+  tests/unit/webserver/detectNetworkContext.test.ts
   docs/README.md
   docs/guides/atius-fork-runtime.md
 )

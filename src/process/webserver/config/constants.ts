@@ -128,22 +128,25 @@ export const SERVER_CONFIG = {
  *
  * Signals (by priority):
  * 1. WAYLAND_HTTPS=true / NODE_ENV=production + HTTPS=true (explicit opt-in)
- * 2. SERVER_BASE_URL starts with https:// (explicit public entrypoint, e.g. nginx TLS)
- * 3. req.secure === true (only meaningful once Express trust proxy is configured)
+ * 2. req.secure === true (only meaningful once Express trust proxy is configured)
+ * 3. SERVER_BASE_URL starts with https:// when no request context is available
  *
  * X-Forwarded-Proto is intentionally NOT read directly: without trust proxy it
- * would be spoofable. Use SERVER_BASE_URL or trust proxy + req.secure instead.
+ * would be spoofable. For request-scoped decisions such as cookie attributes,
+ * use trust proxy + req.secure instead of a global public entrypoint: this lets
+ * the same process serve https://wayland.example.com and direct HTTP VPN origins
+ * without issuing unusable Secure cookies to the HTTP origin.
  */
 export function detectHttps(req?: Request): boolean {
   if (process.env.WAYLAND_HTTPS === 'true' || (process.env.NODE_ENV === 'production' && process.env.HTTPS === 'true')) {
     return true;
   }
 
-  if (process.env.SERVER_BASE_URL?.startsWith('https://')) {
-    return true;
+  if (req) {
+    return req.secure === true;
   }
 
-  if (req?.secure) {
+  if (process.env.SERVER_BASE_URL?.startsWith('https://')) {
     return true;
   }
 
