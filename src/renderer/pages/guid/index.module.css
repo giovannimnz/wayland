@@ -391,6 +391,36 @@
   gap: 6px !important;
 }
 
+.actionConfigGroup :global([data-testid='mode-selector']) {
+  flex: 0 1 240px;
+  max-width: 240px;
+  min-width: 0;
+}
+
+.actionConfigGroup :global([data-testid='mode-selector'] .agent-mode-compact-pill) {
+  width: 100%;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+.actionConfigGroup :global([data-testid='mode-selector'] .arco-btn-content),
+.actionConfigGroup :global([data-testid='mode-selector'] .arco-btn-content > span:first-child) {
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+@media (max-width: 1200px) {
+  .actionConfigGroup :global([data-testid='mode-selector']) {
+    flex-basis: 240px;
+    max-width: 240px;
+  }
+
+  .actionConfigGroup :global([data-testid='mode-selector'] .agent-mode-compact-prefix) {
+    display: none;
+  }
+}
+
 .actionSubmit {
   display: flex;
   align-items: center;
@@ -491,6 +521,12 @@
 
   .actionConfigGroup {
     gap: 12px;
+    max-width: 100%;
+  }
+
+  .actionConfigGroup :global([data-testid='mode-selector']) {
+    flex: 0 1 min(220px, 100%);
+    max-width: min(220px, 100%);
   }
 
   .actionConfigGroupWithDivider > :first-child::after {

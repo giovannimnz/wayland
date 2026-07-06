@@ -280,13 +280,13 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
         : canSwitchMode
           ? getCurrentModeLabel()
           : agentName || backend || 'Agent';
-    const compactLabel =
-      compactLabelOverride ||
-      (compactLabelPrefix && compactLabelType !== 'agent'
-        ? hideCompactLabelPrefixOnMobile && isMobile
-          ? baseCompactLabel
-          : `${compactLabelPrefix} · ${baseCompactLabel}`
-        : baseCompactLabel);
+    const showCompactPrefix = Boolean(
+      compactLabelPrefix &&
+      compactLabelType !== 'agent' &&
+      !compactLabelOverride &&
+      !(hideCompactLabelPrefixOnMobile && isMobile)
+    );
+    const compactLabel = compactLabelOverride || baseCompactLabel;
     if (!canInteract && legacyCompactBehavior) {
       return null;
     }
@@ -307,6 +307,11 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
           <span className='flex items-center gap-6px min-w-0 leading-none'>
             {compactLeadingIcon && <span className='shrink-0 inline-flex items-center'>{compactLeadingIcon}</span>}
             {showLogoInCompact && <span className='shrink-0 inline-flex items-center'>{renderLogo()}</span>}
+            {showCompactPrefix && (
+              <span className='agent-mode-compact-prefix shrink-0 whitespace-nowrap leading-none'>
+                {compactLabelPrefix} ·
+              </span>
+            )}
             <MarqueePillLabel>{compactLabel}</MarqueePillLabel>
             {canInteract && <ChevronDown size={12} className='text-t-tertiary shrink-0' />}
           </span>

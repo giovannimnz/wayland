@@ -40,6 +40,7 @@ FILES=(
   src/process/webserver/routes/apiRoutes.ts
   src/process/webserver/websocket/WebSocketManager.ts
   src/renderer/components/agent/AgentModeSelector.tsx
+  src/renderer/components/agent/MarqueePillLabel.tsx
   src/renderer/components/model/modelSelector/EffortSubRow.tsx
   src/renderer/components/model/modelSelector/modelSelectorTypes.ts
   src/renderer/components/settings/DirectorySelectionModal.tsx

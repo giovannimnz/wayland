@@ -180,7 +180,7 @@ index 000000000..b1a24c05a
 +- Hermes/Codex agent pills are accessible by name for keyboard/automation;
 +- mobile composer controls and intent pills wrap visibly.
 diff --git a/package.json b/package.json
-index 321ffaef7..6a3832ab5 100644
+index 2f7e4d43b..b895002c1 100644
 --- a/package.json
 +++ b/package.json
 @@ -83,7 +83,12 @@
@@ -353,10 +353,10 @@ index 000000000..171b72c4f
 +bash "$ROOT/scripts/atius-build-renderer-overlay.sh"
 diff --git a/scripts/atius-refresh-source-patch.sh b/scripts/atius-refresh-source-patch.sh
 new file mode 100755
-index 000000000..b647f763c
+index 000000000..90a95f65b
 --- /dev/null
 +++ b/scripts/atius-refresh-source-patch.sh
-@@ -0,0 +1,141 @@
+@@ -0,0 +1,142 @@
 +#!/usr/bin/env bash
 +set -euo pipefail
 +ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -399,6 +399,7 @@ index 000000000..b647f763c
 +  src/process/webserver/routes/apiRoutes.ts
 +  src/process/webserver/websocket/WebSocketManager.ts
 +  src/renderer/components/agent/AgentModeSelector.tsx
++  src/renderer/components/agent/MarqueePillLabel.tsx
 +  src/renderer/components/model/modelSelector/EffortSubRow.tsx
 +  src/renderer/components/model/modelSelector/modelSelectorTypes.ts
 +  src/renderer/components/settings/DirectorySelectionModal.tsx
@@ -616,10 +617,38 @@ index d9ba0071b..6fd211ce2 100755
      print_summary
  }
 diff --git a/src/common/adapter/ipcBridge.ts b/src/common/adapter/ipcBridge.ts
-index 71867e0e0..78fd74d64 100644
+index 4f4c0a070..78fd74d64 100644
 --- a/src/common/adapter/ipcBridge.ts
 +++ b/src/common/adapter/ipcBridge.ts
-@@ -1529,7 +1529,7 @@ export interface ICreateConversationParams {
+@@ -87,13 +87,6 @@ export type SkillStats = {
+   verified: number;
+ };
+
+-/** One progress tick of a full-library skill scan (see `skills.scanProgress`). */
+-export type SkillScanProgress = {
+-  done: number;
+-  total: number;
+-  currentName: string;
+-};
+-
+ /**
+  * Result of a shell open/reveal operation. The IPC bridge's `invoke` has no
+  * rejection channel (a throwing provider leaves the caller's promise pending
+@@ -513,13 +506,6 @@ export const skills = {
+    * entries were (re)scanned. Never spends a model call — first-party content.
+    */
+   scanLibrary: buildProvider<{ rescanned: number }, void>('skills.scan-library'),
+-  /**
+-   * Library-sweep progress (main → renderer). Emitted from the `rescanAll` /
+-   * `scanLibrary` / app-start sweep every few skills, plus a final
+-   * `done === total` tick, so the Skills page can show "Scanning 640 / 1,900"
+-   * instead of an indeterminate spinner.
+-   */
+-  scanProgress: buildEmitter<SkillScanProgress>('skills.scan-progress'),
+   import: {
+     /** Import a skill from a local folder path. */
+     folder: buildProvider<ImportResult, { srcPath: string }>('skills.import.folder'),
+@@ -1543,7 +1529,7 @@ export interface ICreateConversationParams {
       * (Codex / WCore / Claude-ACP). Persisted on the conversation and read by
       * each backend's config builder on the next turn. Absent => backend default.
       */
@@ -919,7 +948,7 @@ index 09d5fa5d3..7468ee4a2 100644
 
        if (this.isYoloMode(prev) && !this.isYoloMode(mode)) {
 diff --git a/src/process/task/WCoreManager.ts b/src/process/task/WCoreManager.ts
-index 29b7ea4a9..906636627 100644
+index 61a9c7519..906636627 100644
 --- a/src/process/task/WCoreManager.ts
 +++ b/src/process/task/WCoreManager.ts
 @@ -119,7 +119,7 @@ type WCoreManagerData = {
@@ -931,6 +960,42 @@ index 29b7ea4a9..906636627 100644
    /**
     * Per-conversation MCP scoping (#348): the user-server ids active for this
     * chat. `undefined` => all enabled servers; `[]` => no user servers. Forwarded
+@@ -1134,17 +1134,17 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
+         // confirm() (keyed via pendingApprovalTokens).
+         if (autoMode && !isInfo && appr.resumeToken) {
+           const callId = appr.callId ?? '';
+-          // A non-interactive spawn (channel/cron sets this.yoloMode) is genuinely
+-          // autonomous - there is no user to prompt, and it opted into full-auto.
+-          // Escalating to the Confirming gate here would hang the turn forever
+-          // (no one to answer), so auto-resume(true) as this path always did
+-          // before #264's escalation was added. Interactive auto modes (below)
+-          // still route to the user's confirmation gate.
++          // A non-interactive spawn (channel/cron sets this.yoloMode) has no user
++          // to prompt. addConfirmation() would auto-pick the first (allow) option
++          // under yoloMode and SILENTLY APPROVE - the opposite of what an
++          // un-anticipated approval needs. So loud-deny instead: a visible,
++          // recorded denial, never a silent approve and never a hang.
+           if (this.yoloMode) {
+-            this.agent?.resumeApproval(appr.resumeToken, true);
+-            mainLog(
++            this.agent?.resumeApproval(appr.resumeToken, false);
++            mainError(
+               '[WCoreManager]',
+-              `approval_required reason='${appr.reason}' in a non-interactive (yoloMode) session; auto-approved`
++              `approval_required reason='${appr.reason}' in a non-interactive (yoloMode) session with no user to prompt; denied`,
++              data.data
+             );
+             return;
+           }
+@@ -1153,7 +1153,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
+           this.addConfirmation({
+             title: 'messages.permissionRequest',
+             id: callId,
+-            description: appr.reason ? `reason: ${appr.reason}` : context,
++            description: context || `reason: ${appr.reason ?? ''}`,
+             callId,
+             options: [
+               { label: 'messages.confirmation.yesAllowOnce', value: ToolConfirmationOutcome.ProceedOnce },
 diff --git a/src/process/task/claudeConfig.ts b/src/process/task/claudeConfig.ts
 index 17ce3ae28..1cb8f3866 100644
 --- a/src/process/task/claudeConfig.ts
@@ -1379,7 +1444,7 @@ index f3cc42413..ed3d2498f 100644
      );
    }
 diff --git a/src/renderer/components/agent/AgentModeSelector.tsx b/src/renderer/components/agent/AgentModeSelector.tsx
-index 6af365fd7..5990185c7 100644
+index 6af365fd7..111b9a56a 100644
 --- a/src/renderer/components/agent/AgentModeSelector.tsx
 +++ b/src/renderer/components/agent/AgentModeSelector.tsx
 @@ -7,6 +7,7 @@
@@ -1412,6 +1477,70 @@ index 6af365fd7..5990185c7 100644
    }, [dynamicModes, cachedModes, backend]);
    const defaultMode = modes[0]?.value ?? 'default';
    // Validate initialMode against available modes; fall back to backend's default
+@@ -270,13 +280,13 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
+         : canSwitchMode
+           ? getCurrentModeLabel()
+           : agentName || backend || 'Agent';
+-    const compactLabel =
+-      compactLabelOverride ||
+-      (compactLabelPrefix && compactLabelType !== 'agent'
+-        ? hideCompactLabelPrefixOnMobile && isMobile
+-          ? baseCompactLabel
+-          : `${compactLabelPrefix} · ${baseCompactLabel}`
+-        : baseCompactLabel);
++    const showCompactPrefix = Boolean(
++      compactLabelPrefix &&
++      compactLabelType !== 'agent' &&
++      !compactLabelOverride &&
++      !(hideCompactLabelPrefixOnMobile && isMobile)
++    );
++    const compactLabel = compactLabelOverride || baseCompactLabel;
+     if (!canInteract && legacyCompactBehavior) {
+       return null;
+     }
+@@ -297,6 +307,11 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
+           <span className='flex items-center gap-6px min-w-0 leading-none'>
+             {compactLeadingIcon && <span className='shrink-0 inline-flex items-center'>{compactLeadingIcon}</span>}
+             {showLogoInCompact && <span className='shrink-0 inline-flex items-center'>{renderLogo()}</span>}
++            {showCompactPrefix && (
++              <span className='agent-mode-compact-prefix shrink-0 whitespace-nowrap leading-none'>
++                {compactLabelPrefix} ·
++              </span>
++            )}
+             <MarqueePillLabel>{compactLabel}</MarqueePillLabel>
+             {canInteract && <ChevronDown size={12} className='text-t-tertiary shrink-0' />}
+           </span>
+diff --git a/src/renderer/components/agent/MarqueePillLabel.tsx b/src/renderer/components/agent/MarqueePillLabel.tsx
+index a5880605d..41ce06751 100644
+--- a/src/renderer/components/agent/MarqueePillLabel.tsx
++++ b/src/renderer/components/agent/MarqueePillLabel.tsx
+@@ -74,7 +74,8 @@ const MarqueePillLabel: React.FC<{
+   return (
+     <span
+       ref={containerRef}
+-      className='inline-block overflow-hidden whitespace-nowrap leading-none min-w-0 relative'
++      className='inline-block max-w-full overflow-hidden whitespace-nowrap leading-none min-w-0 relative'
++      title={children}
+       onMouseEnter={handleMouseEnter}
+       onMouseLeave={handleMouseLeave}
+     >
+@@ -87,7 +88,15 @@ const MarqueePillLabel: React.FC<{
+         {children}
+       </span>
+       {/* Static text: visible by default, hidden when marquee is active */}
+-      <span className={active ? 'leading-none invisible' : 'leading-none'}>{children}</span>
++      <span
++        className={
++          active
++            ? 'block overflow-hidden text-ellipsis whitespace-nowrap leading-none invisible'
++            : 'block overflow-hidden text-ellipsis whitespace-nowrap leading-none'
++        }
++      >
++        {children}
++      </span>
+       {/* Marquee track: overlaid via absolute, visible only when active */}
+       <span
+         ref={marqueeRef}
 diff --git a/src/renderer/components/model/modelSelector/EffortSubRow.tsx b/src/renderer/components/model/modelSelector/EffortSubRow.tsx
 index 1b7056f39..e13224722 100644
 --- a/src/renderer/components/model/modelSelector/EffortSubRow.tsx
@@ -2521,10 +2650,47 @@ index e5c063be6..1091d6b03 100644
    // No usable model configured. Mirrors the send-time validation: only the
    // model-backed backends actually reject on a missing model - the Gemini path
 diff --git a/src/renderer/pages/guid/index.module.css b/src/renderer/pages/guid/index.module.css
-index d4f57919e..c9f127437 100644
+index d4f57919e..29cf9a341 100644
 --- a/src/renderer/pages/guid/index.module.css
 +++ b/src/renderer/pages/guid/index.module.css
-@@ -454,27 +454,35 @@
+@@ -391,6 +391,36 @@
+   gap: 6px !important;
+ }
+
++.actionConfigGroup :global([data-testid='mode-selector']) {
++  flex: 0 1 240px;
++  max-width: 240px;
++  min-width: 0;
++}
++
++.actionConfigGroup :global([data-testid='mode-selector'] .agent-mode-compact-pill) {
++  width: 100%;
++  max-width: 100% !important;
++  min-width: 0 !important;
++  overflow: hidden !important;
++}
++
++.actionConfigGroup :global([data-testid='mode-selector'] .arco-btn-content),
++.actionConfigGroup :global([data-testid='mode-selector'] .arco-btn-content > span:first-child) {
++  min-width: 0 !important;
++  overflow: hidden !important;
++}
++
++@media (max-width: 1200px) {
++  .actionConfigGroup :global([data-testid='mode-selector']) {
++    flex-basis: 240px;
++    max-width: 240px;
++  }
++
++  .actionConfigGroup :global([data-testid='mode-selector'] .agent-mode-compact-prefix) {
++    display: none;
++  }
++}
++
+ .actionSubmit {
+   display: flex;
+   align-items: center;
+@@ -454,27 +484,35 @@
    }
 
    .actionRow {
@@ -2572,7 +2738,20 @@ index d4f57919e..c9f127437 100644
    }
 
    .actionEntry {
-@@ -694,30 +702,28 @@
+@@ -483,6 +521,12 @@
+
+   .actionConfigGroup {
+     gap: 12px;
++    max-width: 100%;
++  }
++
++  .actionConfigGroup :global([data-testid='mode-selector']) {
++    flex: 0 1 min(220px, 100%);
++    max-width: min(220px, 100%);
+   }
+
+   .actionConfigGroupWithDivider > :first-child::after {
+@@ -694,30 +738,28 @@
 
    .actionTools {
      gap: 6px;
@@ -2615,7 +2794,7 @@ index d4f57919e..c9f127437 100644
 
    .actionSubmit {
 diff --git a/src/renderer/services/i18n/i18n-keys.d.ts b/src/renderer/services/i18n/i18n-keys.d.ts
-index a608f31a6..941cf099d 100644
+index d56ab7cfa..941cf099d 100644
 --- a/src/renderer/services/i18n/i18n-keys.d.ts
 +++ b/src/renderer/services/i18n/i18n-keys.d.ts
 @@ -48,6 +48,7 @@ export type I18nKey =
@@ -2635,6 +2814,14 @@ index a608f31a6..941cf099d 100644
    | 'conversation.modelSelector.emptyBody'
    | 'conversation.modelSelector.emptyFlux'
    | 'conversation.modelSelector.emptySub'
+@@ -4653,7 +4656,6 @@ export type I18nKey =
+   | 'skills.import.zip.placeholder'
+   | 'skills.scanLibrary.done'
+   | 'skills.scanLibrary.failed'
+-  | 'skills.scanLibrary.progress'
+   | 'skills.search.empty'
+   | 'skills.search.emptyLibrary'
+   | 'skills.search.placeholder'
 diff --git a/src/renderer/services/i18n/index.ts b/src/renderer/services/i18n/index.ts
 index dfed662be..11974739a 100644
 --- a/src/renderer/services/i18n/index.ts

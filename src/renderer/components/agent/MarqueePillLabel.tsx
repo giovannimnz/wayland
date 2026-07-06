@@ -74,7 +74,8 @@ const MarqueePillLabel: React.FC<{
   return (
     <span
       ref={containerRef}
-      className='inline-block overflow-hidden whitespace-nowrap leading-none min-w-0 relative'
+      className='inline-block max-w-full overflow-hidden whitespace-nowrap leading-none min-w-0 relative'
+      title={children}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
@@ -87,7 +88,15 @@ const MarqueePillLabel: React.FC<{
         {children}
       </span>
       {/* Static text: visible by default, hidden when marquee is active */}
-      <span className={active ? 'leading-none invisible' : 'leading-none'}>{children}</span>
+      <span
+        className={
+          active
+            ? 'block overflow-hidden text-ellipsis whitespace-nowrap leading-none invisible'
+            : 'block overflow-hidden text-ellipsis whitespace-nowrap leading-none'
+        }
+      >
+        {children}
+      </span>
       {/* Marquee track: overlaid via absolute, visible only when active */}
       <span
         ref={marqueeRef}
