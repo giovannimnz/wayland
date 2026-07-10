@@ -21,6 +21,7 @@ FILES=(
   scripts/atius-build-renderer-overlay.sh
   scripts/atius-postinstall-hook.sh
   scripts/atius-refresh-source-patch.sh
+  scripts/atius-sync-ubuntu-runtime.mjs
   scripts/atius-reapply-renderer-overlay.sh
   scripts/atius-update.sh
   scripts/atius-wayland-https-proxy.js
@@ -58,6 +59,7 @@ FILES=(
   src/renderer/pages/guid/index.module.css
   src/renderer/pages/guid/components/AgentPillBar.tsx
   src/renderer/pages/guid/components/GuidActionRow.tsx
+  src/renderer/pages/guid/components/GuidInputCard.tsx
   src/renderer/pages/guid/components/GuidModelSelector.tsx
   src/renderer/pages/guid/components/newChatStarter/IntentPillBar.module.css
   src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
@@ -114,7 +116,16 @@ git rev-parse --verify "$BASE_REF" >/dev/null 2>&1 || {
 # so dependency and version bumps from upstream are never frozen by our fork.
 upstream_pkg_tmp="$(mktemp)"
 patch_tmp="$(mktemp)"
-cleanup() { rm -f "$upstream_pkg_tmp" "$patch_tmp"; }
+INTENT_TO_ADD=()
+reset_intent_to_add() {
+  if [[ ${#INTENT_TO_ADD[@]} -gt 0 ]]; then
+    git reset -q -- "${INTENT_TO_ADD[@]}" >/dev/null 2>&1 || true
+  fi
+}
+cleanup() {
+  reset_intent_to_add
+  rm -f "$upstream_pkg_tmp" "$patch_tmp"
+}
 trap cleanup EXIT
 git show "$BASE_REF:package.json" > "$upstream_pkg_tmp"
 node - "$upstream_pkg_tmp" "$ROOT/package.json" <<'NODE'
@@ -133,6 +144,13 @@ upstream.scripts = {
 fs.writeFileSync(currentPath, JSON.stringify(upstream, null, 2) + '\n');
 NODE
 
+for file in "${FILES[@]}"; do
+  if [[ -e "$file" ]] && ! git ls-files --error-unmatch -- "$file" >/dev/null 2>&1; then
+    git add -N -- "$file"
+    INTENT_TO_ADD+=("$file")
+  fi
+done
+
 mkdir -p "$(dirname "$PATCH")"
 git diff --no-ext-diff --binary "$BASE_REF" -- "${FILES[@]}" > "$patch_tmp"
 perl -pi -e 's/[ \t]+$//' "$patch_tmp"
@@ -141,6 +159,7 @@ if [[ -f "$PATCH" ]] && cmp -s "$patch_tmp" "$PATCH"; then
   exit 0
 fi
 mv "$patch_tmp" "$PATCH"
+cleanup
 trap - EXIT
 chmod 0644 "$PATCH"
 echo "[atius-refresh] patch updated: $PATCH"

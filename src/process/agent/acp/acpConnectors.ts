@@ -127,6 +127,11 @@ function shouldPreferDirectCodexAcpPackage(): boolean {
   return process.platform === 'win32' || process.platform === 'linux';
 }
 
+function resolveWaylandCodexAcpCliOverride(): string | null {
+  const override = process.env.WAYLAND_CODEX_ACP_CLI?.trim();
+  return override && override.length > 0 ? override : null;
+}
+
 function extractCodexPlatformPackageFromError(errorMessage: string): string | null {
   const packageMatch = errorMessage.match(/Cannot find package '(@zed-industries\/codex-acp-[^']+)'/i);
   if (packageMatch) {
@@ -791,6 +796,13 @@ export function connectCodex(
   customEnv?: Record<string, string>
 ): Promise<void> {
   return (async () => {
+    const cliOverride = resolveWaylandCodexAcpCliOverride();
+    if (cliOverride) {
+      mainWarn('[ACP codex]', `Using explicit Codex ACP CLI override: ${cliOverride}`);
+      await hooks.setup(await spawnGenericBackend('codex', cliOverride, workingDir, [], customEnv));
+      return;
+    }
+
     const codexPlatformPackage = resolvePreferredCodexAcpPlatformPackage();
     // Resolve the latest published codex-acp at spawn time (fallback to the
     // pinned CODEX_ACP_NPX_PACKAGE offline).

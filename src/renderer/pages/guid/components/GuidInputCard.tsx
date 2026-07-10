@@ -44,6 +44,8 @@ type GuidInputCardProps = {
   mentionOpen: boolean;
   mentionSelectorBadge: React.ReactNode;
   mentionDropdown: React.ReactNode;
+  slashCommandOpen: boolean;
+  slashCommandMenu: React.ReactNode;
 
   // Files
   files: string[];
@@ -75,6 +77,8 @@ const GuidInputCard: React.FC<GuidInputCardProps> = ({
   mentionOpen,
   mentionSelectorBadge,
   mentionDropdown,
+  slashCommandOpen,
+  slashCommandMenu,
   files,
   onRemoveFile,
   dir,
@@ -94,7 +98,7 @@ const GuidInputCard: React.FC<GuidInputCardProps> = ({
 
   return (
     <div
-      className={`${styles.guidInputCard} guid-input-card-shell relative p-16px ${dir ? 'pb-8px' : ''} border-3 b bg-dialog-fill-0 b-solid rd-20px flex flex-col ${mentionOpen ? 'overflow-visible' : 'overflow-hidden'} transition-all duration-200 ${isFileDragging ? 'border-dashed guid-input-card-shell--dragging' : ''}`}
+      className={`${styles.guidInputCard} guid-input-card-shell relative p-16px ${dir ? 'pb-8px' : ''} border-3 b bg-dialog-fill-0 b-solid rd-20px flex flex-col ${mentionOpen || slashCommandOpen ? 'overflow-visible' : 'overflow-hidden'} transition-all duration-200 ${isFileDragging ? 'border-dashed guid-input-card-shell--dragging' : ''}`}
       style={{
         zIndex: 1,
         transition: 'box-shadow 0.25s ease, border-color 0.25s ease, border-width 0.25s ease',
@@ -133,6 +137,11 @@ const GuidInputCard: React.FC<GuidInputCardProps> = ({
       {mentionOpen && (
         <div className='absolute z-50' style={{ left: 16, top: 44 }}>
           {mentionDropdown}
+        </div>
+      )}
+      {slashCommandOpen && (
+        <div className='absolute z-60' style={{ left: 16, right: 16, top: isMobile ? 70 : 86 }}>
+          {slashCommandMenu}
         </div>
       )}
       {files.length > 0 && (

@@ -27,10 +27,10 @@ index a85d779cb..36b229afd 100644
  ## Where to put new docs
 diff --git a/docs/guides/atius-fork-runtime.md b/docs/guides/atius-fork-runtime.md
 new file mode 100644
-index 000000000..2187bd85b
+index 000000000..86e0fcbc6
 --- /dev/null
 +++ b/docs/guides/atius-fork-runtime.md
-@@ -0,0 +1,197 @@
+@@ -0,0 +1,258 @@
 +# Atius srv-3 fork/runtime guide
 +
 +This guide documents the ATIUS-managed source runtime served at
@@ -44,9 +44,9 @@ index 000000000..2187bd85b
 +- repo: `/home/ubuntu/GitHub/wayland`
 +- service: `wayland.service`
 +- runtime entrypoint: `/home/ubuntu/GitHub/wayland/dist-server/server.mjs`
-+- HTTP port: `25750`
-+- HTTPS VPN port: `25725`, terminated by `wayland-https-proxy.service`
-+- service user: `wayland`
++- HTTP port: `25725`
++- HTTPS VPN port: `25750`, terminated by `wayland-https-proxy.service`
++- service user: `ubuntu`
 +
 +The deployment is rebuilt from source after custom patch application instead of
 +using the stock packaged auto-update flow.
@@ -57,8 +57,8 @@ index 000000000..2187bd85b
 +
 +- `patches/atius-webui-workspace-visible.patch`
 +- `scripts/atius-apply-source-patch.sh`
-+- `scripts/atius-build-renderer-overlay.sh`
 +- `scripts/atius-postinstall-hook.sh`
++- `scripts/atius-sync-ubuntu-runtime.mjs`
 +- `scripts/atius-refresh-source-patch.sh`
 +- `scripts/atius-reapply-renderer-overlay.sh`
 +- `scripts/atius-update.sh`
@@ -66,6 +66,7 @@ index 000000000..2187bd85b
 +- `scripts/install-ubuntu.sh`
 +- `scripts/build-server.mjs`
 +- `scripts/build-mcp-servers.js`
++- `scripts/atius-build-renderer-overlay.sh` (CPU guardrail: max 20% por padrão)
 +- `src/process/agent/acp/AcpDetector.ts`
 +- `src/process/extensions/data/bundle-vendored/agentProfileMerge.ts`
 +- `src/process/extensions/resolvers/ChannelPluginResolver.ts`
@@ -99,6 +100,7 @@ index 000000000..2187bd85b
 +- `src/renderer/pages/guid/index.module.css`
 +- `src/renderer/pages/guid/components/AgentPillBar.tsx`
 +- `src/renderer/pages/guid/components/GuidActionRow.tsx`
++- `src/renderer/pages/guid/components/GuidInputCard.tsx`
 +- `src/renderer/pages/guid/components/GuidModelSelector.tsx`
 +- `src/renderer/pages/guid/components/newChatStarter/IntentPillBar.module.css`
 +- `src/renderer/pages/guid/hooks/useGuidAgentSelection.ts`
@@ -109,6 +111,11 @@ index 000000000..2187bd85b
 +- `src/renderer/services/i18n/locales/*/conversation.json`
 +- `src/renderer/styles/layout.css`
 +- `src/renderer/utils/model/agentModes.ts`
++
++`scripts/atius-refresh-source-patch.sh` captures listed new files with a temporary
++`git add -N` intent-to-add and resets that intent before exit. This lets the
++protected patch include new ATIUS files such as `scripts/atius-sync-ubuntu-runtime.mjs`
++without leaving the git index staged.
 +
 +Generated artifacts are intentionally not tracked:
 +
@@ -126,14 +133,37 @@ index 000000000..2187bd85b
 +- The GUID model picker keeps the selected Codex label even before `acp.cachedModels` exists.
 +- Codex and Hermes display model and reasoning effort as separate adjacent controls; model menus do not duplicate effort variants.
 +- Codex and Hermes display a separate speed selector beside model/effort. `Padrão` maps to `service_tier=normal`; `Rápido` maps to Codex's `service_tier=priority` Fast tier.
++- The GUID runtime agent selector is only for executable runtime agents/CLIs. Codex and Hermes Agent are the canonical ATIUS choices; Gemini CLI stays hidden/disabled for this deployment. GSD/SDD entries such as `$gsd-plan-phase` are commands/skills, not ACP runtime agents, and must never be generated as `codex-agent-profile-*` rows in `acp.customAgents`.
++- Codex and Hermes GUID model menus use ACP-reported/static bridge catalogs only. They must not fall back to the generic curated provider registry, because that can expose models the ACP adapter does not support.
++- The GUID composer uses the shared slash command controller. Typing `/gsd-plan`, `/gsd-debug`, or another generated Codex skill command opens the command menu in the composer; selecting the item inserts the matching `$gsd-*` invocation text and does not create or select a runtime agent.
 +- Codex permission mode includes `Custom (config.toml)` / `Personalizado(config.toml)` to delegate sandbox defaults back to the service user's Codex config.
-+- Direct VPN HTTP access uses `http://10.100.100.3:25750/`. Even with `SERVER_BASE_URL=https://wayland.atius.com.br` for the public entrypoint, request-scoped cookie options must not mark the session cookie as `Secure` on direct HTTP/VPN requests, otherwise login succeeds in JSON but the WebSocket reconnect has no `wayland-session` cookie and the GUID falls back to `wcore` / no model.
-+- Direct VPN HTTPS access uses `https://10.100.100.3:25725/`. Port `25750` is plain HTTP, so `https://10.100.100.3:25750/` is expected to fail TLS. The `25725` listener is a local Node HTTPS reverse proxy with WebSocket upgrade support that forwards to `127.0.0.1:25750`.
-+- The `25725` certificate lives under `/etc/wayland/tls/wayland-10.100.100.3.crt` and must include `IP:10.100.100.3` in SAN. On `GIOVANNI-W11-PC`, the public certificate was imported into the current user's trusted root store so Brave/Schannel can validate the direct IP URL without `-k`.
++- Direct VPN HTTP access uses `http://10.100.100.3:25725/`. Even with `SERVER_BASE_URL=https://wayland.atius.com.br` for the public entrypoint, request-scoped cookie options must not mark the session cookie as `Secure` on direct HTTP/VPN requests, otherwise login succeeds in JSON but the WebSocket reconnect has no `wayland-session` cookie and the GUID falls back to `wcore` / no model.
++- Direct VPN HTTPS access uses `https://10.100.100.3:25750/`. Port `25725` is plain HTTP, so `https://10.100.100.3:25725/` is expected to fail TLS. The `25750` listener is a local Node HTTPS reverse proxy with WebSocket upgrade support that forwards to `127.0.0.1:25725`.
++- The `25750` certificate lives under `/etc/wayland/tls/wayland-10.100.100.3.crt` and must include `IP:10.100.100.3` in SAN. On `GIOVANNI-W11-PC`, the public certificate was imported into the current user's trusted root store so Brave/Schannel can validate the direct IP URL without `-k`.
 +- The GUID agent pill bar exposes collapsed agents by accessible name so Hermes/Codex can be selected by keyboard and automation.
 +- Mobile GUID controls wrap visibly instead of hiding later model/effort/permission or intent options behind horizontal overflow.
 +- The left sidebar never exposes a bottom horizontal scrollbar; long recents and footer controls truncate or compact inside the available width.
 +- The desktop left sidebar divider is a real resize handle: drag persists `wayland:sidebar-width` while preserving the rail snap behavior below the collapse threshold.
++
++## IJFW Memory (Ferrox Labs)
++
++Install and configure IJFW Memory on this checkout with:
++
++Run this first:
++- npx -y @ijfw/install@latest
++
++If that command fails in this environment (could not determine executable to run), use:
++- cd /home/ubuntu/GitHub/wayland
++- npm exec --yes --package @ijfw/install@latest -- ijfw-install
++
++Operational notes:
++
++- IJFW installs into ~/.ijfw by default; this checkout keeps a local .ijfw/ metadata dir for project context.
++- Keep heavy build/test commands under the 20% CPU default (see scripts/atius-build-renderer-overlay.sh).
++- Track rollout changes in Obsidian and GBrain with the same initiative slug:
++  - Obsidian: infrastructure/wayland/ijfw-memory.md
++  - GBrain: wayland/ijfw-memory
++- In production incidents, validate memory load behavior before restarting wayland.service to avoid session churn while the adapter loads.
 +
 +## Rebuild/update flow
 +
@@ -151,10 +181,17 @@ index 000000000..2187bd85b
 +
 +`scripts/atius-postinstall-hook.sh` is the authoritative systemd/runtime wiring hook. It:
 +
-+- grants the `wayland` service user access to the checkout,
-+- writes `/etc/systemd/system/wayland.service.d/atius-overlay.conf`,
-+- rebuilds the source runtime,
-+- restarts `wayland.service`.
++- runs Wayland as Linux user `ubuntu`, not `wayland`;
++- wires `HOME=/home/ubuntu`, `CODEX_HOME=/home/ubuntu/.codex`, and `HERMES_HOME=/home/ubuntu/.hermes`;
++- exposes the ATIUS Codex ACP fork through `/home/ubuntu/.local/bin/codex-acp-atius`;
++- syncs the live Wayland storage into `/home/ubuntu/.config/Wayland/config/wayland-config.txt`;
++- regenerates `model.config` from the `ubuntu` Codex runtime;
++- prunes generated `codex-agent-profile-*` rows from `acp.customAgents` while preserving user-owned custom ACP agents;
++- mirrors `/home/ubuntu/.codex/skills/*/SKILL.md` into `/home/ubuntu/.config/Wayland/config/skills/` as symlinks;
++- generates `slash.customCommands` entries that insert `$skill-name` for Codex skills, including GSD/SDD commands;
++- pins Codex skills in `skills.preferences`, enables `skills.cliDiscovery.enabled`, and ensures `agents.hidden` contains `gemini`;
++- writes `/etc/systemd/system/wayland.service.d/atius-overlay.conf`;
++- rebuilds the source runtime and restarts the services.
 +
 +## Validation
 +
@@ -167,25 +204,28 @@ index 000000000..2187bd85b
 +sudo systemctl restart wayland.service
 +systemctl is-active wayland.service
 +systemctl is-active wayland-https-proxy.service
-+curl -fsS -o /dev/null -w "http=%{http_code}\n" http://127.0.0.1:25750/
-+curl -fsS -o /dev/null -w "https=%{http_code}\n" https://10.100.100.3:25725/
-+journalctl -u wayland.service --since "5 minutes ago" --no-pager | grep -E "AgentRegistry|found 4 agents|Serving renderer|WebUI running"
++curl -fsS -o /dev/null -w "http=%{http_code}\n" http://127.0.0.1:25725/
++curl -fsS -o /dev/null -w "https=%{http_code}\n" https://10.100.100.3:25750/
++journalctl -u wayland.service --since "5 minutes ago" --no-pager | grep -E "AgentRegistry|Serving renderer|WebUI running"
++node -e 'const fs=require("fs");const p="/home/ubuntu/.config/Wayland/config/wayland-config.txt";const c=JSON.parse(decodeURIComponent(Buffer.from(fs.readFileSync(p,"utf8").trim(),"base64").toString("utf8")));const slash=c["slash.customCommands"]||[];const agents=c["acp.customAgents"]||[];console.log({customAgents:agents.length, generatedCustomAgents:agents.filter(a=>String(a.id||"").startsWith("codex-agent-profile-")).length, slashCommands:slash.length, gsdPlanPhase:slash.some(x=>x.name==="gsd-plan-phase"), geminiHidden:(c["agents.hidden"]||[]).includes("gemini")})'
 +```
 +
 +Expected runtime signals:
 +
 +- `wayland.service` is `active`
 +- `wayland-https-proxy.service` is `active`
-+- local HTTP on `127.0.0.1:25750` returns `200`
-+- direct VPN HTTPS on `10.100.100.3:25725` returns `200` from a trusted Windows client
-+- startup logs include `found 4 agents: Wayland Core, Gemini CLI, Codex, Hermes Agent`
++- local HTTP on `127.0.0.1:25725` returns `200`
++- direct VPN HTTPS on `10.100.100.3:25750` returns `200` from a trusted Windows client
++- startup logs show the Wayland server and AgentRegistry without generated `codex-agent-profile-*` runtime agents
++- `systemctl show wayland.service -p User -p Environment` reports `User=ubuntu`, `CODEX_HOME=/home/ubuntu/.codex`, and `HERMES_HOME=/home/ubuntu/.hermes`
++- `/home/ubuntu/.config/Wayland/config/wayland-config.txt` contains generated `model.config`, zero generated `codex-agent-profile-*` ACP custom agents, generated `slash.customCommands` for `$gsd-*`, pinned Codex skills, and `agents.hidden=[..., "gemini"]`
++- On `https://wayland.atius.com.br/#/guid`, the runtime agent selector shows executable runtimes such as Codex/Hermes Agent, not GSD subagents; typing `/gsd-plan-phase` or `/gsd-debug` in the composer opens the command path and inserts `$gsd-plan-phase` / `$gsd-debug`
 +
 +## Git/GitHub note
 +
 +This checkout is intended to become the ATIUS fork lane for upstream sync. Do
 +not push ATIUS changes to `FerroxLabs/wayland`. Reserve upstream for fetch/merge
 +and publish ATIUS history to the Giovanni fork once that remote exists.
-+
 +
 +## 2026-07-05 GUID UI QA
 +
@@ -228,6 +268,27 @@ index 000000000..2187bd85b
 +
 +Screenshots from the validated run were written to
 +`out/atius-qa/sidebar-responsive-final/`.
++
++## 2026-07-10 GSD command/runtime separation
++
++Root cause: the previous ATIUS sync briefly treated `/home/ubuntu/.codex/agents/*.toml` as ACP custom runtime agents. That made GSD subagents such as `gsd-doc-writer` appear in the GUID runtime selector, which is incorrect.
++
++Canonical behavior:
++
++- runtime agents are executable engines/CLIs only: Codex and Hermes Agent for ATIUS Wayland;
++- Gemini CLI remains hidden/disabled for the deployment through `agents.hidden`;
++- GSD/SDD stays in the programming workflow as Codex skills and slash commands, invoked as `/gsd-plan-phase`, `/gsd-debug`, or `$gsd-plan-phase`;
++- `acp.customAgents` must not contain generated IDs starting with `codex-agent-profile-`;
++- `/home/ubuntu/.codex/gsd-core` and `/home/ubuntu/.codex/skills/gsd-*` are part of the `ubuntu` Codex runtime consumed by Wayland;
++- the sync script mirrors Codex skills into Wayland skill storage and generates `slash.customCommands` templates that insert the matching `$skill-name` token.
++- `src/renderer/pages/guid/GuidPage.tsx` wires `useSlashCommandController` and `useUserSlashCommands`; `GuidInputCard.tsx` renders the slash menu with visible overflow so `/gsd-*` selection works in the GUID first-screen composer.
++
++Latest applied storage state after sync:
++
++- `remainingGeneratedCustomAgents=0`
++- `generatedSlashCommands=112`
++- `gsd-*` slash commands present: `70`
++- required commands present and pinned: `gsd-plan-phase`, `gsd-debug`, `gsd-plan-review-convergence`, `gsd-graphify`
 diff --git a/package.json b/package.json
 index 2f7e4d43b..b895002c1 100644
 --- a/package.json
@@ -274,7 +335,7 @@ index 000000000..9bd37b712
 +exit 1
 diff --git a/scripts/atius-build-renderer-overlay.sh b/scripts/atius-build-renderer-overlay.sh
 new file mode 100755
-index 000000000..8c9904dda
+index 000000000..f816af9da
 --- /dev/null
 +++ b/scripts/atius-build-renderer-overlay.sh
 @@ -0,0 +1,72 @@
@@ -291,7 +352,7 @@ index 000000000..8c9904dda
 +  if ! [[ "$cpu_total" =~ ^[0-9]+$ ]] || [[ "$cpu_total" -lt 1 ]]; then
 +    cpu_total=1
 +  fi
-+  cpu_limit=$((cpu_total / 2))
++  cpu_limit=$((cpu_total * 20 / 100))
 +  if [[ "$cpu_limit" -lt 1 ]]; then
 +    cpu_limit=1
 +  fi
@@ -352,33 +413,59 @@ index 000000000..8c9904dda
 +PY
 diff --git a/scripts/atius-postinstall-hook.sh b/scripts/atius-postinstall-hook.sh
 new file mode 100755
-index 000000000..4d093a8ad
+index 000000000..c931dffc2
 --- /dev/null
 +++ b/scripts/atius-postinstall-hook.sh
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,107 @@
 +#!/usr/bin/env bash
 +set -euo pipefail
 +ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 +BUN_BIN="/opt/Wayland/resources/bundled-bun/linux-arm64/bun"
 +NODE_BIN="/usr/local/bin/node"
-+WAYLAND_HTTP_PORT=25750
-+WAYLAND_HTTPS_PORT=25725
++CARGO_BIN="/home/ubuntu/.cargo/bin/cargo"
++UBUNTU_HOME="/home/ubuntu"
++UBUNTU_DATA_DIR="${UBUNTU_HOME}/.config/Wayland"
++UBUNTU_LOGS_DIR="${UBUNTU_DATA_DIR}/logs"
++UBUNTU_CODEX_HOME="${UBUNTU_HOME}/.codex"
++UBUNTU_HERMES_HOME="${UBUNTU_HOME}/.hermes"
++CODEX_ACP_ROOT="/home/ubuntu/GitHub/codex-acp"
++CODEX_ACP_BIN="${UBUNTU_HOME}/.local/bin/codex-acp-atius"
++WAYLAND_HTTP_PORT=25725
++WAYLAND_HTTPS_PORT=25750
 +WAYLAND_TLS_CERT="/etc/wayland/tls/wayland-10.100.100.3.crt"
 +WAYLAND_TLS_KEY="/etc/wayland/tls/wayland-10.100.100.3.key"
-+sudo setfacl -m u:wayland:rx /home/ubuntu
-+sudo setfacl -m u:wayland:rx /home/ubuntu/GitHub
-+sudo setfacl -R -m u:wayland:rx "$ROOT"
-+sudo setfacl -R -m u:wayland:rX "$ROOT/node_modules" 2>/dev/null || true
++sudo install -d -m 0750 -o ubuntu -g ubuntu "${UBUNTU_HOME}/.config"
++sudo install -d -m 0750 -o ubuntu -g ubuntu "${UBUNTU_DATA_DIR}"
++sudo install -d -m 0750 -o ubuntu -g ubuntu "${UBUNTU_DATA_DIR}/config"
++sudo install -d -m 0750 -o ubuntu -g ubuntu "${UBUNTU_LOGS_DIR}"
++if [[ -d /var/lib/wayland/.config/Wayland ]]; then
++  sudo cp -a /var/lib/wayland/.config/Wayland/. "${UBUNTU_DATA_DIR}/"
++  sudo chown -R ubuntu:ubuntu "${UBUNTU_DATA_DIR}"
++fi
++sudo install -d -m 0750 -o ubuntu -g ubuntu "${UBUNTU_HOME}/.local/bin"
++sudo tee "${CODEX_ACP_BIN}" >/dev/null <<'SCRIPT'
++#!/usr/bin/env bash
++set -euo pipefail
++exec /home/ubuntu/.cargo/bin/cargo run --quiet --manifest-path /home/ubuntu/GitHub/codex-acp/Cargo.toml -- "$@"
++SCRIPT
++sudo chown ubuntu:ubuntu "${CODEX_ACP_BIN}"
++sudo chmod 0755 "${CODEX_ACP_BIN}"
 +sudo mkdir -p /etc/systemd/system/wayland.service.d
 +sudo tee /etc/systemd/system/wayland.service.d/atius-overlay.conf >/dev/null <<CONF
 +[Service]
 +ExecStart=
 +ExecStartPre=
++User=ubuntu
++Group=ubuntu
 +WorkingDirectory=${ROOT}
-+Environment=HOME=/var/lib/wayland
-+Environment=WAYLAND_WORKDIR=/var/lib/wayland
-+Environment=DATA_DIR=/var/lib/wayland/.config/Wayland
-+Environment=LOGS_DIR=/var/lib/wayland/.config/Wayland/logs
++ExecStartPre=${NODE_BIN} ${ROOT}/scripts/atius-sync-ubuntu-runtime.mjs
++Environment=HOME=${UBUNTU_HOME}
++Environment=WAYLAND_WORKDIR=${UBUNTU_HOME}
++Environment=DATA_DIR=${UBUNTU_DATA_DIR}
++Environment=LOGS_DIR=${UBUNTU_LOGS_DIR}
++Environment=CODEX_HOME=${UBUNTU_CODEX_HOME}
++Environment=HERMES_HOME=${UBUNTU_HERMES_HOME}
++Environment=WAYLAND_CODEX_ACP_CLI=${CODEX_ACP_BIN}
 +Environment=NODE_ENV=production
 +Environment=ALLOW_REMOTE=true
 +Environment=PORT=${WAYLAND_HTTP_PORT}
@@ -386,11 +473,11 @@ index 000000000..4d093a8ad
 +Environment=WAYLAND_ALLOWED_ORIGINS=https://wayland.atius.com.br,http://10.100.100.3:${WAYLAND_HTTP_PORT},http://10.1.1.3:${WAYLAND_HTTP_PORT},http://10.1.1.7:${WAYLAND_HTTP_PORT},https://10.100.100.3:${WAYLAND_HTTPS_PORT},https://10.1.1.3:${WAYLAND_HTTPS_PORT},https://10.1.1.7:${WAYLAND_HTTPS_PORT}
 +Environment=WAYLAND_OPERATOR_CIDRS=10.1.1.1/32
 +Environment=WAYLAND_DISABLE_AUTO_UPDATE=1
-+Environment=PATH=/opt/Wayland/resources/bundled-bun/linux-arm64:/var/lib/wayland/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/snap/bin
++Environment=PATH=/opt/Wayland/resources/bundled-bun/linux-arm64:${UBUNTU_HOME}/.local/bin:${UBUNTU_HOME}/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/snap/bin
 +ExecStart=${BUN_BIN} ${ROOT}/dist-server/server.mjs
 +TimeoutStartSec=180
 +CONF
-+sudo install -d -m 0750 -o root -g wayland /etc/wayland/tls
++sudo install -d -m 0750 -o root -g ubuntu /etc/wayland/tls
 +if [[ ! -f "$WAYLAND_TLS_CERT" ]] || ! sudo openssl x509 -in "$WAYLAND_TLS_CERT" -noout -ext subjectAltName 2>/dev/null | grep -q 'IP Address:10.100.100.3'; then
 +  sudo openssl req -x509 -newkey rsa:2048 -sha256 -days 825 -nodes \
 +    -keyout "$WAYLAND_TLS_KEY" \
@@ -401,7 +488,7 @@ index 000000000..4d093a8ad
 +    -addext 'keyUsage=critical,digitalSignature,keyEncipherment' \
 +    -addext 'extendedKeyUsage=serverAuth'
 +fi
-+sudo chown root:wayland "$WAYLAND_TLS_KEY" "$WAYLAND_TLS_CERT"
++sudo chown root:ubuntu "$WAYLAND_TLS_KEY" "$WAYLAND_TLS_CERT"
 +sudo chmod 0640 "$WAYLAND_TLS_KEY"
 +sudo chmod 0644 "$WAYLAND_TLS_CERT"
 +sudo install -m 0755 -o root -g root "$ROOT/scripts/atius-wayland-https-proxy.js" /usr/local/lib/wayland-https-proxy.js
@@ -414,8 +501,8 @@ index 000000000..4d093a8ad
 +
 +[Service]
 +Type=simple
-+User=wayland
-+Group=wayland
++User=ubuntu
++Group=ubuntu
 +Environment=NODE_ENV=production
 +Environment=WAYLAND_HTTPS_HOST=0.0.0.0
 +Environment=WAYLAND_HTTPS_PORT=${WAYLAND_HTTPS_PORT}
@@ -433,6 +520,7 @@ index 000000000..4d093a8ad
 +sudo systemctl disable --now wayland-atius-overlay.path wayland-atius-overlay.service >/dev/null 2>&1 || true
 +sudo systemctl daemon-reload
 +bash "$ROOT/scripts/atius-build-renderer-overlay.sh"
++sudo systemctl stop wayland-https-proxy.service >/dev/null 2>&1 || true
 +sudo systemctl restart wayland.service
 +sudo systemctl enable --now wayland-https-proxy.service
 +sudo systemctl restart wayland-https-proxy.service
@@ -449,10 +537,10 @@ index 000000000..171b72c4f
 +bash "$ROOT/scripts/atius-build-renderer-overlay.sh"
 diff --git a/scripts/atius-refresh-source-patch.sh b/scripts/atius-refresh-source-patch.sh
 new file mode 100755
-index 000000000..4c4ba445c
+index 000000000..a8a25097f
 --- /dev/null
 +++ b/scripts/atius-refresh-source-patch.sh
-@@ -0,0 +1,154 @@
+@@ -0,0 +1,173 @@
 +#!/usr/bin/env bash
 +set -euo pipefail
 +ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -476,6 +564,7 @@ index 000000000..4c4ba445c
 +  scripts/atius-build-renderer-overlay.sh
 +  scripts/atius-postinstall-hook.sh
 +  scripts/atius-refresh-source-patch.sh
++  scripts/atius-sync-ubuntu-runtime.mjs
 +  scripts/atius-reapply-renderer-overlay.sh
 +  scripts/atius-update.sh
 +  scripts/atius-wayland-https-proxy.js
@@ -513,6 +602,7 @@ index 000000000..4c4ba445c
 +  src/renderer/pages/guid/index.module.css
 +  src/renderer/pages/guid/components/AgentPillBar.tsx
 +  src/renderer/pages/guid/components/GuidActionRow.tsx
++  src/renderer/pages/guid/components/GuidInputCard.tsx
 +  src/renderer/pages/guid/components/GuidModelSelector.tsx
 +  src/renderer/pages/guid/components/newChatStarter/IntentPillBar.module.css
 +  src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
@@ -569,7 +659,16 @@ index 000000000..4c4ba445c
 +# so dependency and version bumps from upstream are never frozen by our fork.
 +upstream_pkg_tmp="$(mktemp)"
 +patch_tmp="$(mktemp)"
-+cleanup() { rm -f "$upstream_pkg_tmp" "$patch_tmp"; }
++INTENT_TO_ADD=()
++reset_intent_to_add() {
++  if [[ ${#INTENT_TO_ADD[@]} -gt 0 ]]; then
++    git reset -q -- "${INTENT_TO_ADD[@]}" >/dev/null 2>&1 || true
++  fi
++}
++cleanup() {
++  reset_intent_to_add
++  rm -f "$upstream_pkg_tmp" "$patch_tmp"
++}
 +trap cleanup EXIT
 +git show "$BASE_REF:package.json" > "$upstream_pkg_tmp"
 +node - "$upstream_pkg_tmp" "$ROOT/package.json" <<'NODE'
@@ -588,6 +687,13 @@ index 000000000..4c4ba445c
 +fs.writeFileSync(currentPath, JSON.stringify(upstream, null, 2) + '\n');
 +NODE
 +
++for file in "${FILES[@]}"; do
++  if [[ -e "$file" ]] && ! git ls-files --error-unmatch -- "$file" >/dev/null 2>&1; then
++    git add -N -- "$file"
++    INTENT_TO_ADD+=("$file")
++  fi
++done
++
 +mkdir -p "$(dirname "$PATCH")"
 +git diff --no-ext-diff --binary "$BASE_REF" -- "${FILES[@]}" > "$patch_tmp"
 +perl -pi -e 's/[ \t]+$//' "$patch_tmp"
@@ -596,6 +702,7 @@ index 000000000..4c4ba445c
 +  exit 0
 +fi
 +mv "$patch_tmp" "$PATCH"
++cleanup
 +trap - EXIT
 +chmod 0644 "$PATCH"
 +echo "[atius-refresh] patch updated: $PATCH"
@@ -607,6 +714,318 @@ index 000000000..4c4ba445c
 +    echo "[atius-refresh] no staged package/patch changes to commit"
 +  fi
 +fi
+diff --git a/scripts/atius-sync-ubuntu-runtime.mjs b/scripts/atius-sync-ubuntu-runtime.mjs
+new file mode 100644
+index 000000000..ab05d690a
+--- /dev/null
++++ b/scripts/atius-sync-ubuntu-runtime.mjs
+@@ -0,0 +1,306 @@
++#!/usr/bin/env node
++import { execFileSync } from 'node:child_process';
++import { existsSync, lstatSync, mkdirSync, readlinkSync, readdirSync, symlinkSync, unlinkSync, readFileSync, writeFileSync } from 'node:fs';
++import path from 'node:path';
++
++const ubuntuHome = '/home/ubuntu';
++const baseCodexHome = process.env.CODEX_HOME?.trim() || path.join(ubuntuHome, '.codex');
++const waylandDataDir = process.env.DATA_DIR?.trim() || path.join(ubuntuHome, '.config', 'Wayland');
++const sourceConfigPath = '/var/lib/wayland/.config/Wayland/config/wayland-config.txt';
++const targetConfigPath = path.join(waylandDataDir, 'config', 'wayland-config.txt');
++const codexSkillsDir = path.join(baseCodexHome, 'skills');
++const waylandSkillsDir = path.join(waylandDataDir, 'config', 'skills');
++const generatedProviderId = 'atius-chatgpt-subscription';
++const generatedAgentPrefix = 'codex-agent-profile-';
++const generatedSlashCommandPrefix = 'atius-codex-skill-command-';
++const generatedCommandTimestamp = Date.UTC(2026, 6, 10);
++const slashCommandNamePattern = /^[a-zA-Z][a-zA-Z0-9_-]{0,31}$/;
++
++function decodeStorage(filePath) {
++  if (!existsSync(filePath)) return {};
++  const raw = readFileSync(filePath, 'utf8').trim();
++  if (!raw) return {};
++  const decoded = Buffer.from(raw, 'base64').toString('utf8');
++  return JSON.parse(decodeURIComponent(decoded));
++}
++
++function encodeStorage(value) {
++  return Buffer.from(encodeURIComponent(JSON.stringify(value)), 'utf8').toString('base64');
++}
++
++function safeRead(filePath) {
++  try {
++    return readFileSync(filePath, 'utf8');
++  } catch {
++    return null;
++  }
++}
++
++function parseTomlHeader(content, key) {
++  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
++  const match = content.match(new RegExp(`^${escaped}\\s*=\\s*"([^"]*)"`, 'm'));
++  return match ? match[1].trim() : null;
++}
++
++function slugify(value) {
++  return value
++    .toLowerCase()
++    .replace(/[^a-z0-9]+/g, '-')
++    .replace(/^-+|-+$/g, '');
++}
++
++function parseSkillFrontmatter(content) {
++  const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
++  if (!match) return null;
++  const frontmatter = match[1];
++  const field = (key) => {
++    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
++    const quoted = frontmatter.match(new RegExp(`^${escaped}:[ \\t]*["']([^"'\\n]+)["'][ \\t]*$`, 'm'));
++    if (quoted) return quoted[1].trim();
++    const plain = frontmatter.match(new RegExp(`^${escaped}:[ \\t]*(.+?)[ \\t]*$`, 'm'));
++    return plain ? plain[1].trim().replace(/^['"]|['"]$/g, '') : null;
++  };
++  const name = field('name');
++  if (!name) return null;
++  return {
++    name,
++    description: field('description') || `Codex skill command: ${name}`,
++  };
++}
++
++function listCodexSkillCommands() {
++  if (!existsSync(codexSkillsDir)) return [];
++  const commands = [];
++  for (const entry of readdirSync(codexSkillsDir)) {
++    const sourceDir = path.join(codexSkillsDir, entry);
++    try {
++      if (!lstatSync(sourceDir).isDirectory()) continue;
++    } catch {
++      continue;
++    }
++    const skillFile = path.join(sourceDir, 'SKILL.md');
++    const content = safeRead(skillFile);
++    if (!content) continue;
++    const parsed = parseSkillFrontmatter(content);
++    const name = parsed?.name || entry;
++    if (!slashCommandNamePattern.test(name)) continue;
++    commands.push({
++      name,
++      description: parsed?.description || `Codex skill command: ${name}`,
++      sourceDir,
++    });
++  }
++  return commands.sort((left, right) => left.name.localeCompare(right.name));
++}
++
++function syncCodexSkillsIntoWayland(skills) {
++  if (skills.length === 0) return 0;
++  mkdirSync(waylandSkillsDir, { recursive: true });
++  let changed = 0;
++  for (const skill of skills) {
++    const targetDir = path.join(waylandSkillsDir, skill.name);
++    try {
++      const targetStat = lstatSync(targetDir);
++      if (targetStat.isSymbolicLink()) {
++        const currentTarget = readlinkSync(targetDir);
++        if (currentTarget === skill.sourceDir) continue;
++        unlinkSync(targetDir);
++      } else {
++        // User-owned skill with the same name. Preserve it and let the user's
++        // copy win while still exposing the slash command.
++        continue;
++      }
++    } catch {
++      // Target does not exist yet.
++    }
++    symlinkSync(skill.sourceDir, targetDir, 'dir');
++    changed += 1;
++  }
++  return changed;
++}
++
++function buildGeneratedSlashCommands(skills) {
++  return skills.map((skill) => ({
++    id: `${generatedSlashCommandPrefix}${slugify(skill.name)}`,
++    name: skill.name,
++    description: skill.description,
++    template: `$${skill.name} `,
++    createdAt: generatedCommandTimestamp,
++    updatedAt: generatedCommandTimestamp,
++  }));
++}
++
++function currentCodexModelsFromStorage(config) {
++  const models = config?.['acp.cachedModels']?.codex?.availableModels;
++  if (!Array.isArray(models)) return [];
++  return models
++    .map((model) => (model && typeof model.id === 'string' ? model.id : null))
++    .filter((model) => typeof model === 'string' && model.length > 0);
++}
++
++function currentCodexModelsFromModelConfig(config) {
++  const providers = Array.isArray(config?.['model.config']) ? config['model.config'] : [];
++  const provider = providers.find((entry) => entry && entry.id === generatedProviderId);
++  if (!provider || !Array.isArray(provider.model)) return [];
++  return provider.model.filter((model) => typeof model === 'string' && model.length > 0);
++}
++
++function listCodexModels(sourceConfig, targetConfig) {
++  const cachedModels = currentCodexModelsFromStorage(sourceConfig);
++  if (cachedModels.length > 0) return cachedModels;
++  const targetCachedModels = currentCodexModelsFromStorage(targetConfig);
++  if (targetCachedModels.length > 0) return targetCachedModels;
++  const sourceModelConfig = currentCodexModelsFromModelConfig(sourceConfig);
++  if (sourceModelConfig.length > 0) return sourceModelConfig;
++  const targetModelConfig = currentCodexModelsFromModelConfig(targetConfig);
++  if (targetModelConfig.length > 0) return targetModelConfig;
++
++  try {
++    const stdout = execFileSync('codex', ['debug', 'models'], {
++      encoding: 'utf8',
++      env: {
++        ...process.env,
++        HOME: ubuntuHome,
++        CODEX_HOME: baseCodexHome,
++      },
++      timeout: 30000,
++      windowsHide: true,
++    });
++    const parsed = JSON.parse(stdout);
++    const models = Array.isArray(parsed.models) ? parsed.models : [];
++    return models
++      .filter((model) => model && typeof model.slug === 'string' && model.visibility === 'list')
++      .map((model) => model.slug);
++  } catch {
++    return ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'];
++  }
++}
++
++function buildGeneratedProvider(existing, sourceConfig, targetConfig) {
++  const models = listCodexModels(sourceConfig, targetConfig);
++  return {
++    ...(existing && typeof existing === 'object' ? existing : {}),
++    id: generatedProviderId,
++    platform: 'openai-compatible',
++    name: 'Chatgpt Subscription',
++    baseUrl: 'https://chatgpt.com/backend-api',
++    apiKey: '',
++    model: models,
++    enabled: true,
++    modelEnabled: Object.fromEntries(models.map((model) => [model, true])),
++  };
++}
++
++
++function pruneGeneratedCustomAgents(base) {
++  const current = Array.isArray(base['acp.customAgents']) ? base['acp.customAgents'] : [];
++  base['acp.customAgents'] = current.filter(
++    (agent) => typeof agent?.id !== 'string' || !agent.id.startsWith(generatedAgentPrefix)
++  );
++}
++
++function mergeSlashCommands(base, codexSkills) {
++  const current = Array.isArray(base['slash.customCommands']) ? base['slash.customCommands'] : [];
++  const preserved = current.filter(
++    (command) => typeof command?.id !== 'string' || !command.id.startsWith(generatedSlashCommandPrefix)
++  );
++  const existingNames = new Set(
++    preserved.map((command) => (typeof command?.name === 'string' ? command.name.toLowerCase() : null)).filter(Boolean)
++  );
++  const generated = buildGeneratedSlashCommands(codexSkills).filter(
++    (command) => !existingNames.has(command.name.toLowerCase())
++  );
++  base['slash.customCommands'] = [...preserved, ...generated];
++}
++
++function mergeSkillsPreferences(base, codexSkills) {
++  const current =
++    base['skills.preferences'] && typeof base['skills.preferences'] === 'object'
++      ? base['skills.preferences']
++      : { pinned: [], disabled: [], revision: 0 };
++  const disabled = Array.isArray(current.disabled) ? current.disabled : [];
++  const pinned = Array.isArray(current.pinned) ? current.pinned : [];
++  const disabledSet = new Set(disabled);
++  const nextPinned = Array.from(new Set([...pinned, ...codexSkills.map((skill) => skill.name).filter((name) => !disabledSet.has(name))]));
++  const changed = nextPinned.length !== pinned.length || base['skills.cliDiscovery.enabled'] !== true;
++  base['skills.preferences'] = {
++    pinned: nextPinned,
++    disabled,
++    revision: Number(current.revision || 0) + (changed ? 1 : 0),
++  };
++  base['skills.cliDiscovery.enabled'] = true;
++}
++
++function mergeModelConfig(base, sourceConfig, targetConfig) {
++  const current = Array.isArray(base['model.config']) ? base['model.config'] : [];
++  const preserved = current.filter((provider) => provider?.id !== generatedProviderId);
++  const existing = current.find((provider) => provider?.id === generatedProviderId);
++  base['model.config'] = [...preserved, buildGeneratedProvider(existing, sourceConfig, targetConfig)];
++}
++
++function mergeConfig(sourceConfig, targetConfig) {
++  const merged = {
++    ...targetConfig,
++    ...sourceConfig,
++  };
++
++  if (!merged.language) {
++    merged.language = sourceConfig.language || targetConfig.language || 'pt-BR';
++  }
++  if (!merged['guid.lastSelectedAgent']) {
++    merged['guid.lastSelectedAgent'] = sourceConfig['guid.lastSelectedAgent'] || 'codex';
++  }
++
++  merged['codex.config'] = {
++    ...((typeof targetConfig['codex.config'] === 'object' && targetConfig['codex.config']) || {}),
++    ...((typeof sourceConfig['codex.config'] === 'object' && sourceConfig['codex.config']) || {}),
++    sandboxMode: 'danger-full-access',
++  };
++
++  merged['acp.cachedModels'] = undefined;
++  merged['acp.cachedConfigOptions'] = undefined;
++  merged['acp.cachedInitializeResult'] = undefined;
++  merged['acp.cachedModes'] = undefined;
++
++  const codexSkills = listCodexSkillCommands();
++  const syncedCodexSkills = syncCodexSkillsIntoWayland(codexSkills);
++
++  mergeModelConfig(merged, sourceConfig, targetConfig);
++  pruneGeneratedCustomAgents(merged);
++  mergeSlashCommands(merged, codexSkills);
++  mergeSkillsPreferences(merged, codexSkills);
++
++  const hiddenAgents = Array.isArray(merged['agents.hidden']) ? merged['agents.hidden'] : [];
++  merged['agents.hidden'] = Array.from(new Set([...hiddenAgents, 'gemini']));
++  merged['atius.codexSkillSync'] = {
++    skills: codexSkills.length,
++    symlinksCreated: syncedCodexSkills,
++    slashCommands: (merged['slash.customCommands'] || []).filter((command) =>
++      String(command.id || '').startsWith(generatedSlashCommandPrefix)
++    ).length,
++  };
++  return merged;
++}
++
++function main() {
++  const sourceConfig = decodeStorage(sourceConfigPath);
++  const targetConfig = decodeStorage(targetConfigPath);
++  const merged = mergeConfig(sourceConfig, targetConfig);
++  mkdirSync(path.dirname(targetConfigPath), { recursive: true });
++  writeFileSync(targetConfigPath, encodeStorage(merged));
++  console.log(
++    JSON.stringify({
++      targetConfigPath,
++      generatedModels: (merged['model.config'] || []).find((provider) => provider.id === generatedProviderId)?.model || [],
++      remainingGeneratedCustomAgents: (merged['acp.customAgents'] || []).filter((agent) =>
++        String(agent.id || '').startsWith(generatedAgentPrefix)
++      ).length,
++      generatedSlashCommands: (merged['slash.customCommands'] || []).filter((command) =>
++        String(command.id || '').startsWith(generatedSlashCommandPrefix)
++      ).length,
++      codexSkillSync: merged['atius.codexSkillSync'],
++    })
++  );
++}
++
++main();
 diff --git a/scripts/atius-update.sh b/scripts/atius-update.sh
 new file mode 100755
 index 000000000..7450c2c18
@@ -624,6 +1043,106 @@ index 000000000..7450c2c18
 +bash scripts/atius-refresh-source-patch.sh
 +sudo bash scripts/atius-postinstall-hook.sh
 +echo "[atius-update] source patch refreshed, standalone runtime rebuilt and restarted"
+diff --git a/scripts/atius-wayland-https-proxy.js b/scripts/atius-wayland-https-proxy.js
+new file mode 100755
+index 000000000..60e9d37b1
+--- /dev/null
++++ b/scripts/atius-wayland-https-proxy.js
+@@ -0,0 +1,94 @@
++const fs = require('fs');
++const http = require('http');
++const https = require('https');
++const net = require('net');
++
++const LISTEN_HOST = process.env.WAYLAND_HTTPS_HOST || '0.0.0.0';
++const LISTEN_PORT = Number(process.env.WAYLAND_HTTPS_PORT || '25750');
++const TARGET_HOST = process.env.WAYLAND_HTTP_HOST || '127.0.0.1';
++const TARGET_PORT = Number(process.env.WAYLAND_HTTP_PORT || '25725');
++const CERT_PATH = process.env.WAYLAND_TLS_CERT || '/etc/wayland/tls/wayland-10.100.100.3.crt';
++const KEY_PATH = process.env.WAYLAND_TLS_KEY || '/etc/wayland/tls/wayland-10.100.100.3.key';
++
++function proxyRequest(clientReq, clientRes) {
++  const headers = {
++    ...clientReq.headers,
++    host: clientReq.headers.host || `10.100.100.3:${LISTEN_PORT}`,
++    'x-forwarded-for': clientReq.socket.remoteAddress || '',
++    'x-forwarded-host': clientReq.headers.host || '',
++    'x-forwarded-proto': 'https',
++  };
++
++  const upstream = http.request(
++    {
++      host: TARGET_HOST,
++      port: TARGET_PORT,
++      method: clientReq.method,
++      path: clientReq.url,
++      headers,
++    },
++    (upstreamRes) => {
++      clientRes.writeHead(upstreamRes.statusCode || 502, upstreamRes.headers);
++      upstreamRes.pipe(clientRes);
++    }
++  );
++
++  upstream.on('error', (error) => {
++    console.error('[wayland-https-proxy] upstream error', error);
++    if (!clientRes.headersSent) {
++      clientRes.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
++    }
++    clientRes.end('Bad Gateway');
++  });
++
++  clientReq.pipe(upstream);
++}
++
++function proxyUpgrade(clientReq, clientSocket, head) {
++  const upstream = net.connect(TARGET_PORT, TARGET_HOST, () => {
++    const headers = {
++      ...clientReq.headers,
++      host: clientReq.headers.host || `10.100.100.3:${LISTEN_PORT}`,
++      'x-forwarded-for': clientReq.socket.remoteAddress || '',
++      'x-forwarded-host': clientReq.headers.host || '',
++      'x-forwarded-proto': 'https',
++    };
++
++    const requestLine = `${clientReq.method} ${clientReq.url} HTTP/${clientReq.httpVersion}\r\n`;
++    const headerLines = Object.entries(headers)
++      .flatMap(([key, value]) => {
++        if (Array.isArray(value)) {
++          return value.map((item) => `${key}: ${item}`);
++        }
++        return value === undefined ? [] : [`${key}: ${value}`];
++      })
++      .join('\r\n');
++
++    upstream.write(`${requestLine}${headerLines}\r\n\r\n`);
++    if (head && head.length) {
++      upstream.write(head);
++    }
++    upstream.pipe(clientSocket);
++    clientSocket.pipe(upstream);
++  });
++
++  upstream.on('error', (error) => {
++    console.error('[wayland-https-proxy] websocket upstream error', error);
++    clientSocket.destroy();
++  });
++}
++
++const server = https.createServer(
++  {
++    cert: fs.readFileSync(CERT_PATH),
++    key: fs.readFileSync(KEY_PATH),
++  },
++  proxyRequest
++);
++
++server.on('upgrade', proxyUpgrade);
++server.listen(LISTEN_PORT, LISTEN_HOST, () => {
++  console.log(
++    `[wayland-https-proxy] listening on https://${LISTEN_HOST}:${LISTEN_PORT} -> http://${TARGET_HOST}:${TARGET_PORT}`
++  );
++});
 diff --git a/scripts/build-mcp-servers.js b/scripts/build-mcp-servers.js
 index 7b5ac8b8b..18e496e67 100644
 --- a/scripts/build-mcp-servers.js
@@ -970,7 +1489,7 @@ index d6e86a67a..3c2e6674a 100644
 
          let PluginClass = mod.default || mod.Plugin;
 diff --git a/src/process/task/AcpAgentManager.ts b/src/process/task/AcpAgentManager.ts
-index 09d5fa5d3..1f9f4ab43 100644
+index 09d5fa5d3..716120f7e 100644
 --- a/src/process/task/AcpAgentManager.ts
 +++ b/src/process/task/AcpAgentManager.ts
 @@ -4,7 +4,7 @@ import { channelEventBus } from '@process/channels/agent/ChannelEventBus';
@@ -992,7 +1511,20 @@ index 09d5fa5d3..1f9f4ab43 100644
  } from '@process/task/codexConfig';
  import { materializeFluxClaudeConfigDir } from '@process/task/claudeConfig';
  import { materializeFluxHermesHome } from '@process/task/hermesConfig';
-@@ -111,7 +113,9 @@ interface AcpAgentManagerData {
+@@ -77,7 +79,12 @@ import { shouldInjectTeamGuideMcp } from '@process/team/prompts/teamGuideCapabil
+ import { extractTextFromMessage, processCronInMessage } from './MessageMiddleware';
+ import { ConversationTurnCompletionService } from './ConversationTurnCompletionService';
+ import { resolveFluxRouting, type FluxRoutingResult, type RoutingDecision } from '@process/task/fluxRouting';
++import { readCodexStaticModelInfo } from '@process/task/codexStaticModelInfo';
+ import { readConnectedFluxKey } from '@process/connectors/fluxKey';
++import { readFile } from 'node:fs/promises';
++import { homedir } from 'node:os';
++import { join } from 'node:path';
++import yaml from 'js-yaml';
+
+ interface AcpAgentManagerData {
+   workspace?: string;
+@@ -111,11 +118,83 @@ interface AcpAgentManagerData {
    /** Pending config option selections from Guid page (applied after session creation) */
    pendingConfigOptions?: Record<string, string>;
    /** Per-conversation reasoning effort (codex/claude). Absent => backend default. */
@@ -1003,7 +1535,81 @@ index 09d5fa5d3..1f9f4ab43 100644
    /** Per-conversation active MCP server ids (#348): undefined = all enabled, [] = none. */
    activeMcpServers?: string[];
  }
-@@ -635,6 +639,7 @@ ${collectedResponses.join('\n')}`;
+
++type StaticModelOption = { id: string; label: string };
++
++function labelForModel(models: StaticModelOption[], modelId: string | null): string | null {
++  if (!modelId) return null;
++  return models.find((model) => model.id === modelId)?.label ?? modelId;
++}
++
++function finalizeStaticModelInfo(
++  availableModels: StaticModelOption[],
++  currentModelId: string | null,
++  sourceDetail: AcpModelInfo['sourceDetail']
++): AcpModelInfo | null {
++  if (availableModels.length === 0) return null;
++  const activeModelId =
++    currentModelId && availableModels.some((model) => model.id === currentModelId)
++      ? currentModelId
++      : availableModels[0].id;
++  return {
++    currentModelId: activeModelId,
++    currentModelLabel: labelForModel(availableModels, activeModelId),
++    availableModels,
++    canSwitch: availableModels.length > 1,
++    source: 'models',
++    sourceDetail,
++  };
++}
++
++function resolveHermesHome(): string {
++  const configured = process.env.HERMES_HOME?.trim();
++  if (configured) return configured;
++  if (process.platform === 'win32' && process.env.LOCALAPPDATA) return join(process.env.LOCALAPPDATA, 'hermes');
++  return join(homedir(), '.hermes');
++}
++
++type HermesProviderCache = Record<string, { models?: unknown }>;
++
++function readHermesConfigDefaults(config: unknown): { provider: string | null; modelId: string | null } {
++  if (!config || typeof config !== 'object') return { provider: null, modelId: null };
++  const model = (config as Record<string, unknown>).model;
++  if (!model || typeof model !== 'object') return { provider: null, modelId: null };
++  const record = model as Record<string, unknown>;
++  return {
++    provider: typeof record.provider === 'string' && record.provider.trim() ? record.provider.trim() : null,
++    modelId: typeof record.default === 'string' && record.default.trim() ? record.default.trim() : null,
++  };
++}
++
++async function readHermesModelInfoFromConfig(): Promise<AcpModelInfo | null> {
++  const hermesHome = resolveHermesHome();
++  const configRaw = await readFile(join(hermesHome, 'config.yaml'), 'utf8');
++  const { provider, modelId } = readHermesConfigDefaults(yaml.load(configRaw));
++  const providerId = provider || 'openai-codex';
++
++  let cacheModels: string[] = [];
++  try {
++    const cacheRaw = await readFile(join(hermesHome, 'provider_models_cache.json'), 'utf8');
++    const cache = JSON.parse(cacheRaw) as HermesProviderCache;
++    const candidate = cache[providerId]?.models;
++    if (Array.isArray(candidate)) {
++      cacheModels = candidate.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
++    }
++  } catch {
++    // The provider cache is optional. Fall back to the configured default below.
++  }
++
++  const modelIds = Array.from(new Set([...(modelId ? [modelId] : []), ...cacheModels]));
++  const availableModels = modelIds.map((id) => ({ id, label: id }));
++  return finalizeStaticModelInfo(availableModels, modelId, 'acp-models');
++}
++
+ type BufferedStreamTextMessage = {
+   conversationId: string;
+   backend: AcpBackend;
+@@ -635,6 +714,7 @@ ${collectedResponses.join('\n')}`;
      // surface; codex/codebuddy route separately).
      const decision = await this.computeFluxRouting(data.backend, data.currentModelId ?? undefined);
      this.lastRouting = decision.routing;
@@ -1011,7 +1617,7 @@ index 09d5fa5d3..1f9f4ab43 100644
      if (decision.routing === 'flux') {
        for (const k of decision.stripKeys) delete mergedEnv[k];
        Object.assign(mergedEnv, decision.env);
-@@ -651,7 +656,8 @@ ${collectedResponses.join('\n')}`;
+@@ -651,7 +731,8 @@ ${collectedResponses.join('\n')}`;
              sandboxMode,
              undefined,
              undefined,
@@ -1021,7 +1627,7 @@ index 09d5fa5d3..1f9f4ab43 100644
            );
            mergedEnv.CODEX_HOME = codexHome;
          } catch (err) {
-@@ -689,7 +695,9 @@ ${collectedResponses.join('\n')}`;
+@@ -689,7 +770,9 @@ ${collectedResponses.join('\n')}`;
            // writes the connected flux key inline into the scoped config.
            mergedEnv.HERMES_HOME = await materializeFluxHermesHome(
              app.getPath('userData'),
@@ -1032,7 +1638,7 @@ index 09d5fa5d3..1f9f4ab43 100644
            );
          } catch (err) {
            mainWarn('[AcpAgentManager]', 'materializeFluxHermesHome failed', err);
-@@ -698,14 +706,22 @@ ${collectedResponses.join('\n')}`;
+@@ -698,14 +781,22 @@ ${collectedResponses.join('\n')}`;
      }
 
      // Native (non-Flux) codex spawns: point CODEX_HOME at a Wayland-scoped clone
@@ -1061,7 +1667,7 @@ index 09d5fa5d3..1f9f4ab43 100644
        } catch (err) {
          mainWarn('[AcpAgentManager]', 'materializeNativeCodexHome failed', err);
        }
-@@ -949,14 +965,21 @@ ${collectedResponses.join('\n')}`;
+@@ -949,14 +1040,21 @@ ${collectedResponses.join('\n')}`;
      }
 
      if (data.backend === 'codex') {
@@ -1091,7 +1697,7 @@ index 09d5fa5d3..1f9f4ab43 100644
      }
 
      return { cliPath, customArgs, yoloMode };
-@@ -1386,6 +1409,7 @@ ${collectedResponses.join('\n')}`;
+@@ -1386,6 +1484,7 @@ ${collectedResponses.join('\n')}`;
 
    initAgent(data: AcpAgentManagerData = this.options) {
      if (this.bootstrap) return this.bootstrap;
@@ -1099,7 +1705,7 @@ index 09d5fa5d3..1f9f4ab43 100644
 
      this.bootstrapping = true;
      const bootstrapPromise = (async () => {
-@@ -1427,6 +1451,8 @@ ${collectedResponses.join('\n')}`;
+@@ -1427,6 +1526,8 @@ ${collectedResponses.join('\n')}`;
            currentModelId: this.persistedModelId ?? undefined,
            sessionMode: this.currentMode,
            pendingConfigOptions: data.pendingConfigOptions,
@@ -1108,7 +1714,103 @@ index 09d5fa5d3..1f9f4ab43 100644
            // Per-conversation MCP scoping (#348): forward to loadBuiltinSessionMcpServers.
            activeMcpServers: data.activeMcpServers,
            // The read-only concierge diagnostics MCP server is Concierge-only.
-@@ -2135,7 +2161,9 @@ ${collectedResponses.join('\n')}`;
+@@ -1436,8 +1537,7 @@ ${collectedResponses.join('\n')}`;
+           allowConciergeDiag: isConciergeAssistant(data.presetAssistantId) || isConciergeAssistant(data.customAgentId),
+           // Forward team MCP stdio config so AcpAgent.loadBuiltinSessionMcpServers() can inject it
+           teamMcpStdioConfig: (data as unknown as Record<string, unknown>).teamMcpStdioConfig as
+-            | { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> }
+-            | undefined,
++            { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> } | undefined,
+         },
+         onSessionIdUpdate: (sessionId: string) => {
+           // Save ACP session ID to database for resume support
+@@ -1925,44 +2025,61 @@ ${collectedResponses.join('\n')}`;
+
+   /**
+    * Model info for a backend BEFORE any task/agent exists (cold start on a new
+-   * chat). Claude Code never reports through the ACP `models` API, so its catalog
+-   * is not in `acp.cachedModels`; instead it is derivable offline from the
+-   * cc-switch local config (provider DB + `~/.claude/settings.json`), with no live
+-   * ACP connection. We compute it here so the picker shows the current model +
+-   * switch list immediately, and persist it into `acp.cachedModels` so later cold
+-   * starts hit the renderer's warm-cache path and it survives as last-known.
+-   *
+-   * Returns null for every other backend (their pre-connection catalog already
+-   * comes from `acp.cachedModels`, populated by a previous live session), so this
+-   * cannot regress models-API backends (kimi/opencode) or backends that genuinely
+-   * expose nothing.
++   * chat). Some ACP bridges only report models after a session starts, but the
++   * launch page still needs the bridge-compatible catalog:
++   * - Claude comes from cc-switch / ~/.claude settings.
++   * - Codex comes from `codex debug models`, the same local catalog Codex Desktop uses.
++   * - Hermes comes from its configured provider cache + config.yaml default.
+    */
+   static async getStaticModelInfo(backend: string): Promise<AcpModelInfo | null> {
+-    if (backend !== 'claude') return null;
++    let modelInfo: AcpModelInfo | null = null;
++    if (backend === 'claude') {
++      // cc-switch users get richer per-provider ids; everyone else with the Claude
++      // Code CLI set up falls back to native ~/.claude/settings.json slots.
++      modelInfo = readClaudeModelInfoFromCcSwitch() ?? readClaudeModelInfoFromSettings();
++    } else if (backend === 'codex') {
++      try {
++        modelInfo = await readCodexStaticModelInfo();
++      } catch (error) {
++        mainWarn('[AcpAgentManager]', 'Failed to read static codex model info', error);
++      }
++    } else if (backend === 'hermes') {
++      try {
++        modelInfo = await readHermesModelInfoFromConfig();
++      } catch (error) {
++        mainWarn('[AcpAgentManager]', 'Failed to read static hermes model info', error);
++      }
++    } else {
++      return null;
++    }
+
+-    // cc-switch users get richer per-provider ids; everyone else with the Claude
+-    // Code CLI set up falls back to native ~/.claude/settings.json slots.
+-    const modelInfo = readClaudeModelInfoFromCcSwitch() ?? readClaudeModelInfoFromSettings();
+     if (!modelInfo?.availableModels?.length) return null;
+
++    let resolvedModelInfo = modelInfo;
+     try {
+       const cached = (await ProcessConfig.get('acp.cachedModels')) || {};
+       const existing = cached[backend];
++      const currentModelId =
++        existing?.currentModelId && modelInfo.availableModels.some((model) => model.id === existing.currentModelId)
++          ? existing.currentModelId
++          : modelInfo.currentModelId;
++      const currentModelLabel = labelForModel(modelInfo.availableModels, currentModelId);
++      resolvedModelInfo = {
++        ...modelInfo,
++        currentModelId,
++        currentModelLabel,
++      };
+       await ProcessConfig.set('acp.cachedModels', {
+         ...cached,
+-        [backend]: {
+-          ...modelInfo,
+-          // Preserve the original default from the first live session, mirroring
+-          // cacheModelList — a derived default must not clobber a real one.
+-          currentModelId: existing?.currentModelId ?? modelInfo.currentModelId,
+-          currentModelLabel: existing?.currentModelLabel ?? modelInfo.currentModelLabel,
+-        },
++        // Preserve the original default from the first live session, mirroring
++        // cacheModelList — a derived default must not clobber a real one.
++        [backend]: resolvedModelInfo,
+       });
+     } catch (error) {
+-      mainWarn('[AcpAgentManager]', 'Failed to cache static claude model info', error);
++      mainWarn('[AcpAgentManager]', `Failed to cache static ${backend} model info`, error);
+     }
+
+-    return modelInfo;
++    return resolvedModelInfo;
+   }
+
+   /**
+@@ -2135,7 +2252,9 @@ ${collectedResponses.join('\n')}`;
        // spawn's scoped CODEX_HOME (materializeNativeCodexHome) carries it. We no
        // longer write the user's ~/.codex/config.toml. codex-acp has no live
        // set_mode, so the change applies on the next spawn regardless.
@@ -2288,10 +2990,23 @@ index 267fd8679..fe547ec02 100644
        onCancel={handleCancel}
      />
 diff --git a/src/renderer/pages/guid/GuidPage.tsx b/src/renderer/pages/guid/GuidPage.tsx
-index 516b8989c..fef0300ed 100644
+index 516b8989c..5975c48de 100644
 --- a/src/renderer/pages/guid/GuidPage.tsx
 +++ b/src/renderer/pages/guid/GuidPage.tsx
-@@ -239,6 +239,8 @@ const GuidPage: React.FC = () => {
+@@ -37,8 +37,12 @@ import GuidModelSelector from './components/GuidModelSelector';
+ import MentionDropdown, { MentionSelectorBadge } from './components/MentionDropdown';
+ import FeedbackReportModal from '@/renderer/components/settings/SettingsModal/contents/FeedbackReportModal';
+ import SpeechInputButton from '@/renderer/components/chat/SpeechInputButton';
++import SlashCommandMenu, { type SlashCommandMenuItem } from '@/renderer/components/chat/SlashCommandMenu';
++import { useSlashCommandController } from '@/renderer/hooks/chat/useSlashCommandController';
++import { useUserSlashCommands } from '@/renderer/hooks/chat/useUserSlashCommands';
+ import { appendSpeechTranscript } from '@/renderer/hooks/system/useSpeechInput';
+ import { useHiddenAgents } from '@renderer/hooks/assistant/useHiddenAgents';
++import type { SlashCommandItem } from '@/common/chat/slash/types';
+ import { filterVisibleAgents } from './hooks/agentSelectionUtils';
+ import { useGuidAgentSelection } from './hooks/useGuidAgentSelection';
+ import { useGuidInput } from './hooks/useGuidInput';
+@@ -239,6 +243,8 @@ const GuidPage: React.FC = () => {
      isPresetAgent: agentSelection.isPresetAgent,
      selectedMode: agentSelection.selectedMode,
      selectedAcpModel: agentSelection.selectedAcpModel,
@@ -2300,7 +3015,92 @@ index 516b8989c..fef0300ed 100644
      pendingConfigOptions: agentSelection.pendingConfigOptions,
      cachedConfigOptions: agentSelection.cachedConfigOptions,
      currentModel: modelSelection.currentModel,
-@@ -869,6 +871,12 @@ const GuidPage: React.FC = () => {
+@@ -304,6 +310,65 @@ const GuidPage: React.FC = () => {
+     });
+   }, [recordTelemetry, agentSelection.selectedAgentInfo, agentSelection.selectedAgent, guidInput.files]);
+
++  const { commands: userSlashCommands } = useUserSlashCommands();
++  const userSlashCommandItems = useMemo<SlashCommandItem[]>(
++    () =>
++      userSlashCommands.map((command) => ({
++        name: command.name,
++        description: command.description,
++        kind: 'template',
++        source: 'user',
++        hint: t('messages.slash.customBadge', { defaultValue: 'Custom' }),
++      })),
++    [userSlashCommands, t]
++  );
++  const userSlashTemplateByName = useMemo(() => {
++    const templates = new Map<string, string>();
++    for (const command of userSlashCommands) {
++      templates.set(command.name, command.template);
++    }
++    return templates;
++  }, [userSlashCommands]);
++  const slashController = useSlashCommandController({
++    input: guidInput.input,
++    commands: userSlashCommandItems,
++    onSelectTemplate: (name) => {
++      guidInput.setInput(`/${name} `);
++      guidInput.handleTextareaFocus();
++    },
++    onSelectUserCommand: (name) => {
++      guidInput.setInput(userSlashTemplateByName.get(name) ?? `/${name} `);
++      guidInput.handleTextareaFocus();
++    },
++  });
++  const slashMenuItems = useMemo<SlashCommandMenuItem[]>(
++    () =>
++      slashController.filteredCommands.map((command) => ({
++        key: command.name,
++        label: `/${command.name}`,
++        description: command.description,
++        badge: command.hint,
++      })),
++    [slashController.filteredCommands]
++  );
++  const slashCommandMenuNode = (
++    <SlashCommandMenu
++      title={t('messages.slash.title', { defaultValue: 'Commands' })}
++      hint={t('messages.slash.hint', { defaultValue: 'Type / to open command menu' })}
++      items={slashMenuItems}
++      activeIndex={slashController.activeIndex}
++      loading={false}
++      onHoverItem={slashController.setActiveIndex}
++      onSelectItem={(item) => {
++        const targetIndex = slashController.filteredCommands.findIndex((command) => command.name === item.key);
++        if (targetIndex >= 0) {
++          slashController.onSelectByIndex(targetIndex);
++        }
++      }}
++      emptyText={t('messages.slash.empty', { defaultValue: 'No commands found' })}
++    />
++  );
++
+   // --- Coordinated handlers (depend on multiple hooks) ---
+   const handleInputChange = useCallback(
+     (value: string) => {
+@@ -387,6 +452,9 @@ const GuidPage: React.FC = () => {
+         mention.setMentionActiveIndex(0);
+         return;
+       }
++      if (!mention.mentionOpen && !mention.mentionSelectorOpen && slashController.onKeyDown(event)) {
++        return;
++      }
+       if (event.key === 'Enter' && !event.shiftKey) {
+         event.preventDefault();
+         if (!guidInput.input.trim()) return;
+@@ -395,7 +463,7 @@ const GuidPage: React.FC = () => {
+         send.sendMessageHandler({ onSent: recordMessageSent });
+       }
+     },
+-    [mention, guidInput.input, send.sendMessageHandler, recordMessageSent]
++    [mention, slashController.onKeyDown, guidInput.input, send.sendMessageHandler, recordMessageSent]
+   );
+
+   const handleSelectAgent = useCallback(
+@@ -869,6 +937,12 @@ const GuidPage: React.FC = () => {
        currentAcpCachedModelInfo={agentSelection.currentAcpCachedModelInfo}
        selectedAcpModel={agentSelection.selectedAcpModel}
        setSelectedAcpModel={agentSelection.setSelectedAcpModel}
@@ -2313,6 +3113,15 @@ index 516b8989c..fef0300ed 100644
      />
    );
 
+@@ -1160,6 +1234,8 @@ const GuidPage: React.FC = () => {
+               />
+             }
+             mentionDropdown={mentionDropdownNode}
++            slashCommandOpen={slashController.isOpen}
++            slashCommandMenu={slashCommandMenuNode}
+             files={guidInput.files}
+             onRemoveFile={guidInput.handleRemoveFile}
+             dir={guidInput.dir}
 diff --git a/src/renderer/pages/guid/components/AgentPillBar.tsx b/src/renderer/pages/guid/components/AgentPillBar.tsx
 index d89c8d316..d5d9c49bb 100644
 --- a/src/renderer/pages/guid/components/AgentPillBar.tsx
@@ -2553,8 +3362,51 @@ index 9224d36b5..b192c7ba9 100644
      </div>
    );
  };
+diff --git a/src/renderer/pages/guid/components/GuidInputCard.tsx b/src/renderer/pages/guid/components/GuidInputCard.tsx
+index 8feeb4cc8..06908a37b 100644
+--- a/src/renderer/pages/guid/components/GuidInputCard.tsx
++++ b/src/renderer/pages/guid/components/GuidInputCard.tsx
+@@ -44,6 +44,8 @@ type GuidInputCardProps = {
+   mentionOpen: boolean;
+   mentionSelectorBadge: React.ReactNode;
+   mentionDropdown: React.ReactNode;
++  slashCommandOpen: boolean;
++  slashCommandMenu: React.ReactNode;
+
+   // Files
+   files: string[];
+@@ -75,6 +77,8 @@ const GuidInputCard: React.FC<GuidInputCardProps> = ({
+   mentionOpen,
+   mentionSelectorBadge,
+   mentionDropdown,
++  slashCommandOpen,
++  slashCommandMenu,
+   files,
+   onRemoveFile,
+   dir,
+@@ -94,7 +98,7 @@ const GuidInputCard: React.FC<GuidInputCardProps> = ({
+
+   return (
+     <div
+-      className={`${styles.guidInputCard} guid-input-card-shell relative p-16px ${dir ? 'pb-8px' : ''} border-3 b bg-dialog-fill-0 b-solid rd-20px flex flex-col ${mentionOpen ? 'overflow-visible' : 'overflow-hidden'} transition-all duration-200 ${isFileDragging ? 'border-dashed guid-input-card-shell--dragging' : ''}`}
++      className={`${styles.guidInputCard} guid-input-card-shell relative p-16px ${dir ? 'pb-8px' : ''} border-3 b bg-dialog-fill-0 b-solid rd-20px flex flex-col ${mentionOpen || slashCommandOpen ? 'overflow-visible' : 'overflow-hidden'} transition-all duration-200 ${isFileDragging ? 'border-dashed guid-input-card-shell--dragging' : ''}`}
+       style={{
+         zIndex: 1,
+         transition: 'box-shadow 0.25s ease, border-color 0.25s ease, border-width 0.25s ease',
+@@ -135,6 +139,11 @@ const GuidInputCard: React.FC<GuidInputCardProps> = ({
+           {mentionDropdown}
+         </div>
+       )}
++      {slashCommandOpen && (
++        <div className='absolute z-60' style={{ left: 16, right: 16, top: isMobile ? 70 : 86 }}>
++          {slashCommandMenu}
++        </div>
++      )}
+       {files.length > 0 && (
+         <div className='flex flex-wrap items-center gap-8px mt-12px mb-12px'>
+           {files.map((path) => (
 diff --git a/src/renderer/pages/guid/components/GuidModelSelector.tsx b/src/renderer/pages/guid/components/GuidModelSelector.tsx
-index d2bfc8f43..df01eced3 100644
+index d2bfc8f43..b9794a15a 100644
 --- a/src/renderer/pages/guid/components/GuidModelSelector.tsx
 +++ b/src/renderer/pages/guid/components/GuidModelSelector.tsx
 @@ -4,13 +4,13 @@
@@ -2708,18 +3560,29 @@ index d2bfc8f43..df01eced3 100644
  }) => {
    const { t } = useTranslation();
    const navigate = useNavigate();
-@@ -415,27 +527,111 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
-   // live GPT models). For an enumerable CLI the curated `id` IS the model name
-   // the CLI expects, so `setSelectedAcpModel(model.id)` reaches the send path
-   // identically to a cached entry. This is what kills the cold-start dead-end.
+@@ -409,33 +521,114 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+     return fluxConnected && (compat === 'env' || compat === 'setup');
+   }, [agentKey, fluxConnected]);
+
+-  // Unified ACP model list (PRINCIPLE: no hardcoded lists). Prefer the live
+-  // cached catalog when a session has populated it; otherwise fall back to the
+-  // self-updating curated catalog (`curatedForAgent`, e.g. enumerable Codex →
+-  // live GPT models). For an enumerable CLI the curated `id` IS the model name
+-  // the CLI expects, so `setSelectedAcpModel(model.id)` reaches the send path
+-  // identically to a cached entry. This is what kills the cold-start dead-end.
 -  const acpModels = React.useMemo<AcpModelInfo['availableModels']>(() => {
++  // Unified ACP model list. ACP backends must render only bridge-compatible
++  // models from cached/static ACP info; falling back to the provider registry
++  // leaks generic OpenAI/Anthropic rows that the adapter may not support.
 +  const rawAcpModels = React.useMemo<AcpModelInfo['availableModels']>(() => {
      if (currentAcpCachedModelInfo?.availableModels?.length) {
        return currentAcpCachedModelInfo.availableModels;
      }
-     return (curated ?? []).map((m) => ({ id: m.id, label: m.displayName }));
-   }, [currentAcpCachedModelInfo?.availableModels, curated]);
-
+-    return (curated ?? []).map((m) => ({ id: m.id, label: m.displayName }));
+-  }, [currentAcpCachedModelInfo?.availableModels, curated]);
++    return [];
++  }, [currentAcpCachedModelInfo?.availableModels]);
++
 +  const acpModels = React.useMemo(() => normalizeAcpModelOptions(rawAcpModels), [rawAcpModels]);
 +
 +  const selectedBaseModelId = React.useMemo(
@@ -2810,7 +3673,7 @@ index d2bfc8f43..df01eced3 100644
 +    },
 +    [agentKey, onConfigOptionSelect, recordTelemetry, setSelectedAcpServiceTier]
 +  );
-+
+
    const acpSelectedLabel = React.useMemo(() => {
 -    if (isFluxModelId(selectedAcpModel)) return FLUX_MODEL_DISPLAY[selectedAcpModel as FluxModelId];
 -    return (
@@ -2834,7 +3697,7 @@ index d2bfc8f43..df01eced3 100644
 
    const acpButtonLabel = React.useMemo(() => {
      return getModelDisplayLabel({
-@@ -454,6 +650,95 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -454,6 +647,95 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
      [acpButtonLabel, acpSourceLabel]
    );
 
@@ -2930,7 +3793,7 @@ index d2bfc8f43..df01eced3 100644
    // ── Provider-based agents (Gemini / Wayland Core) - three-tier picker ────
    if (isGeminiMode) {
      return (
-@@ -479,7 +764,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -479,7 +761,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
          <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
            <span className='flex items-center gap-6px min-w-0'>
              <Brain size={14} color={iconColors.secondary} className='shrink-0' />
@@ -2939,7 +3802,21 @@ index d2bfc8f43..df01eced3 100644
              <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
            </span>
          </Button>
-@@ -500,72 +785,76 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -488,10 +770,9 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+   }
+
+   // ── CLI agents - ACP model selector ──────────────────────────────────────
+-  // Render the picker whenever Flux Auto is offered OR there is any real model
+-  // to show (live cache or curated catalog). This kills the cold-start dead-end:
+-  // a connected Flux user sees Flux Auto from the first frame, and an enumerable
+-  // CLI (Codex) surfaces its live GPT models even before a session caches them.
++  // Render the picker whenever Flux Auto is offered OR there is any real ACP
++  // model to show. The cold-start path is handled by getStaticModelInfo so this
++  // never needs to substitute a generic provider catalog.
+   if (showAcpFlux || acpModels.length > 0) {
+     // Inline scope caption - keeps the Arco Menu legal (no raw <div> kids).
+     const scopeCaptionItem = (
+@@ -500,72 +781,76 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
        </Menu.Item>
      );
      return (
@@ -3124,7 +4001,7 @@ index 5f8854113..5246d3351 100644
    }
  }
 diff --git a/src/renderer/pages/guid/hooks/useGuidAgentSelection.ts b/src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
-index 2628b8146..5f51d876f 100644
+index 2628b8146..90d8cf201 100644
 --- a/src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
 +++ b/src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
 @@ -9,6 +9,7 @@ import type { IProvider } from '@/common/config/storage';
@@ -3146,7 +4023,7 @@ index 2628b8146..5f51d876f 100644
    currentAcpCachedModelInfo: AcpModelInfo | null;
    currentEffectiveAgentInfo: EffectiveAgentInfo;
    cachedConfigOptions: AcpSessionConfigOption[];
-@@ -65,6 +70,34 @@ export type GuidAgentSelectionResult = {
+@@ -65,6 +70,42 @@ export type GuidAgentSelectionResult = {
    customAgentAvatarMap: Map<string, string | undefined>;
  };
 
@@ -3167,6 +4044,14 @@ index 2628b8146..5f51d876f 100644
 +  return { modelId: modelId!.slice(0, -match[0].length), effort: normalizeEffort(match[1]) };
 +};
 +
++const acpCatalogHasModel = (
++  availableModels: AcpModelInfo['availableModels'] | undefined,
++  modelId: string | null
++): boolean => {
++  if (!modelId || !availableModels?.length) return false;
++  return availableModels.some((model) => splitModelEffort(model.id).modelId === modelId);
++};
++
 +const effortFromConfigOptions = (options: AcpSessionConfigOption[] | undefined): GuidReasoningEffort | null => {
 +  const option = options?.find(
 +    (opt) =>
@@ -3181,7 +4066,7 @@ index 2628b8146..5f51d876f 100644
  type UseGuidAgentSelectionOptions = {
    modelList: IProvider[];
    isGoogleAuth: boolean;
-@@ -93,6 +126,8 @@ export const useGuidAgentSelection = ({
+@@ -93,6 +134,8 @@ export const useGuidAgentSelection = ({
    const initialRestoreDoneRef = useRef(false);
    const [acpCachedModels, setAcpCachedModels] = useState<Record<string, AcpModelInfo>>({});
    const [selectedAcpModel, _setSelectedAcpModel] = useState<string | null>(null);
@@ -3190,7 +4075,7 @@ index 2628b8146..5f51d876f 100644
    const [cachedConfigOptions, setCachedConfigOptions] = useState<AcpSessionConfigOption[]>([]);
    const [pendingConfigOptions, setPendingConfigOptions] = useState<Record<string, string>>({});
 
-@@ -122,10 +157,22 @@ export const useGuidAgentSelection = ({
+@@ -122,10 +165,22 @@ export const useGuidAgentSelection = ({
      setPendingConfigOptions((prev) => ({ ...prev, [configId]: value }));
    }, []);
 
@@ -3214,7 +4099,7 @@ index 2628b8146..5f51d876f 100644
        const agentKey = selectedAgentRef.current;
        if (agentKey && agentKey !== 'gemini' && agentKey !== 'custom' && newModelId) {
          void savePreferredModelId(agentKey, newModelId);
-@@ -379,18 +426,20 @@ export const useGuidAgentSelection = ({
+@@ -379,18 +434,20 @@ export const useGuidAgentSelection = ({
        .then((cached) => {
          if (!isActive) return;
          const options = cached?.[backend];
@@ -3242,29 +4127,43 @@ index 2628b8146..5f51d876f 100644
          setPendingConfigOptions({});
        });
      return () => {
-@@ -425,7 +474,9 @@ export const useGuidAgentSelection = ({
-           | string
-           | undefined;
+@@ -422,11 +479,15 @@ export const useGuidAgentSelection = ({
+         const config = await ConfigStorage.get('acp.config');
+         if (cancelled) return;
+         const preferred = (config?.[backend as AcpBackendAll] as Record<string, unknown>)?.preferredModelId as
+-          | string
+-          | undefined;
++          string | undefined;
          if (preferred) {
 -          _setSelectedAcpModel(preferred);
+-          return;
 +          const parsed = splitModelEffort(preferred);
-+          _setSelectedAcpModel(parsed.modelId);
-+          if (parsed.effort) _setSelectedAcpEffort(parsed.effort);
-           return;
++          const cachedCatalog = acpCachedModels[backend]?.availableModels;
++          if (!cachedCatalog?.length || acpCatalogHasModel(cachedCatalog, parsed.modelId)) {
++            _setSelectedAcpModel(parsed.modelId);
++            if (parsed.effort) _setSelectedAcpEffort(parsed.effort);
++            return;
++          }
          }
        } catch {
-@@ -436,7 +487,9 @@ export const useGuidAgentSelection = ({
+         /* fall through to cached / native default */
+@@ -435,8 +496,13 @@ export const useGuidAgentSelection = ({
+
        // 2. Last model the ACP bridge cached for this backend.
        const cachedModelId = acpCachedModels[backend]?.currentModelId;
-       if (cachedModelId) {
+-      if (cachedModelId) {
 -        _setSelectedAcpModel(cachedModelId);
++      if (
++        cachedModelId &&
++        acpCatalogHasModel(acpCachedModels[backend]?.availableModels, splitModelEffort(cachedModelId).modelId)
++      ) {
 +        const parsed = splitModelEffort(cachedModelId);
 +        _setSelectedAcpModel(parsed.modelId);
 +        if (parsed.effort) _setSelectedAcpEffort(parsed.effort);
          return;
        }
 
-@@ -457,7 +510,11 @@ export const useGuidAgentSelection = ({
+@@ -457,7 +523,11 @@ export const useGuidAgentSelection = ({
        }
 
        // 4. No signal (non-claude backend, or claude without a native login).
@@ -3277,7 +4176,39 @@ index 2628b8146..5f51d876f 100644
      };
 
      void resolveAcpModel();
-@@ -617,6 +674,10 @@ export const useGuidAgentSelection = ({
+@@ -540,14 +610,29 @@ export const useGuidAgentSelection = ({
+       : selectedAgentKey.startsWith('custom:')
+         ? 'custom'
+         : selectedAgentKey;
+-    if (!backend || acpCachedModels[backend]?.availableModels?.length) return;
++    if (!backend) return;
++    const shouldRevalidateCachedCatalog = backend === 'codex';
++    if (!shouldRevalidateCachedCatalog && acpCachedModels[backend]?.availableModels?.length) return;
+     let active = true;
+     ipcBridge.acpConversation.getModelInfo
+       .invoke({ conversationId: '', backend })
+       .then((res) => {
+         const info = res?.success ? res.data?.modelInfo : null;
+         if (!active || !info?.availableModels?.length) return;
+-        setAcpCachedModels((prev) => (prev[backend]?.availableModels?.length ? prev : { ...prev, [backend]: info }));
++        setAcpCachedModels((prev) => {
++          const existing = prev[backend];
++          if (!shouldRevalidateCachedCatalog && existing?.availableModels?.length) return prev;
++          const sameCatalog =
++            existing?.currentModelId === info.currentModelId &&
++            existing?.currentModelLabel === info.currentModelLabel &&
++            existing?.availableModels?.length === info.availableModels.length &&
++            existing.availableModels.every(
++              (model, index) =>
++                model.id === info.availableModels[index]?.id && model.label === info.availableModels[index]?.label
++            );
++          if (sameCatalog) return prev;
++          return { ...prev, [backend]: info };
++        });
+       })
+       .catch(() => {
+         // Offline resolve is best-effort; the picker keeps its default until connect.
+@@ -617,6 +702,10 @@ export const useGuidAgentSelection = ({
      acpCachedModels,
      selectedAcpModel,
      setSelectedAcpModel,
@@ -4460,7 +5391,7 @@ index 62e56ae1b..4b3f1f41a 100644
 +  });
 +});
 diff --git a/tests/unit/renderer/guidModelSelector.dom.test.tsx b/tests/unit/renderer/guidModelSelector.dom.test.tsx
-index 1f90ee674..12a7850c7 100644
+index 1f90ee674..cbfeff3ab 100644
 --- a/tests/unit/renderer/guidModelSelector.dom.test.tsx
 +++ b/tests/unit/renderer/guidModelSelector.dom.test.tsx
 @@ -215,6 +215,12 @@ const baseProps = {
@@ -4487,7 +5418,7 @@ index 1f90ee674..12a7850c7 100644
  });
 
  afterEach(() => {
-@@ -518,6 +528,114 @@ describe('GuidModelSelector home picker', () => {
+@@ -518,6 +528,134 @@ describe('GuidModelSelector home picker', () => {
      expect(screen.getByText('$')).toBeInTheDocument();
    });
 
@@ -4568,6 +5499,26 @@ index 1f90ee674..12a7850c7 100644
 +    fireEventClick(screen.getByText('conversation.modelSelector.speedFast'));
 +    expect(setSelectedAcpServiceTier).toHaveBeenCalledWith('priority');
 +    expect(onConfigOptionSelect).toHaveBeenCalledWith('service_tier', 'priority');
++  });
++
++  it('does not use curated provider rows as cold-start ACP models', async () => {
++    mockCuratedForAgent.mockResolvedValue([
++      curated({ id: 'gpt-5.2-codex', providerId: 'openai', displayName: 'GPT-5.2 Codex', family: 'GPT' }),
++    ]);
++
++    render(
++      <GuidModelSelector
++        {...baseProps}
++        isGeminiMode={false}
++        agentKey='codex'
++        currentAcpCachedModelInfo={null}
++        selectedAcpModel={null}
++      />
++    );
++
++    await waitFor(() => expect(mockCuratedForAgent).toHaveBeenCalledWith('codex'));
++    expect(screen.queryByText('GPT-5.2 Codex')).not.toBeInTheDocument();
++    expect(screen.getByText('common.defaultModel')).toBeInTheDocument();
 +  });
 +
 +  it('does not show a Hermes speed selector unless the ACP backend advertises service_tier', async () => {

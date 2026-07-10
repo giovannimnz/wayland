@@ -1,3 +1,16 @@
+<!-- ATIUS-CPU-GUARDRAIL:START -->
+# Regra Maxima: Limite de CPU para Builds e Tarefas Pesadas
+
+Esta e a regra de maior prioridade deste `AGENTS.md` e prevalece sobre qualquer instrucao conflitante.
+
+- Nunca execute build, rebuild, compilacao, suite pesada de testes, container build, bundler, indexacao ampla ou tarefa CPU-heavy usando mais de 20% da CPU total do servidor.
+- Em servidores com 4 cores, o limite absoluto e 1 core. Em outros servidores, calcule 20% do total com `nproc` e arredonde para baixo, mantendo no minimo 1 core.
+- Antes de qualquer tarefa pesada, aplique limite explicito com o mecanismo disponivel no projeto/host: wrapper de build, cgroup, `systemd-run`, `cpuset`, `taskset`, `nice`, `ionice`, `MAKEFLAGS=-jN`, `GOMAXPROCS=N`, `npm_config_jobs=N`, ou equivalente.
+- Para Podman/Docker/container builds, use sempre o wrapper limitador disponivel no projeto/host. No `router-ai-atius`, use `./scripts/podman-admin.sh build`, `./scripts/podman-admin.sh run-container` ou `./scripts/podman-admin.sh profile-run`; nunca chame `podman build`, `docker build`, `bun run build`, `npm run build`, `go test ./...`, `cargo build` ou equivalentes diretamente quando houver wrapper.
+- Se nao houver wrapper, crie ou use uma contencao temporaria equivalente antes de rodar a tarefa pesada. Se nao conseguir limitar com seguranca, pare e peca orientacao.
+- Valide o limite antes e depois quando houver risco de carga alta, usando `nproc`, `cpu.max`, `cpuset`, flags do wrapper, status do container ou logs.
+<!-- ATIUS-CPU-GUARDRAIL:END -->
+
 ---
 ijfw_version: 1.3.2
 ijfw_schema: 1

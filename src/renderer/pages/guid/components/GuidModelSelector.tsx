@@ -521,18 +521,15 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
     return fluxConnected && (compat === 'env' || compat === 'setup');
   }, [agentKey, fluxConnected]);
 
-  // Unified ACP model list (PRINCIPLE: no hardcoded lists). Prefer the live
-  // cached catalog when a session has populated it; otherwise fall back to the
-  // self-updating curated catalog (`curatedForAgent`, e.g. enumerable Codex →
-  // live GPT models). For an enumerable CLI the curated `id` IS the model name
-  // the CLI expects, so `setSelectedAcpModel(model.id)` reaches the send path
-  // identically to a cached entry. This is what kills the cold-start dead-end.
+  // Unified ACP model list. ACP backends must render only bridge-compatible
+  // models from cached/static ACP info; falling back to the provider registry
+  // leaks generic OpenAI/Anthropic rows that the adapter may not support.
   const rawAcpModels = React.useMemo<AcpModelInfo['availableModels']>(() => {
     if (currentAcpCachedModelInfo?.availableModels?.length) {
       return currentAcpCachedModelInfo.availableModels;
     }
-    return (curated ?? []).map((m) => ({ id: m.id, label: m.displayName }));
-  }, [currentAcpCachedModelInfo?.availableModels, curated]);
+    return [];
+  }, [currentAcpCachedModelInfo?.availableModels]);
 
   const acpModels = React.useMemo(() => normalizeAcpModelOptions(rawAcpModels), [rawAcpModels]);
 
@@ -773,10 +770,9 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
   }
 
   // ── CLI agents - ACP model selector ──────────────────────────────────────
-  // Render the picker whenever Flux Auto is offered OR there is any real model
-  // to show (live cache or curated catalog). This kills the cold-start dead-end:
-  // a connected Flux user sees Flux Auto from the first frame, and an enumerable
-  // CLI (Codex) surfaces its live GPT models even before a session caches them.
+  // Render the picker whenever Flux Auto is offered OR there is any real ACP
+  // model to show. The cold-start path is handled by getStaticModelInfo so this
+  // never needs to substitute a generic provider catalog.
   if (showAcpFlux || acpModels.length > 0) {
     // Inline scope caption - keeps the Arco Menu legal (no raw <div> kids).
     const scopeCaptionItem = (

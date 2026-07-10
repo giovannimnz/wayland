@@ -79,7 +79,12 @@ import { shouldInjectTeamGuideMcp } from '@process/team/prompts/teamGuideCapabil
 import { extractTextFromMessage, processCronInMessage } from './MessageMiddleware';
 import { ConversationTurnCompletionService } from './ConversationTurnCompletionService';
 import { resolveFluxRouting, type FluxRoutingResult, type RoutingDecision } from '@process/task/fluxRouting';
+import { readCodexStaticModelInfo } from '@process/task/codexStaticModelInfo';
 import { readConnectedFluxKey } from '@process/connectors/fluxKey';
+import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import yaml from 'js-yaml';
 
 interface AcpAgentManagerData {
   workspace?: string;
@@ -118,6 +123,76 @@ interface AcpAgentManagerData {
   serviceTier?: CodexServiceTier;
   /** Per-conversation active MCP server ids (#348): undefined = all enabled, [] = none. */
   activeMcpServers?: string[];
+}
+
+type StaticModelOption = { id: string; label: string };
+
+function labelForModel(models: StaticModelOption[], modelId: string | null): string | null {
+  if (!modelId) return null;
+  return models.find((model) => model.id === modelId)?.label ?? modelId;
+}
+
+function finalizeStaticModelInfo(
+  availableModels: StaticModelOption[],
+  currentModelId: string | null,
+  sourceDetail: AcpModelInfo['sourceDetail']
+): AcpModelInfo | null {
+  if (availableModels.length === 0) return null;
+  const activeModelId =
+    currentModelId && availableModels.some((model) => model.id === currentModelId)
+      ? currentModelId
+      : availableModels[0].id;
+  return {
+    currentModelId: activeModelId,
+    currentModelLabel: labelForModel(availableModels, activeModelId),
+    availableModels,
+    canSwitch: availableModels.length > 1,
+    source: 'models',
+    sourceDetail,
+  };
+}
+
+function resolveHermesHome(): string {
+  const configured = process.env.HERMES_HOME?.trim();
+  if (configured) return configured;
+  if (process.platform === 'win32' && process.env.LOCALAPPDATA) return join(process.env.LOCALAPPDATA, 'hermes');
+  return join(homedir(), '.hermes');
+}
+
+type HermesProviderCache = Record<string, { models?: unknown }>;
+
+function readHermesConfigDefaults(config: unknown): { provider: string | null; modelId: string | null } {
+  if (!config || typeof config !== 'object') return { provider: null, modelId: null };
+  const model = (config as Record<string, unknown>).model;
+  if (!model || typeof model !== 'object') return { provider: null, modelId: null };
+  const record = model as Record<string, unknown>;
+  return {
+    provider: typeof record.provider === 'string' && record.provider.trim() ? record.provider.trim() : null,
+    modelId: typeof record.default === 'string' && record.default.trim() ? record.default.trim() : null,
+  };
+}
+
+async function readHermesModelInfoFromConfig(): Promise<AcpModelInfo | null> {
+  const hermesHome = resolveHermesHome();
+  const configRaw = await readFile(join(hermesHome, 'config.yaml'), 'utf8');
+  const { provider, modelId } = readHermesConfigDefaults(yaml.load(configRaw));
+  const providerId = provider || 'openai-codex';
+
+  let cacheModels: string[] = [];
+  try {
+    const cacheRaw = await readFile(join(hermesHome, 'provider_models_cache.json'), 'utf8');
+    const cache = JSON.parse(cacheRaw) as HermesProviderCache;
+    const candidate = cache[providerId]?.models;
+    if (Array.isArray(candidate)) {
+      cacheModels = candidate.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+    }
+  } catch {
+    // The provider cache is optional. Fall back to the configured default below.
+  }
+
+  const modelIds = Array.from(new Set([...(modelId ? [modelId] : []), ...cacheModels]));
+  const availableModels = modelIds.map((id) => ({ id, label: id }));
+  return finalizeStaticModelInfo(availableModels, modelId, 'acp-models');
 }
 
 type BufferedStreamTextMessage = {
@@ -1462,8 +1537,7 @@ ${collectedResponses.join('\n')}`;
           allowConciergeDiag: isConciergeAssistant(data.presetAssistantId) || isConciergeAssistant(data.customAgentId),
           // Forward team MCP stdio config so AcpAgent.loadBuiltinSessionMcpServers() can inject it
           teamMcpStdioConfig: (data as unknown as Record<string, unknown>).teamMcpStdioConfig as
-            | { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> }
-            | undefined,
+            { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> } | undefined,
         },
         onSessionIdUpdate: (sessionId: string) => {
           // Save ACP session ID to database for resume support
@@ -1951,44 +2025,61 @@ ${collectedResponses.join('\n')}`;
 
   /**
    * Model info for a backend BEFORE any task/agent exists (cold start on a new
-   * chat). Claude Code never reports through the ACP `models` API, so its catalog
-   * is not in `acp.cachedModels`; instead it is derivable offline from the
-   * cc-switch local config (provider DB + `~/.claude/settings.json`), with no live
-   * ACP connection. We compute it here so the picker shows the current model +
-   * switch list immediately, and persist it into `acp.cachedModels` so later cold
-   * starts hit the renderer's warm-cache path and it survives as last-known.
-   *
-   * Returns null for every other backend (their pre-connection catalog already
-   * comes from `acp.cachedModels`, populated by a previous live session), so this
-   * cannot regress models-API backends (kimi/opencode) or backends that genuinely
-   * expose nothing.
+   * chat). Some ACP bridges only report models after a session starts, but the
+   * launch page still needs the bridge-compatible catalog:
+   * - Claude comes from cc-switch / ~/.claude settings.
+   * - Codex comes from `codex debug models`, the same local catalog Codex Desktop uses.
+   * - Hermes comes from its configured provider cache + config.yaml default.
    */
   static async getStaticModelInfo(backend: string): Promise<AcpModelInfo | null> {
-    if (backend !== 'claude') return null;
+    let modelInfo: AcpModelInfo | null = null;
+    if (backend === 'claude') {
+      // cc-switch users get richer per-provider ids; everyone else with the Claude
+      // Code CLI set up falls back to native ~/.claude/settings.json slots.
+      modelInfo = readClaudeModelInfoFromCcSwitch() ?? readClaudeModelInfoFromSettings();
+    } else if (backend === 'codex') {
+      try {
+        modelInfo = await readCodexStaticModelInfo();
+      } catch (error) {
+        mainWarn('[AcpAgentManager]', 'Failed to read static codex model info', error);
+      }
+    } else if (backend === 'hermes') {
+      try {
+        modelInfo = await readHermesModelInfoFromConfig();
+      } catch (error) {
+        mainWarn('[AcpAgentManager]', 'Failed to read static hermes model info', error);
+      }
+    } else {
+      return null;
+    }
 
-    // cc-switch users get richer per-provider ids; everyone else with the Claude
-    // Code CLI set up falls back to native ~/.claude/settings.json slots.
-    const modelInfo = readClaudeModelInfoFromCcSwitch() ?? readClaudeModelInfoFromSettings();
     if (!modelInfo?.availableModels?.length) return null;
 
+    let resolvedModelInfo = modelInfo;
     try {
       const cached = (await ProcessConfig.get('acp.cachedModels')) || {};
       const existing = cached[backend];
+      const currentModelId =
+        existing?.currentModelId && modelInfo.availableModels.some((model) => model.id === existing.currentModelId)
+          ? existing.currentModelId
+          : modelInfo.currentModelId;
+      const currentModelLabel = labelForModel(modelInfo.availableModels, currentModelId);
+      resolvedModelInfo = {
+        ...modelInfo,
+        currentModelId,
+        currentModelLabel,
+      };
       await ProcessConfig.set('acp.cachedModels', {
         ...cached,
-        [backend]: {
-          ...modelInfo,
-          // Preserve the original default from the first live session, mirroring
-          // cacheModelList — a derived default must not clobber a real one.
-          currentModelId: existing?.currentModelId ?? modelInfo.currentModelId,
-          currentModelLabel: existing?.currentModelLabel ?? modelInfo.currentModelLabel,
-        },
+        // Preserve the original default from the first live session, mirroring
+        // cacheModelList — a derived default must not clobber a real one.
+        [backend]: resolvedModelInfo,
       });
     } catch (error) {
-      mainWarn('[AcpAgentManager]', 'Failed to cache static claude model info', error);
+      mainWarn('[AcpAgentManager]', `Failed to cache static ${backend} model info`, error);
     }
 
-    return modelInfo;
+    return resolvedModelInfo;
   }
 
   /**

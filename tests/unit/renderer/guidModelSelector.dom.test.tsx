@@ -607,6 +607,26 @@ describe('GuidModelSelector home picker', () => {
     expect(onConfigOptionSelect).toHaveBeenCalledWith('service_tier', 'priority');
   });
 
+  it('does not use curated provider rows as cold-start ACP models', async () => {
+    mockCuratedForAgent.mockResolvedValue([
+      curated({ id: 'gpt-5.2-codex', providerId: 'openai', displayName: 'GPT-5.2 Codex', family: 'GPT' }),
+    ]);
+
+    render(
+      <GuidModelSelector
+        {...baseProps}
+        isGeminiMode={false}
+        agentKey='codex'
+        currentAcpCachedModelInfo={null}
+        selectedAcpModel={null}
+      />
+    );
+
+    await waitFor(() => expect(mockCuratedForAgent).toHaveBeenCalledWith('codex'));
+    expect(screen.queryByText('GPT-5.2 Codex')).not.toBeInTheDocument();
+    expect(screen.getByText('common.defaultModel')).toBeInTheDocument();
+  });
+
   it('does not show a Hermes speed selector unless the ACP backend advertises service_tier', async () => {
     mockCuratedForAgent.mockResolvedValue([]);
     const acpInfo = {

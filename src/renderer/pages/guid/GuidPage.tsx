@@ -37,8 +37,12 @@ import GuidModelSelector from './components/GuidModelSelector';
 import MentionDropdown, { MentionSelectorBadge } from './components/MentionDropdown';
 import FeedbackReportModal from '@/renderer/components/settings/SettingsModal/contents/FeedbackReportModal';
 import SpeechInputButton from '@/renderer/components/chat/SpeechInputButton';
+import SlashCommandMenu, { type SlashCommandMenuItem } from '@/renderer/components/chat/SlashCommandMenu';
+import { useSlashCommandController } from '@/renderer/hooks/chat/useSlashCommandController';
+import { useUserSlashCommands } from '@/renderer/hooks/chat/useUserSlashCommands';
 import { appendSpeechTranscript } from '@/renderer/hooks/system/useSpeechInput';
 import { useHiddenAgents } from '@renderer/hooks/assistant/useHiddenAgents';
+import type { SlashCommandItem } from '@/common/chat/slash/types';
 import { filterVisibleAgents } from './hooks/agentSelectionUtils';
 import { useGuidAgentSelection } from './hooks/useGuidAgentSelection';
 import { useGuidInput } from './hooks/useGuidInput';
@@ -306,6 +310,65 @@ const GuidPage: React.FC = () => {
     });
   }, [recordTelemetry, agentSelection.selectedAgentInfo, agentSelection.selectedAgent, guidInput.files]);
 
+  const { commands: userSlashCommands } = useUserSlashCommands();
+  const userSlashCommandItems = useMemo<SlashCommandItem[]>(
+    () =>
+      userSlashCommands.map((command) => ({
+        name: command.name,
+        description: command.description,
+        kind: 'template',
+        source: 'user',
+        hint: t('messages.slash.customBadge', { defaultValue: 'Custom' }),
+      })),
+    [userSlashCommands, t]
+  );
+  const userSlashTemplateByName = useMemo(() => {
+    const templates = new Map<string, string>();
+    for (const command of userSlashCommands) {
+      templates.set(command.name, command.template);
+    }
+    return templates;
+  }, [userSlashCommands]);
+  const slashController = useSlashCommandController({
+    input: guidInput.input,
+    commands: userSlashCommandItems,
+    onSelectTemplate: (name) => {
+      guidInput.setInput(`/${name} `);
+      guidInput.handleTextareaFocus();
+    },
+    onSelectUserCommand: (name) => {
+      guidInput.setInput(userSlashTemplateByName.get(name) ?? `/${name} `);
+      guidInput.handleTextareaFocus();
+    },
+  });
+  const slashMenuItems = useMemo<SlashCommandMenuItem[]>(
+    () =>
+      slashController.filteredCommands.map((command) => ({
+        key: command.name,
+        label: `/${command.name}`,
+        description: command.description,
+        badge: command.hint,
+      })),
+    [slashController.filteredCommands]
+  );
+  const slashCommandMenuNode = (
+    <SlashCommandMenu
+      title={t('messages.slash.title', { defaultValue: 'Commands' })}
+      hint={t('messages.slash.hint', { defaultValue: 'Type / to open command menu' })}
+      items={slashMenuItems}
+      activeIndex={slashController.activeIndex}
+      loading={false}
+      onHoverItem={slashController.setActiveIndex}
+      onSelectItem={(item) => {
+        const targetIndex = slashController.filteredCommands.findIndex((command) => command.name === item.key);
+        if (targetIndex >= 0) {
+          slashController.onSelectByIndex(targetIndex);
+        }
+      }}
+      emptyText={t('messages.slash.empty', { defaultValue: 'No commands found' })}
+    />
+  );
+
   // --- Coordinated handlers (depend on multiple hooks) ---
   const handleInputChange = useCallback(
     (value: string) => {
@@ -389,6 +452,9 @@ const GuidPage: React.FC = () => {
         mention.setMentionActiveIndex(0);
         return;
       }
+      if (!mention.mentionOpen && !mention.mentionSelectorOpen && slashController.onKeyDown(event)) {
+        return;
+      }
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
         if (!guidInput.input.trim()) return;
@@ -397,7 +463,7 @@ const GuidPage: React.FC = () => {
         send.sendMessageHandler({ onSent: recordMessageSent });
       }
     },
-    [mention, guidInput.input, send.sendMessageHandler, recordMessageSent]
+    [mention, slashController.onKeyDown, guidInput.input, send.sendMessageHandler, recordMessageSent]
   );
 
   const handleSelectAgent = useCallback(
@@ -1168,6 +1234,8 @@ const GuidPage: React.FC = () => {
               />
             }
             mentionDropdown={mentionDropdownNode}
+            slashCommandOpen={slashController.isOpen}
+            slashCommandMenu={slashCommandMenuNode}
             files={guidInput.files}
             onRemoveFile={guidInput.handleRemoveFile}
             dir={guidInput.dir}

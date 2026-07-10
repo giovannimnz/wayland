@@ -413,6 +413,54 @@ describe('useGuidAgentSelection – preset agent config resolution', () => {
     expect(result.current.currentAcpCachedModelInfo).toBeNull();
   });
 
+  it('revalidates a stale codex cached catalog through getModelInfo on selection', async () => {
+    setupMocks({
+      cachedModels: {
+        codex: {
+          source: 'models',
+          currentModelId: 'gpt-5.2',
+          currentModelLabel: 'GPT-5.2',
+          availableModels: [{ id: 'gpt-5.2', label: 'GPT-5.2' }],
+          canSwitch: true,
+        },
+      },
+      acpConfig: {},
+    });
+    ipcMock.getModelInfo.mockResolvedValue({
+      success: true,
+      data: {
+        modelInfo: {
+          source: 'models',
+          currentModelId: 'gpt-5.5',
+          currentModelLabel: 'GPT-5.5',
+          availableModels: [
+            { id: 'gpt-5.5', label: 'GPT-5.5' },
+            { id: 'gpt-5.4', label: 'GPT-5.4' },
+          ],
+          canSwitch: true,
+        },
+      },
+    });
+
+    const { result } = renderHook(() => useGuidAgentSelection(hookOptions));
+
+    await waitFor(() => {
+      expect(result.current.availableAgents).toBeDefined();
+    });
+
+    act(() => {
+      result.current.setSelectedAgentKey('codex');
+    });
+
+    await waitFor(() => {
+      expect(ipcMock.getModelInfo).toHaveBeenCalledWith({ conversationId: '', backend: 'codex' });
+      expect(result.current.currentAcpCachedModelInfo?.availableModels.map((model) => model.id)).toEqual([
+        'gpt-5.5',
+        'gpt-5.4',
+      ]);
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // Home-path Claude native default: a fresh Claude chat must default to the
   // subscription slot, never be left model-less (which lets the global "Route

@@ -87,6 +87,14 @@ const splitModelEffort = (
   return { modelId: modelId!.slice(0, -match[0].length), effort: normalizeEffort(match[1]) };
 };
 
+const acpCatalogHasModel = (
+  availableModels: AcpModelInfo['availableModels'] | undefined,
+  modelId: string | null
+): boolean => {
+  if (!modelId || !availableModels?.length) return false;
+  return availableModels.some((model) => splitModelEffort(model.id).modelId === modelId);
+};
+
 const effortFromConfigOptions = (options: AcpSessionConfigOption[] | undefined): GuidReasoningEffort | null => {
   const option = options?.find(
     (opt) =>
@@ -471,13 +479,15 @@ export const useGuidAgentSelection = ({
         const config = await ConfigStorage.get('acp.config');
         if (cancelled) return;
         const preferred = (config?.[backend as AcpBackendAll] as Record<string, unknown>)?.preferredModelId as
-          | string
-          | undefined;
+          string | undefined;
         if (preferred) {
           const parsed = splitModelEffort(preferred);
-          _setSelectedAcpModel(parsed.modelId);
-          if (parsed.effort) _setSelectedAcpEffort(parsed.effort);
-          return;
+          const cachedCatalog = acpCachedModels[backend]?.availableModels;
+          if (!cachedCatalog?.length || acpCatalogHasModel(cachedCatalog, parsed.modelId)) {
+            _setSelectedAcpModel(parsed.modelId);
+            if (parsed.effort) _setSelectedAcpEffort(parsed.effort);
+            return;
+          }
         }
       } catch {
         /* fall through to cached / native default */
@@ -486,7 +496,10 @@ export const useGuidAgentSelection = ({
 
       // 2. Last model the ACP bridge cached for this backend.
       const cachedModelId = acpCachedModels[backend]?.currentModelId;
-      if (cachedModelId) {
+      if (
+        cachedModelId &&
+        acpCatalogHasModel(acpCachedModels[backend]?.availableModels, splitModelEffort(cachedModelId).modelId)
+      ) {
         const parsed = splitModelEffort(cachedModelId);
         _setSelectedAcpModel(parsed.modelId);
         if (parsed.effort) _setSelectedAcpEffort(parsed.effort);
@@ -597,14 +610,29 @@ export const useGuidAgentSelection = ({
       : selectedAgentKey.startsWith('custom:')
         ? 'custom'
         : selectedAgentKey;
-    if (!backend || acpCachedModels[backend]?.availableModels?.length) return;
+    if (!backend) return;
+    const shouldRevalidateCachedCatalog = backend === 'codex';
+    if (!shouldRevalidateCachedCatalog && acpCachedModels[backend]?.availableModels?.length) return;
     let active = true;
     ipcBridge.acpConversation.getModelInfo
       .invoke({ conversationId: '', backend })
       .then((res) => {
         const info = res?.success ? res.data?.modelInfo : null;
         if (!active || !info?.availableModels?.length) return;
-        setAcpCachedModels((prev) => (prev[backend]?.availableModels?.length ? prev : { ...prev, [backend]: info }));
+        setAcpCachedModels((prev) => {
+          const existing = prev[backend];
+          if (!shouldRevalidateCachedCatalog && existing?.availableModels?.length) return prev;
+          const sameCatalog =
+            existing?.currentModelId === info.currentModelId &&
+            existing?.currentModelLabel === info.currentModelLabel &&
+            existing?.availableModels?.length === info.availableModels.length &&
+            existing.availableModels.every(
+              (model, index) =>
+                model.id === info.availableModels[index]?.id && model.label === info.availableModels[index]?.label
+            );
+          if (sameCatalog) return prev;
+          return { ...prev, [backend]: info };
+        });
       })
       .catch(() => {
         // Offline resolve is best-effort; the picker keeps its default until connect.

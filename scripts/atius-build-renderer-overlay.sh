@@ -11,7 +11,7 @@ limit_build_cpu() {
   if ! [[ "$cpu_total" =~ ^[0-9]+$ ]] || [[ "$cpu_total" -lt 1 ]]; then
     cpu_total=1
   fi
-  cpu_limit=$((cpu_total / 2))
+  cpu_limit=$((cpu_total * 20 / 100))
   if [[ "$cpu_limit" -lt 1 ]]; then
     cpu_limit=1
   fi
