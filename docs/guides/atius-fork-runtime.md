@@ -92,7 +92,7 @@ Generated artifacts are intentionally not tracked:
 
 ## Current ATIUS behaviors to preserve
 
-- `Conversar na pasta` stays visible on the WebUI, defaults to `/home/ubuntu/GitHub`, and opens the browser directory picker.
+- `Conversar na pasta` stays visible on the WebUI, defaults to `/home/ubuntu/Servers` (`~/Servers` for the `ubuntu` runtime user), and opens the browser directory picker.
 - The login screen defaults to `pt-BR` when no saved language exists.
 - Standalone build output includes the MCP stdio scripts required by the server startup canary.
 - Service-shell env loading skips non-interactive login shells like `/usr/sbin/nologin`.
@@ -202,7 +202,7 @@ Validated on `https://wayland.atius.com.br/#/guid` with Playwright/Chromium at
 Confirmed behaviors:
 
 - no horizontal page overflow at any tested viewport;
-- `Conversar na pasta` opens the WebUI directory picker at `/home/ubuntu/GitHub`;
+- `Conversar na pasta` opens the WebUI directory picker at `/home/ubuntu/Servers` (`~/Servers`);
 - Codex model menu shows base models only, while effort is selected separately;
 - Hermes Agent shows the same separate effort selector;
 - Codex permission menu includes `Custom (config.toml)`;

@@ -89,8 +89,12 @@ vi.mock('@arco-design/web-react', () => {
         {children}
       </div>
     ),
-    SubMenu: ({ children, title }: React.PropsWithChildren & { title?: React.ReactNode }) => (
-      <div>
+    SubMenu: ({
+      children,
+      title,
+      className,
+    }: React.PropsWithChildren & { title?: React.ReactNode; className?: string }) => (
+      <div className={className}>
         <div>{title}</div>
         {children}
       </div>
@@ -115,15 +119,24 @@ vi.mock('@arco-design/web-react', () => {
     Slider: ({
       value,
       onChange,
+      min = 0,
+      max = 100,
+      step = 1,
       'aria-label': ariaLabel,
     }: {
       value?: number;
       onChange?: (value: number) => void;
+      min?: number;
+      max?: number;
+      step?: number;
       'aria-label'?: string;
     }) => (
       <input
         aria-label={ariaLabel}
         type='range'
+        min={min}
+        max={max}
+        step={step}
         value={value ?? 0}
         onChange={(event) => onChange?.(Number(event.target.value))}
       />
@@ -562,6 +575,14 @@ describe('GuidModelSelector home picker', () => {
       currentModelId: 'gpt-5.5/xhigh',
       currentModelLabel: 'GPT-5.5 (xhigh)',
       availableModels: [
+        { id: 'gpt-5.6-sol/low', label: 'GPT-5.6 Sol (low)' },
+        { id: 'gpt-5.6-sol/medium', label: 'GPT-5.6 Sol (medium)' },
+        { id: 'gpt-5.6-sol/high', label: 'GPT-5.6 Sol (high)' },
+        { id: 'gpt-5.6-sol/xhigh', label: 'GPT-5.6 Sol (xhigh)' },
+        { id: 'gpt-5.6-sol/ultra', label: 'GPT-5.6 Sol (ultra)' },
+        { id: 'gpt-5.6-terra/low', label: 'GPT-5.6 Terra (low)' },
+        { id: 'gpt-5.6-terra/medium', label: 'GPT-5.6 Terra (medium)' },
+        { id: 'gpt-5.6-luna/xhigh', label: 'GPT-5.6 Luna (xhigh)' },
         { id: 'gpt-5.5/low', label: 'GPT-5.5 (low)' },
         { id: 'gpt-5.5/medium', label: 'GPT-5.5 (medium)' },
         { id: 'gpt-5.5/high', label: 'GPT-5.5 (high)' },
@@ -611,10 +632,17 @@ describe('GuidModelSelector home picker', () => {
           {
             id: 'power',
             type: 'select',
-            currentValue: 'gpt-5.5:xhigh',
+            currentValue: 'gpt-5.6-luna:xhigh',
             options: [
-              { value: 'gpt-5.4:high', name: '5.4 High' },
-              { value: 'gpt-5.5:xhigh', name: '5.5 Extra High' },
+              { value: 'gpt-5.6-terra:low', name: '5.6 Terra Low' },
+              { value: 'gpt-5.6-terra:medium', name: '5.6 Terra Medium' },
+              { value: 'gpt-5.6-luna:xhigh', name: '5.6 Luna Extra High' },
+              { value: 'gpt-5.6-sol:low', name: '5.6 Sol Low' },
+              { value: 'gpt-5.6-sol:medium', name: '5.6 Sol Medium' },
+              { value: 'gpt-5.6-sol:high', name: '5.6 Sol High' },
+              { value: 'gpt-5.6-sol:xhigh', name: '5.6 Sol Extra High' },
+              { value: 'gpt-5.6-sol:max', name: '5.6 Sol Max' },
+              { value: 'gpt-5.6-sol:ultra', name: '5.6 Sol Ultra' },
             ],
           },
         ]}
@@ -625,6 +653,10 @@ describe('GuidModelSelector home picker', () => {
     expect(await screen.findByText('conversation.modelSelector.title')).toBeInTheDocument();
     expect(screen.getByText('5.5')).toBeInTheDocument();
     expect(screen.queryByText('GPT-5.5 (xhigh)')).not.toBeInTheDocument();
+    expect(screen.queryByText('conversation.modelSelector.effortLowDesc')).not.toBeInTheDocument();
+    expect(document.querySelector('.guid-intelligence-submenu-model')).toBeInTheDocument();
+    expect(document.querySelector('.guid-intelligence-submenu-effort')).toBeInTheDocument();
+    expect(document.querySelector('.guid-intelligence-submenu-speed')).toBeInTheDocument();
 
     fireEventClick(await screen.findByText('GPT-5.4'));
     expect(setSelectedAcpModel).toHaveBeenCalledWith('gpt-5.4');
@@ -639,7 +671,9 @@ describe('GuidModelSelector home picker', () => {
     expect(onConfigOptionSelect).toHaveBeenCalledWith('service_tier', 'priority');
 
     fireEventClick(screen.getByText('conversation.modelSelector.advanced'));
-    expect(screen.getByRole('slider', { name: 'conversation.modelSelector.powerAria' })).toBeInTheDocument();
+    const powerSlider = screen.getByRole('slider', { name: 'conversation.modelSelector.powerAria' });
+    expect(powerSlider).toBeInTheDocument();
+    expect(powerSlider).toHaveAttribute('max', '5');
   });
 
   it('does not use curated provider rows as cold-start ACP models', async () => {

@@ -812,8 +812,11 @@
    portalled by Arco, so these selectors must remain global. */
 :global(.guid-intelligence-menu) {
   width: min(312px, calc(100vw - 24px));
+  max-height: min(430px, calc(100vh - 20px));
   padding: 6px;
-  overflow: visible;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   color: var(--color-text-1);
   background: var(--bg-3);
   border: 1px solid var(--color-border-2);
@@ -832,9 +835,53 @@
 
 :global(.guid-intelligence-menu-list .arco-menu-item),
 :global(.guid-intelligence-menu-list .arco-menu-inline-header) {
-  min-height: 38px;
+  min-height: 36px;
   margin: 1px 0 !important;
   border-radius: 7px;
+}
+
+:global(.guid-intelligence-menu-list .arco-menu-inline-header) {
+  height: 36px;
+  line-height: 36px;
+}
+
+:global(.guid-intelligence-submenu > .arco-menu-inline-content) {
+  margin: 2px 0 3px;
+  padding: 2px;
+  overflow-x: hidden;
+  background: var(--color-fill-1);
+  border-radius: 7px;
+  overscroll-behavior: contain;
+}
+
+:global(.guid-intelligence-submenu-model > .arco-menu-inline-content) {
+  max-height: 158px !important;
+  overflow-y: auto !important;
+}
+
+:global(.guid-intelligence-submenu-effort > .arco-menu-inline-content) {
+  max-height: 150px !important;
+  overflow-y: auto !important;
+}
+
+:global(.guid-intelligence-submenu-speed > .arco-menu-inline-content) {
+  max-height: 106px !important;
+  overflow-y: auto !important;
+}
+
+:global(.guid-intelligence-submenu > .arco-menu-inline-content .arco-menu-item) {
+  min-height: 34px;
+  padding: 0 9px !important;
+  line-height: 18px !important;
+}
+
+:global(.guid-intelligence-submenu > .arco-menu-inline-content .arco-menu-indent) {
+  display: none;
+}
+
+:global(.guid-intelligence-submenu > .arco-menu-inline-content .arco-menu-item-inner) {
+  min-width: 0;
+  line-height: 18px !important;
 }
 
 :global(.guid-intelligence-row) {
@@ -875,6 +922,38 @@
   min-width: 0;
 }
 
+:global(.guid-intelligence-option) {
+  min-height: 34px;
+  line-height: 18px;
+}
+
+:global(.guid-intelligence-option-copy) {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+}
+
+:global(.guid-intelligence-option-copy-described) {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+  padding: 4px 0;
+}
+
+:global(.guid-intelligence-option-label),
+:global(.guid-intelligence-option-description) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:global(.guid-intelligence-option-description) {
+  color: var(--color-text-3);
+  font-size: 11px;
+  line-height: 14px;
+}
+
 :global(.guid-intelligence-reset) {
   color: var(--color-text-3);
 }
@@ -890,7 +969,7 @@
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  min-height: 38px;
+  min-height: 36px;
   padding: 0 12px;
   color: var(--color-text-3);
   font: inherit;
@@ -910,28 +989,24 @@
 }
 
 :global(.guid-intelligence-power) {
-  padding: 7px 12px 10px;
-}
-
-:global(.guid-intelligence-power-summary) {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  min-height: 20px;
-  margin-bottom: 3px;
-  color: var(--color-text-2);
-  font-size: 12px;
+  gap: 2px;
+  padding: 4px 12px 8px;
 }
 
 :global(.guid-intelligence-ultra-warning) {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  margin-top: 2px;
   color: rgb(var(--warning-6));
+  font-size: 11px;
+  line-height: 15px;
 }
 
 :global(.guid-intelligence-power .arco-slider) {
-  margin: 8px 3px 2px;
+  margin: 6px 3px 4px;
 }
 
 :global(.guid-intelligence-power .arco-slider-track) {
@@ -939,17 +1014,21 @@
 }
 
 :global(.guid-intelligence-power .arco-slider-button) {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border-width: 2px;
+}
+
+:global(.guid-intelligence-power[data-ultra='true'] .arco-slider-track) {
+  background: rgb(153 102 255);
 }
 
 :global(.guid-intelligence-power-ends) {
   display: flex;
   justify-content: space-between;
-  margin-top: 1px;
-  color: var(--color-text-4);
-  font-size: 11px;
+  color: var(--color-text-3);
+  font-size: 12px;
+  line-height: 18px;
 }
 
 @media (max-width: 520px) {

@@ -26,6 +26,8 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styles from '../index.module.css';
 
+const DEFAULT_WORKSPACE_PATH = '/home/ubuntu/Servers';
+
 type GuidActionRowProps = {
   // File handling
   files: string[];
@@ -191,7 +193,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
     }
 
     ipcBridge.dialog.showOpen
-      .invoke({ defaultPath: '/home/ubuntu/GitHub', properties: ['openDirectory', 'createDirectory'] })
+      .invoke({ defaultPath: DEFAULT_WORKSPACE_PATH, properties: ['openDirectory', 'createDirectory'] })
       .then((dirs) => {
         if (dirs && dirs[0]) onSelectWorkspace(dirs[0]);
       })
@@ -311,7 +313,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
       {isWebUI && (
         <DirectorySelectionModal
           visible={workspacePickerVisible}
-          initialPath='/home/ubuntu/GitHub'
+          initialPath={DEFAULT_WORKSPACE_PATH}
           onConfirm={(dirs) => {
             setWorkspacePickerVisible(false);
             if (dirs && dirs[0]) onSelectWorkspace(dirs[0]);

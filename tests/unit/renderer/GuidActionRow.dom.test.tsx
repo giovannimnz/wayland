@@ -74,9 +74,21 @@ vi.mock('lucide-react', async (importOriginal) => ({
 }));
 
 vi.mock('@/renderer/components/settings/DirectorySelectionModal', () => ({
-  default: ({ visible, onConfirm }: { visible: boolean; onConfirm: (paths: string[] | undefined) => void }) =>
+  default: ({
+    visible,
+    initialPath,
+    onConfirm,
+  }: {
+    visible: boolean;
+    initialPath?: string;
+    onConfirm: (paths: string[] | undefined) => void;
+  }) =>
     visible ? (
-      <button data-testid='web-workspace-modal' onClick={() => onConfirm(['/web/chosen/path'])}>
+      <button
+        data-testid='web-workspace-modal'
+        data-initial-path={initialPath}
+        onClick={() => onConfirm(['/web/chosen/path'])}
+      >
         WebWorkspaceModal
       </button>
     ) : null,
@@ -204,7 +216,7 @@ describe('GuidActionRow', () => {
 
     await vi.waitFor(() => {
       expect(ipcBridge.dialog.showOpen.invoke).toHaveBeenCalledWith({
-        defaultPath: '/home/ubuntu/GitHub',
+        defaultPath: '/home/ubuntu/Servers',
         properties: ['openDirectory', 'createDirectory'],
       });
       expect(onSelectWorkspace).toHaveBeenCalledWith('/chosen/path');
@@ -223,7 +235,9 @@ describe('GuidActionRow', () => {
     fireEvent.click(screen.getByText('conversation.welcome.specifyWorkspace'));
 
     expect(ipcBridge.dialog.showOpen.invoke).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByTestId('web-workspace-modal'));
+    const workspaceModal = screen.getByTestId('web-workspace-modal');
+    expect(workspaceModal).toHaveAttribute('data-initial-path', '/home/ubuntu/Servers');
+    fireEvent.click(workspaceModal);
 
     expect(onSelectWorkspace).toHaveBeenCalledWith('/web/chosen/path');
   });

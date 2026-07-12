@@ -27,7 +27,7 @@ index a85d779cb..36b229afd 100644
  ## Where to put new docs
 diff --git a/docs/guides/atius-fork-runtime.md b/docs/guides/atius-fork-runtime.md
 new file mode 100644
-index 000000000..86e0fcbc6
+index 000000000..e07485e59
 --- /dev/null
 +++ b/docs/guides/atius-fork-runtime.md
 @@ -0,0 +1,258 @@
@@ -125,7 +125,7 @@ index 000000000..86e0fcbc6
 +
 +## Current ATIUS behaviors to preserve
 +
-+- `Conversar na pasta` stays visible on the WebUI, defaults to `/home/ubuntu/GitHub`, and opens the browser directory picker.
++- `Conversar na pasta` stays visible on the WebUI, defaults to `/home/ubuntu/Servers` (`~/Servers` for the `ubuntu` runtime user), and opens the browser directory picker.
 +- The login screen defaults to `pt-BR` when no saved language exists.
 +- Standalone build output includes the MCP stdio scripts required by the server startup canary.
 +- Service-shell env loading skips non-interactive login shells like `/usr/sbin/nologin`.
@@ -235,7 +235,7 @@ index 000000000..86e0fcbc6
 +Confirmed behaviors:
 +
 +- no horizontal page overflow at any tested viewport;
-+- `Conversar na pasta` opens the WebUI directory picker at `/home/ubuntu/GitHub`;
++- `Conversar na pasta` opens the WebUI directory picker at `/home/ubuntu/Servers` (`~/Servers`);
 +- Codex model menu shows base models only, while effort is selected separately;
 +- Hermes Agent shows the same separate effort selector;
 +- Codex permission menu includes `Custom (config.toml)`;
@@ -1399,7 +1399,7 @@ index d9ba0071b..6fd211ce2 100755
      print_summary
  }
 diff --git a/src/common/adapter/ipcBridge.ts b/src/common/adapter/ipcBridge.ts
-index 8208627d1..88baa7ff0 100644
+index 28e5a7a8e..88baa7ff0 100644
 --- a/src/common/adapter/ipcBridge.ts
 +++ b/src/common/adapter/ipcBridge.ts
 @@ -16,7 +16,6 @@ import type { MicPermissionStatus } from '../../process/services/macPermissions/
@@ -1424,7 +1424,18 @@ index 8208627d1..88baa7ff0 100644
  /**
   * Result of a shell open/reveal operation. The IPC bridge's `invoke` has no
   * rejection channel (a throwing provider leaves the caller's promise pending
-@@ -514,13 +506,6 @@ export const skills = {
+@@ -298,10 +290,6 @@ export const application = {
+   updateSystemInfo: buildProvider<IBridgeResponse, { cacheDir: string; workDir: string }>('system.update-info'), // Update system info
+   getZoomFactor: buildProvider<number, void>('app.get-zoom-factor'),
+   setZoomFactor: buildProvider<number, { factor: number }>('app.set-zoom-factor'),
+-  // The conversation the user is currently looking at, or null when no chat is in
+-  // view. Reported by the renderer so the task-completion notifier (#579) can stay
+-  // quiet only about the on-screen chat, not every chat while the app is focused.
+-  setForegroundConversation: buildProvider<void, { conversationId: string | null }>('app.set-foreground-conversation'),
+   // Pop a main destination (e.g. Mission Control) out into its own window, reusing
+   // the conversation pop-out window infrastructure. `route` is validated against an
+   // allowlist in the main process. Returns alreadyOpen:true when an existing
+@@ -518,13 +506,6 @@ export const skills = {
     * entries were (re)scanned. Never spends a model call — first-party content.
     */
    scanLibrary: buildProvider<{ rescanned: number }, void>('skills.scan-library'),
@@ -1438,7 +1449,7 @@ index 8208627d1..88baa7ff0 100644
    import: {
      /** Import a skill from a local folder path. */
      folder: buildProvider<ImportResult, { srcPath: string }>('skills.import.folder'),
-@@ -652,22 +637,6 @@ export const imports = {
+@@ -656,24 +637,6 @@ export const imports = {
    singleSkillMd: buildProvider<ImportSummary, { srcPath: string }>('imports.single-skill-md'),
  };
 
@@ -1451,17 +1462,19 @@ index 8208627d1..88baa7ff0 100644
 -  error?: string;
 -}
 -
--// #512: credential-redacted export of an assistant to a portable agent-profile
--// SKILL.md that round-trips through the importer above. (Workflow export is a
--// fast-follow — it needs path-confinement of the skill's on-disk location.)
+-// #512: credential-redacted export of an assistant / workflow to a portable
+-// SKILL.md that round-trips through the importer above. The workflow body is
+-// resolved through SkillLibrary by NAME (never a renderer-supplied path), so
+-// there is no on-disk path-traversal surface.
 -export const dataExport = {
 -  assistant: buildProvider<PortableExportResult, { id: string }>('data-export.assistant'),
+-  workflow: buildProvider<PortableExportResult, { name: string }>('data-export.workflow'),
 -};
 -
  export const voiceAsset = {
    download: buildProvider<DownloadResult, VoiceAsset>('voice-asset.download'),
    cancel: buildProvider<{ cancelled: boolean }, { assetId: string }>('voice-asset.cancel'),
-@@ -1352,9 +1321,7 @@ export const cron = {
+@@ -1358,9 +1321,7 @@ export const cron = {
    getJob: buildProvider<ICronJob | null, { jobId: string }>('cron.get-job'),
    // CRUD
    addJob: buildProvider<ICronJob, ICreateCronJobParams>('cron.add-job'),
@@ -1472,7 +1485,7 @@ index 8208627d1..88baa7ff0 100644
    removeJob: buildProvider<void, { jobId: string }>('cron.remove-job'),
    runNow: buildProvider<{ conversationId: string }, { jobId: string }>('cron.run-now'),
    saveSkill: buildProvider<void, { jobId: string; content: string }>('cron.save-skill'),
-@@ -1474,8 +1441,6 @@ export interface ICreateCronJobParams {
+@@ -1480,8 +1441,6 @@ export interface ICreateCronJobParams {
    createdBy: 'user' | 'agent';
    executionMode?: 'existing' | 'new_conversation';
    agentConfig?: ICronAgentConfig;
@@ -1481,7 +1494,7 @@ index 8208627d1..88baa7ff0 100644
  }
 
  interface ISendMessageParams {
-@@ -1564,7 +1529,12 @@ export interface ICreateConversationParams {
+@@ -1570,7 +1529,12 @@ export interface ICreateConversationParams {
       * (Codex / WCore / Claude-ACP). Persisted on the conversation and read by
       * each backend's config builder on the next turn. Absent => backend default.
       */
@@ -1495,7 +1508,7 @@ index 8208627d1..88baa7ff0 100644
      /** Team ownership - conversations with teamId are hidden from the sidebar */
      teamId?: string;
      /** Project ownership - stamps extra.projectId so the conversation lives under a project umbrella. */
-@@ -1610,22 +1580,6 @@ export interface IResponseMessage {
+@@ -1616,22 +1580,6 @@ export interface IResponseMessage {
    msg_id: string;
    conversation_id: string;
    hidden?: boolean;
@@ -1518,7 +1531,7 @@ index 8208627d1..88baa7ff0 100644
  }
 
  export interface IConversationTurnCompletedEvent {
-@@ -1701,49 +1655,14 @@ export interface IExtensionInfo {
+@@ -1707,49 +1655,14 @@ export interface IExtensionInfo {
    displayName: string;
    version: string;
    description?: string;
@@ -1568,7 +1581,7 @@ index 8208627d1..88baa7ff0 100644
  }
 
  /** Permission summary for extension management UI (Figma-inspired) */
-@@ -1754,39 +1673,6 @@ export interface IExtensionPermissionSummary {
+@@ -1760,39 +1673,6 @@ export interface IExtensionPermissionSummary {
    granted: boolean;
  }
 
@@ -1608,7 +1621,7 @@ index 8208627d1..88baa7ff0 100644
  /** Settings tab contributed by an extension, consumed by settings UI */
  export interface IExtensionSettingsTab {
    id: string;
-@@ -1808,57 +1694,6 @@ export interface IExtensionWebuiContribution {
+@@ -1814,57 +1694,6 @@ export interface IExtensionWebuiContribution {
    staticAssets: Array<{ urlPrefix: string; directory: string }>;
  }
 
@@ -1666,7 +1679,7 @@ index 8208627d1..88baa7ff0 100644
  export type AgentActivityState = 'idle' | 'writing' | 'researching' | 'executing' | 'syncing' | 'error';
 
  export interface IExtensionAgentActivityEvent {
-@@ -1918,23 +1753,10 @@ export const extensions = {
+@@ -1924,23 +1753,10 @@ export const extensions = {
    getExtI18nForLocale: buildProvider<Record<string, unknown>, { locale: string }>('extensions.get-ext-i18n-for-locale'),
 
    // --- Extension Management API (NocoBase-inspired) ---
@@ -1690,7 +1703,7 @@ index 8208627d1..88baa7ff0 100644
    /** Get permission summary for an extension (Figma-inspired) */
    getPermissions: buildProvider<IExtensionPermissionSummary[], { name: string }>('extensions.get-permissions'),
    /** Get overall risk level for an extension */
-@@ -3132,23 +2954,3 @@ export const terminal = {
+@@ -3138,23 +2954,3 @@ export const terminal = {
    /** PTY exited → renderer (filter by terminalId). */
    exit: buildEmitter<TerminalExitPayload>('terminal.exit'),
  };
@@ -1904,7 +1917,7 @@ index f858dd758..93ed95a18 100644
      return found;
    }
 diff --git a/src/process/agent/acp/acpConnectors.ts b/src/process/agent/acp/acpConnectors.ts
-index d026c67c1..2f10adb6a 100644
+index 5d49ed6b4..2f10adb6a 100644
 --- a/src/process/agent/acp/acpConnectors.ts
 +++ b/src/process/agent/acp/acpConnectors.ts
 @@ -127,6 +127,11 @@ function shouldPreferDirectCodexAcpPackage(): boolean {
@@ -1919,7 +1932,57 @@ index d026c67c1..2f10adb6a 100644
  function extractCodexPlatformPackageFromError(errorMessage: string): string | null {
    const packageMatch = errorMessage.match(/Cannot find package '(@zed-industries\/codex-acp-[^']+)'/i);
    if (packageMatch) {
-@@ -791,6 +796,13 @@ export function connectCodex(
+@@ -625,40 +630,6 @@ async function prepareCodebuddy(): Promise<NpxPrepareResult> {
+  * when Electron's inherited env resolves to an old Node version.
+  * Safe for native binaries too - they ignore NODE_OPTIONS and Node version checks.
+  */
+-/**
+- * #756: per-backend env hardening for headless stdio ACP spawns. Pure so the
+- * choice is unit-testable without spawning anything.
+- *
+- * Hermes is a Python CLI driven over a headless stdio pipe. Two documented
+- * (hermes-setup/SKILL.md) failure modes were never actually defended against in
+- * the spawn path, so a Hermes session would open and then STALL INDEFINITELY —
+- * disproportionately on Windows (fresh installs hit first-run hooks, and Windows
+- * anonymous-pipe buffering is harsher):
+- *   - a first-run interactive "hook" prompt blocks forever waiting on stdin that
+- *     the JSON-RPC driver never answers  → HERMES_ACCEPT_HOOKS=1 auto-accepts it;
+- *   - Python block-buffers stdout when it is not a TTY, so JSON-RPC replies can
+- *     sit unflushed in the pipe buffer     → PYTHONUNBUFFERED=1 forces line flush.
+- * Returned as DEFAULTS (applied before customEnv) so an explicit user/flux value
+- * still wins.
+- */
+-/** ACP CLIs installed as Python packages (pip/uv). They block-buffer stdout off
+- *  a TTY, so their JSON-RPC replies stall in the pipe buffer — worst on Windows. */
+-const PYTHON_ACP_BACKENDS = new Set(['hermes', 'kimi']);
+-
+-export function backendSpawnEnvHardening(backend: string): Record<string, string> {
+-  const out: Record<string, string> = {};
+-  // Force line-buffered stdout for every Python-based backend, not just Hermes.
+-  if (PYTHON_ACP_BACKENDS.has(backend)) {
+-    out['PYTHONUNBUFFERED'] = '1';
+-  }
+-  // Hermes-specific: auto-accept its first-run interactive hook prompt, which
+-  // otherwise blocks the headless spawn forever on stdin nobody answers.
+-  if (backend === 'hermes') {
+-    out['HERMES_ACCEPT_HOOKS'] = '1';
+-  }
+-  return out;
+-}
+-
+ export async function spawnGenericBackend(
+   backend: string,
+   cliPath: string,
+@@ -673,8 +644,6 @@ export async function spawnGenericBackend(
+   }
+
+   const cleanEnv = await prepareCleanEnv();
+-  // #756: apply backend hardening as DEFAULTS, then let customEnv override.
+-  Object.assign(cleanEnv, backendSpawnEnvHardening(backend));
+   if (customEnv) {
+     Object.assign(cleanEnv, customEnv);
+   }
+@@ -827,6 +796,13 @@ export function connectCodex(
    customEnv?: Record<string, string>
  ): Promise<void> {
    return (async () => {
@@ -3762,7 +3825,7 @@ index a5880605d..41ce06751 100644
        <span
          ref={marqueeRef}
 diff --git a/src/renderer/components/layout/Layout.tsx b/src/renderer/components/layout/Layout.tsx
-index a782d4877..60c2df9b5 100644
+index a68861c04..60c2df9b5 100644
 --- a/src/renderer/components/layout/Layout.tsx
 +++ b/src/renderer/components/layout/Layout.tsx
 @@ -26,6 +26,7 @@ import { cleanupSiderTooltips } from '@renderer/utils/ui/siderTooltip';
@@ -3773,10 +3836,11 @@ index a782d4877..60c2df9b5 100644
  import { useGlobalKeybind } from '@renderer/hooks/settings/useGlobalKeybind';
  import { CommandPalette } from '@renderer/components/cmdk';
  import BudgetGateModal from '@renderer/components/cost/BudgetGateModal';
-@@ -35,11 +36,7 @@ import { getAgentKey } from '@renderer/pages/guid/hooks/agentSelectionUtils';
+@@ -35,12 +36,7 @@ import { getAgentKey } from '@renderer/pages/guid/hooks/agentSelectionUtils';
  import type { AcpBackend } from '@/common/types/acpTypes';
  import { isElectronDesktop } from '@renderer/utils/platform';
  import { useIsPopoutMode } from '@renderer/hooks/system/useIsPopoutMode';
+-import { useForegroundConversationReporter } from '@renderer/hooks/system/useForegroundConversationReporter';
 -import {
 -  computeCssSyncDecision,
 -  resolveCssByActiveTheme,
@@ -3786,7 +3850,18 @@ index a782d4877..60c2df9b5 100644
  import '@renderer/styles/layout.css';
 
  // DevTools escape hatch: the only way to open Chrome DevTools in a packaged
-@@ -221,26 +218,21 @@ const Layout: React.FC<{
+@@ -131,10 +127,6 @@ const Layout: React.FC<{
+   // conversation. Fixed for the window's lifetime.
+   const isPopout = useIsPopoutMode();
+
+-  // #579: report the on-screen conversation to the main process so completion
+-  // notifications stay quiet only for the chat actually in view.
+-  useForegroundConversationReporter();
+-
+   // #47: expose the orthogonal signals alongside the legacy `isMobile` composite
+   // (which is left untouched above) so consumers can pick LAYOUT (isNarrow) vs
+   // INTERACTION (isTouch) intent instead of conflating them.
+@@ -226,26 +218,21 @@ const Layout: React.FC<{
    const collapsedRef = useRef(collapsed);
    const lastCssRef = useRef('');
    const lastUiCssUpdateAtRef = useRef(0);
@@ -3816,7 +3891,7 @@ index a782d4877..60c2df9b5 100644
        const decision = computeCssSyncDecision({
          savedCss: savedCssRaw || '',
          activeThemeId: activeThemeId || '',
-@@ -303,14 +295,10 @@ const Layout: React.FC<{
+@@ -308,14 +295,10 @@ const Layout: React.FC<{
 
      window.addEventListener('custom-css-updated', handleCssUpdate as EventListener);
      window.addEventListener('storage', handleStorageChange);
@@ -3831,7 +3906,7 @@ index a782d4877..60c2df9b5 100644
      };
    }, [loadAndHealCustomCss]);
 
-@@ -499,10 +487,12 @@ const Layout: React.FC<{
+@@ -504,10 +487,12 @@ const Layout: React.FC<{
      (event: React.MouseEvent<HTMLDivElement>) => {
        if (isMobile) return;
        event.preventDefault();
@@ -3845,7 +3920,7 @@ index a782d4877..60c2df9b5 100644
        };
        document.body.style.cursor = 'col-resize';
        document.body.style.userSelect = 'none';
-@@ -520,9 +510,15 @@ const Layout: React.FC<{
+@@ -525,9 +510,15 @@ const Layout: React.FC<{
        const shouldCollapse = collapsedRef.current
          ? draggedWidth < SIDER_DRAG_SNAP_THRESHOLD + SIDER_DRAG_HYSTERESIS
          : draggedWidth <= SIDER_DRAG_SNAP_THRESHOLD - SIDER_DRAG_HYSTERESIS;
@@ -3861,7 +3936,7 @@ index a782d4877..60c2df9b5 100644
      };
 
      const endDrag = () => {
-@@ -672,24 +668,25 @@ const Layout: React.FC<{
+@@ -677,24 +668,25 @@ const Layout: React.FC<{
                </ArcoLayout.Header>
                <ArcoLayout.Content className='pt-8px px-8px pb-0 layout-sider-content'>
                  {React.isValidElement(sider)
@@ -4531,7 +4606,7 @@ index d89c8d316..d5d9c49bb 100644
            <div
              className='flex items-center justify-center cursor-pointer p-4px opacity-60 hover:opacity-100 self-center'
 diff --git a/src/renderer/pages/guid/components/GuidActionRow.tsx b/src/renderer/pages/guid/components/GuidActionRow.tsx
-index dc2c7f074..b287c3fef 100644
+index dc2c7f074..1d3a65db4 100644
 --- a/src/renderer/pages/guid/components/GuidActionRow.tsx
 +++ b/src/renderer/pages/guid/components/GuidActionRow.tsx
 @@ -11,8 +11,8 @@ import ComposerAddMenu, {
@@ -4544,7 +4619,7 @@ index dc2c7f074..b287c3fef 100644
  import type { AcpSessionConfigOption } from '@/common/types/acpTypes';
  import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
  import { getCleanFileNames, FileService } from '@/renderer/services/FileService';
-@@ -20,6 +20,7 @@ import { iconColors } from '@/renderer/styles/colors';
+@@ -20,18 +20,19 @@ import { iconColors } from '@/renderer/styles/colors';
  import { isElectronDesktop } from '@/renderer/utils/platform';
  import type { AcpBackend, AcpBackendConfig, AvailableAgent } from '../types';
  import PresetAgentTag, { type AgentSwitcherItem } from './PresetAgentTag';
@@ -4552,7 +4627,12 @@ index dc2c7f074..b287c3fef 100644
  import { Button, Message, Tooltip } from '@arco-design/web-react';
  import React, { useCallback, useMemo, useRef, useState } from 'react';
  import { useTranslation } from 'react-i18next';
-@@ -30,8 +31,6 @@ type GuidActionRowProps = {
+ import styles from '../index.module.css';
+
++const DEFAULT_WORKSPACE_PATH = '/home/ubuntu/Servers';
++
+ type GuidActionRowProps = {
+   // File handling
    files: string[];
    onFilesUploaded: (paths: string[]) => void;
    onSelectWorkspace: (dir: string) => void;
@@ -4561,7 +4641,7 @@ index dc2c7f074..b287c3fef 100644
 
    // Model selector node (rendered by parent)
    modelSelectorNode: React.ReactNode;
-@@ -83,7 +82,6 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -83,7 +84,6 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
    files,
    onFilesUploaded,
    onSelectWorkspace,
@@ -4569,7 +4649,7 @@ index dc2c7f074..b287c3fef 100644
    modelSelectorNode,
    selectedAgent,
    effectiveModeAgent,
-@@ -116,11 +114,26 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -116,11 +116,26 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
    const layout = useLayoutContext();
    const modeBackend = effectiveModeAgent || selectedAgent;
    const showModeSwitch = supportsModeSwitch(modeBackend);
@@ -4597,7 +4677,7 @@ index dc2c7f074..b287c3fef 100644
 
    const handleLocalFileChange = useCallback(
      async (e: React.ChangeEvent<HTMLInputElement>) => {
-@@ -171,6 +184,20 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -171,6 +186,20 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
      return [{ key: 'file', label: t('conversation.welcome.uploadFile'), onClick: openHostFilePicker }];
    }, [isWebUI, openHostFilePicker, t]);
 
@@ -4608,7 +4688,7 @@ index dc2c7f074..b287c3fef 100644
 +    }
 +
 +    ipcBridge.dialog.showOpen
-+      .invoke({ defaultPath: '/home/ubuntu/GitHub', properties: ['openDirectory', 'createDirectory'] })
++      .invoke({ defaultPath: DEFAULT_WORKSPACE_PATH, properties: ['openDirectory', 'createDirectory'] })
 +      .then((dirs) => {
 +        if (dirs && dirs[0]) onSelectWorkspace(dirs[0]);
 +      })
@@ -4618,7 +4698,7 @@ index dc2c7f074..b287c3fef 100644
    return (
      <div className={styles.actionRow}>
        <div className={styles.actionTools}>
-@@ -206,30 +233,14 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -206,30 +235,14 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
            )}
          </div>
 
@@ -4652,7 +4732,7 @@ index dc2c7f074..b287c3fef 100644
 
          <div
            className={`${styles.actionConfigGroup} ${configOptionCount > 1 ? styles.actionConfigGroupWithDivider : ''}`}
-@@ -248,11 +259,10 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -248,11 +261,10 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
                hideCompactLabelPrefixOnMobile
              />
            )}
@@ -4665,14 +4745,14 @@ index dc2c7f074..b287c3fef 100644
              leadingIcon={<Brain size={14} color={iconColors.secondary} />}
              onOptionSelect={onConfigOptionSelect}
            />
-@@ -298,6 +308,17 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -298,6 +310,17 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
            </span>
          </Tooltip>
        </div>
 +      {isWebUI && (
 +        <DirectorySelectionModal
 +          visible={workspacePickerVisible}
-+          initialPath='/home/ubuntu/GitHub'
++          initialPath={DEFAULT_WORKSPACE_PATH}
 +          onConfirm={(dirs) => {
 +            setWorkspacePickerVisible(false);
 +            if (dirs && dirs[0]) onSelectWorkspace(dirs[0]);
@@ -4727,7 +4807,7 @@ index 8feeb4cc8..06908a37b 100644
          <div className='flex flex-wrap items-center gap-8px mt-12px mb-12px'>
            {files.map((path) => (
 diff --git a/src/renderer/pages/guid/components/GuidModelSelector.tsx b/src/renderer/pages/guid/components/GuidModelSelector.tsx
-index d2bfc8f43..cd0f6cf9f 100644
+index d2bfc8f43..895cbddc2 100644
 --- a/src/renderer/pages/guid/components/GuidModelSelector.tsx
 +++ b/src/renderer/pages/guid/components/GuidModelSelector.tsx
 @@ -4,13 +4,13 @@
@@ -4747,7 +4827,7 @@ index d2bfc8f43..cd0f6cf9f 100644
  import { useFluxConnected } from '@/renderer/hooks/useFluxConnected';
  import { peekCuratedForAgent, useModelRegistry } from '@/renderer/hooks/useModelRegistry';
  import { useUsageTelemetry } from '@/renderer/hooks/usage/useUsageTelemetry';
-@@ -43,8 +43,115 @@ type GuidModelSelectorProps = {
+@@ -43,8 +43,124 @@ type GuidModelSelectorProps = {
    currentAcpCachedModelInfo: AcpModelInfo | null;
    selectedAcpModel: string | null;
    setSelectedAcpModel: React.Dispatch<React.SetStateAction<string | null>>;
@@ -4836,6 +4916,15 @@ index d2bfc8f43..cd0f6cf9f 100644
 +  description?: string;
 +};
 +
++const CODEX_56_POWER_LADDER_IDS = [
++  'gpt-5.6-terra:low',
++  'gpt-5.6-sol:low',
++  'gpt-5.6-sol:medium',
++  'gpt-5.6-sol:high',
++  'gpt-5.6-sol:xhigh',
++  'gpt-5.6-sol:ultra',
++] as const;
++
 +const parsePowerSelection = (value: string, label?: string, description?: string): GuidPowerSelection | null => {
 +  const separator = value.lastIndexOf(':');
 +  if (separator <= 0) return null;
@@ -4863,7 +4952,7 @@ index d2bfc8f43..cd0f6cf9f 100644
  /**
   * Map a model's blended USD-per-million-token cost to a $ / $$ / $$$ tier.
   *
-@@ -92,6 +199,33 @@ export const firstSafeCuratedModel = (list: CuratedModel[]): CuratedModel | unde
+@@ -92,6 +208,33 @@ export const firstSafeCuratedModel = (list: CuratedModel[]): CuratedModel | unde
    list.find((m) => m.enabled && !isExperimentalCurated(m)) ??
    list.find((m) => !isExperimentalCurated(m));
 
@@ -4897,7 +4986,7 @@ index d2bfc8f43..cd0f6cf9f 100644
  const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
    isGeminiMode,
    modelList,
-@@ -101,6 +235,12 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -101,6 +244,12 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
    currentAcpCachedModelInfo,
    selectedAcpModel,
    setSelectedAcpModel,
@@ -4910,7 +4999,7 @@ index d2bfc8f43..cd0f6cf9f 100644
  }) => {
    const { t } = useTranslation();
    const navigate = useNavigate();
-@@ -111,6 +251,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -111,6 +260,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
    // Open state - exposed so the frequently-used hook can defer its IPC until
    // the panel is actually visible.
    const [panelOpen, setPanelOpen] = React.useState(false);
@@ -4918,7 +5007,7 @@ index d2bfc8f43..cd0f6cf9f 100644
 
    // Plain-language scope sentence for the selected agent. Reuses the same
    // copy as the Agents settings page so the explanation lives at the point
-@@ -409,33 +550,170 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -409,33 +559,189 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
      return fluxConnected && (compat === 'env' || compat === 'setup');
    }, [agentKey, fluxConnected]);
 
@@ -5001,11 +5090,7 @@ index d2bfc8f43..cd0f6cf9f 100644
 +
 +  const powerSelections = React.useMemo<GuidPowerSelection[]>(() => {
 +    const availableModelIds = new Set(acpModels.map((model) => model.id));
-     return (
--      currentAcpCachedModelInfo?.availableModels?.find((m) => m.id === selectedAcpModel)?.label ||
--      currentAcpCachedModelInfo?.currentModelLabel ||
--      currentAcpCachedModelInfo?.currentModelId ||
--      ''
++    const parsed =
 +      powerOption?.options
 +        ?.map((option) =>
 +          parsePowerSelection(
@@ -5016,14 +5101,16 @@ index d2bfc8f43..cd0f6cf9f 100644
 +        )
 +        .filter((selection): selection is GuidPowerSelection =>
 +          Boolean(selection && availableModelIds.has(selection.modelId))
-+        ) ?? []
-     );
--  }, [
--    currentAcpCachedModelInfo?.availableModels,
--    currentAcpCachedModelInfo?.currentModelId,
--    currentAcpCachedModelInfo?.currentModelLabel,
--    selectedAcpModel,
--  ]);
++        ) ?? [];
++
++    // Older ACP sessions persisted the full model x effort Cartesian product.
++    // Keep the home picker stable across upgrades by projecting any 5.6 cache
++    // onto the same six-position ladder emitted by the current adapter.
++    if (!parsed.some((selection) => selection.modelId.startsWith('gpt-5.6-'))) return parsed;
++    const byId = new Map(parsed.map((selection) => [selection.id, selection]));
++    return CODEX_56_POWER_LADDER_IDS.map((id) => byId.get(id)).filter(
++      (selection): selection is GuidPowerSelection => Boolean(selection)
++    );
 +  }, [acpModels, powerOption]);
 +
 +  const currentPowerSelection = React.useMemo(() => {
@@ -5035,11 +5122,32 @@ index d2bfc8f43..cd0f6cf9f 100644
 +        : typeof powerOption?.selectedValue === 'string'
 +          ? powerOption.selectedValue
 +          : undefined;
-+    return (
++    const normalizedEffort =
++      currentEffort === 'minimal' || currentEffort === 'low'
++        ? 'low'
++        : currentEffort === 'max'
++          ? 'xhigh'
++          : currentEffort;
++    const nearestId = normalizedEffort
++      ? `${normalizedEffort === 'low' ? 'gpt-5.6-terra' : 'gpt-5.6-sol'}:${normalizedEffort}`
++      : undefined;
+     return (
+-      currentAcpCachedModelInfo?.availableModels?.find((m) => m.id === selectedAcpModel)?.label ||
+-      currentAcpCachedModelInfo?.currentModelLabel ||
+-      currentAcpCachedModelInfo?.currentModelId ||
+-      ''
 +      powerSelections.find((selection) => selection.id === explicitId) ??
 +      powerSelections.find((selection) => selection.id === configuredId) ??
++      powerSelections.find((selection) => selection.id === nearestId) ??
++      powerSelections[0] ??
 +      null
-+    );
+     );
+-  }, [
+-    currentAcpCachedModelInfo?.availableModels,
+-    currentAcpCachedModelInfo?.currentModelId,
+-    currentAcpCachedModelInfo?.currentModelLabel,
+-    selectedAcpModel,
+-  ]);
 +  }, [currentEffort, powerOption, powerSelections, selectedBaseModelId]);
 +
 +  const serviceTierOptions = React.useMemo<GuidServiceTier[]>(() => {
@@ -5110,7 +5218,7 @@ index d2bfc8f43..cd0f6cf9f 100644
 
    const acpButtonLabel = React.useMemo(() => {
      return getModelDisplayLabel({
-@@ -454,6 +732,19 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -454,6 +760,19 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
      [acpButtonLabel, acpSourceLabel]
    );
 
@@ -5130,7 +5238,7 @@ index d2bfc8f43..cd0f6cf9f 100644
    // ── Provider-based agents (Gemini / Wayland Core) - three-tier picker ────
    if (isGeminiMode) {
      return (
-@@ -479,7 +770,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -479,7 +798,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
          <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
            <span className='flex items-center gap-6px min-w-0'>
              <Brain size={14} color={iconColors.secondary} className='shrink-0' />
@@ -5139,7 +5247,7 @@ index d2bfc8f43..cd0f6cf9f 100644
              <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
            </span>
          </Button>
-@@ -488,80 +779,236 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -488,80 +807,243 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
    }
 
    // ── CLI agents - ACP model selector ──────────────────────────────────────
@@ -5196,6 +5304,7 @@ index d2bfc8f43..cd0f6cf9f 100644
 +            <Menu className='guid-intelligence-menu-list'>
 +              <Menu.SubMenu
 +                key='model-submenu'
++                className='guid-intelligence-submenu guid-intelligence-submenu-model'
 +                title={menuRowTitle(
 +                  t('conversation.modelSelector.title', { defaultValue: 'Model' }),
 +                  compactModelLabel
@@ -5278,6 +5387,7 @@ index d2bfc8f43..cd0f6cf9f 100644
 +              {effortOptions.length > 0 && (
 +                <Menu.SubMenu
 +                  key='effort-submenu'
++                  className='guid-intelligence-submenu guid-intelligence-submenu-effort'
 +                  title={menuRowTitle(
 +                    t('conversation.modelSelector.effort', { defaultValue: 'Reasoning' }),
 +                    currentEffortLabel ||
@@ -5291,11 +5401,15 @@ index d2bfc8f43..cd0f6cf9f 100644
 +                    });
 +                    const description = t(`${effortLabelKey(effort)}Desc`, { defaultValue: '' });
 +                    return (
-+                      <Menu.Item key={`effort-${effort}`} onClick={() => handleSelectEffort(effort)}>
++                      <Menu.Item
++                        key={`effort-${effort}`}
++                        title={description || undefined}
++                        aria-label={description ? `${label}. ${description}` : label}
++                        onClick={() => handleSelectEffort(effort)}
++                      >
 +                        <span className='guid-intelligence-option'>
-+                          <span className='min-w-0'>
-+                            <span className='block truncate'>{label}</span>
-+                            {description && <span className='block text-12px text-t-tertiary'>{description}</span>}
++                          <span className='guid-intelligence-option-copy'>
++                            <span className='guid-intelligence-option-label'>{label}</span>
 +                          </span>
 +                          {currentEffort === effort && <Check size={15} className='shrink-0' />}
 +                        </span>
@@ -5308,6 +5422,7 @@ index d2bfc8f43..cd0f6cf9f 100644
 +              {serviceTierOptions.length > 0 && currentServiceTier && (
 +                <Menu.SubMenu
 +                  key='speed-submenu'
++                  className='guid-intelligence-submenu guid-intelligence-submenu-speed'
 +                  title={menuRowTitle(
 +                    t('conversation.modelSelector.speed', { defaultValue: 'Speed' }),
 +                    currentServiceTierLabel
@@ -5316,16 +5431,16 @@ index d2bfc8f43..cd0f6cf9f 100644
 +                  {serviceTierOptions.map((tier) => {
 +                    const label = t(serviceTierLabelKey(tier), {
 +                      defaultValue: tier === 'priority' ? 'Fast' : 'Default',
-                     });
++                    });
 +                    const description = t(serviceTierDescriptionKey(tier), {
 +                      defaultValue: tier === 'priority' ? '1.5x speed, increased usage' : 'Default speed',
-+                    });
+                     });
 +                    return (
 +                      <Menu.Item key={`speed-${tier}`} onClick={() => handleSelectServiceTier(tier)}>
 +                        <span className='guid-intelligence-option'>
-+                          <span className='min-w-0'>
-+                            <span className='block truncate'>{label}</span>
-+                            <span className='block text-12px text-t-tertiary'>{description}</span>
++                          <span className='guid-intelligence-option-copy guid-intelligence-option-copy-described'>
++                            <span className='guid-intelligence-option-label'>{label}</span>
++                            <span className='guid-intelligence-option-description'>{description}</span>
 +                          </span>
 +                          {currentServiceTier === tier && <Check size={15} className='shrink-0' />}
 +                        </span>
@@ -5362,8 +5477,6 @@ index d2bfc8f43..cd0f6cf9f 100644
 -                        aria-label={t('settings.modelsPage.homePicker.priceTierAria', { tier })}
 -                      >
 -                        {tier}
--                      </span>
--                    )}
 +                  <span>{t('conversation.modelSelector.advanced', { defaultValue: 'Advanced' })}</span>
 +                  <ChevronDown
 +                    size={15}
@@ -5372,17 +5485,13 @@ index d2bfc8f43..cd0f6cf9f 100644
 +                  />
 +                </button>
 +                {advancedPowerOpen && (
-+                  <div className='guid-intelligence-power'>
-+                    <div className='guid-intelligence-power-summary'>
-+                      <span>{currentPowerSelection?.label || compactSummary}</span>
-+                      {currentPowerSelection?.effort === 'ultra' && (
-+                        <span className='guid-intelligence-ultra-warning'>
-+                          <Zap size={13} aria-hidden />
-+                          {t('conversation.modelSelector.ultraUsageWarning', {
-+                            defaultValue: 'Consumes usage limits faster',
-+                          })}
-+                        </span>
-+                      )}
++                  <div
++                    className='guid-intelligence-power'
++                    data-ultra={currentPowerSelection?.effort === 'ultra'}
++                  >
++                    <div className='guid-intelligence-power-ends' aria-hidden>
++                      <span>{t('conversation.modelSelector.powerFaster', { defaultValue: 'Faster' })}</span>
++                      <span>{t('conversation.modelSelector.powerSmarter', { defaultValue: 'Smarter' })}</span>
 +                    </div>
 +                    <Slider
 +                      min={0}
@@ -5401,10 +5510,14 @@ index d2bfc8f43..cd0f6cf9f 100644
 +                        defaultValue: 'Model and reasoning power',
 +                      })}
 +                    />
-+                    <div className='guid-intelligence-power-ends' aria-hidden>
-+                      <span>{t('conversation.modelSelector.powerFaster', { defaultValue: 'Faster' })}</span>
-+                      <span>{t('conversation.modelSelector.powerSmarter', { defaultValue: 'Smarter' })}</span>
-+                    </div>
++                    {currentPowerSelection?.effort === 'ultra' && (
++                      <span className='guid-intelligence-ultra-warning'>
++                        <Zap size={13} aria-hidden />
++                        {t('conversation.modelSelector.ultraUsageWarning', {
++                          defaultValue: 'Consumes usage limits faster',
++                        })}
+                       </span>
+                     )}
                    </div>
 -                </Menu.Item>
 -              );
@@ -5884,7 +5997,7 @@ index e5c063be6..c6c69ac76 100644
    // No usable model configured. Mirrors the send-time validation: only the
    // model-backed backends actually reject on a missing model - the Gemini path
 diff --git a/src/renderer/pages/guid/index.module.css b/src/renderer/pages/guid/index.module.css
-index d4f57919e..8d23c8d4e 100644
+index d4f57919e..0f4d31207 100644
 --- a/src/renderer/pages/guid/index.module.css
 +++ b/src/renderer/pages/guid/index.module.css
 @@ -345,7 +345,7 @@
@@ -6088,7 +6201,7 @@ index d4f57919e..8d23c8d4e 100644
    }
 
    .actionSubmit {
-@@ -740,3 +807,158 @@
+@@ -740,3 +807,237 @@
    width: 100%;
    margin-top: 16px;
  }
@@ -6097,8 +6210,11 @@ index d4f57919e..8d23c8d4e 100644
 +   portalled by Arco, so these selectors must remain global. */
 +:global(.guid-intelligence-menu) {
 +  width: min(312px, calc(100vw - 24px));
++  max-height: min(430px, calc(100vh - 20px));
 +  padding: 6px;
-+  overflow: visible;
++  overflow-x: hidden;
++  overflow-y: auto;
++  overscroll-behavior: contain;
 +  color: var(--color-text-1);
 +  background: var(--bg-3);
 +  border: 1px solid var(--color-border-2);
@@ -6117,9 +6233,53 @@ index d4f57919e..8d23c8d4e 100644
 +
 +:global(.guid-intelligence-menu-list .arco-menu-item),
 +:global(.guid-intelligence-menu-list .arco-menu-inline-header) {
-+  min-height: 38px;
++  min-height: 36px;
 +  margin: 1px 0 !important;
 +  border-radius: 7px;
++}
++
++:global(.guid-intelligence-menu-list .arco-menu-inline-header) {
++  height: 36px;
++  line-height: 36px;
++}
++
++:global(.guid-intelligence-submenu > .arco-menu-inline-content) {
++  margin: 2px 0 3px;
++  padding: 2px;
++  overflow-x: hidden;
++  background: var(--color-fill-1);
++  border-radius: 7px;
++  overscroll-behavior: contain;
++}
++
++:global(.guid-intelligence-submenu-model > .arco-menu-inline-content) {
++  max-height: 158px !important;
++  overflow-y: auto !important;
++}
++
++:global(.guid-intelligence-submenu-effort > .arco-menu-inline-content) {
++  max-height: 150px !important;
++  overflow-y: auto !important;
++}
++
++:global(.guid-intelligence-submenu-speed > .arco-menu-inline-content) {
++  max-height: 106px !important;
++  overflow-y: auto !important;
++}
++
++:global(.guid-intelligence-submenu > .arco-menu-inline-content .arco-menu-item) {
++  min-height: 34px;
++  padding: 0 9px !important;
++  line-height: 18px !important;
++}
++
++:global(.guid-intelligence-submenu > .arco-menu-inline-content .arco-menu-indent) {
++  display: none;
++}
++
++:global(.guid-intelligence-submenu > .arco-menu-inline-content .arco-menu-item-inner) {
++  min-width: 0;
++  line-height: 18px !important;
 +}
 +
 +:global(.guid-intelligence-row) {
@@ -6160,6 +6320,38 @@ index d4f57919e..8d23c8d4e 100644
 +  min-width: 0;
 +}
 +
++:global(.guid-intelligence-option) {
++  min-height: 34px;
++  line-height: 18px;
++}
++
++:global(.guid-intelligence-option-copy) {
++  display: flex;
++  min-width: 0;
++  align-items: baseline;
++}
++
++:global(.guid-intelligence-option-copy-described) {
++  flex-direction: column;
++  align-items: stretch;
++  gap: 1px;
++  padding: 4px 0;
++}
++
++:global(.guid-intelligence-option-label),
++:global(.guid-intelligence-option-description) {
++  min-width: 0;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++:global(.guid-intelligence-option-description) {
++  color: var(--color-text-3);
++  font-size: 11px;
++  line-height: 14px;
++}
++
 +:global(.guid-intelligence-reset) {
 +  color: var(--color-text-3);
 +}
@@ -6175,7 +6367,7 @@ index d4f57919e..8d23c8d4e 100644
 +  align-items: center;
 +  justify-content: space-between;
 +  width: 100%;
-+  min-height: 38px;
++  min-height: 36px;
 +  padding: 0 12px;
 +  color: var(--color-text-3);
 +  font: inherit;
@@ -6195,28 +6387,24 @@ index d4f57919e..8d23c8d4e 100644
 +}
 +
 +:global(.guid-intelligence-power) {
-+  padding: 7px 12px 10px;
-+}
-+
-+:global(.guid-intelligence-power-summary) {
 +  display: flex;
 +  flex-direction: column;
-+  gap: 4px;
-+  min-height: 20px;
-+  margin-bottom: 3px;
-+  color: var(--color-text-2);
-+  font-size: 12px;
++  gap: 2px;
++  padding: 4px 12px 8px;
 +}
 +
 +:global(.guid-intelligence-ultra-warning) {
 +  display: inline-flex;
 +  align-items: center;
 +  gap: 5px;
++  margin-top: 2px;
 +  color: rgb(var(--warning-6));
++  font-size: 11px;
++  line-height: 15px;
 +}
 +
 +:global(.guid-intelligence-power .arco-slider) {
-+  margin: 8px 3px 2px;
++  margin: 6px 3px 4px;
 +}
 +
 +:global(.guid-intelligence-power .arco-slider-track) {
@@ -6224,17 +6412,21 @@ index d4f57919e..8d23c8d4e 100644
 +}
 +
 +:global(.guid-intelligence-power .arco-slider-button) {
-+  width: 18px;
-+  height: 18px;
++  width: 20px;
++  height: 20px;
 +  border-width: 2px;
++}
++
++:global(.guid-intelligence-power[data-ultra='true'] .arco-slider-track) {
++  background: rgb(153 102 255);
 +}
 +
 +:global(.guid-intelligence-power-ends) {
 +  display: flex;
 +  justify-content: space-between;
-+  margin-top: 1px;
-+  color: var(--color-text-4);
-+  font-size: 11px;
++  color: var(--color-text-3);
++  font-size: 12px;
++  line-height: 18px;
 +}
 +
 +@media (max-width: 520px) {
@@ -6295,7 +6487,7 @@ index 250efe1a8..80dd0df40 100644
              label={t('settings.remoteAgent.url')}
              field='url'
 diff --git a/src/renderer/services/i18n/i18n-keys.d.ts b/src/renderer/services/i18n/i18n-keys.d.ts
-index da9c75438..d590db363 100644
+index ebfb18801..d590db363 100644
 --- a/src/renderer/services/i18n/i18n-keys.d.ts
 +++ b/src/renderer/services/i18n/i18n-keys.d.ts
 @@ -48,10 +48,7 @@ export type I18nKey =
@@ -6474,7 +6666,15 @@ index da9c75438..d590db363 100644
    | 'settings.extensionAssistantReadonly'
    | 'settings.feedback'
    | 'settings.fontSize'
-@@ -3837,6 +3860,9 @@ export type I18nKey =
+@@ -3521,7 +3544,6 @@ export type I18nKey =
+   | 'settings.modelsPage.connect.chatgptCancelled'
+   | 'settings.modelsPage.connect.chatgptConnected'
+   | 'settings.modelsPage.connect.chatgptFailed'
+-  | 'settings.modelsPage.connect.chatgptHeadless'
+   | 'settings.modelsPage.connect.chatgptNoCredit'
+   | 'settings.modelsPage.connect.chatgptNote'
+   | 'settings.modelsPage.connect.chatgptOffline'
+@@ -3838,6 +3860,9 @@ export type I18nKey =
    | 'settings.remoteAgent.pendingCancel'
    | 'settings.remoteAgent.pendingTimeRemaining'
    | 'settings.remoteAgent.pendingTimeout'
@@ -6484,7 +6684,7 @@ index da9c75438..d590db363 100644
    | 'settings.remoteAgent.save'
    | 'settings.remoteAgent.testConnection'
    | 'settings.remoteAgent.testError'
-@@ -3885,7 +3911,6 @@ export type I18nKey =
+@@ -3886,7 +3911,6 @@ export type I18nKey =
    | 'settings.sider.constitution'
    | 'settings.sider.doctor'
    | 'settings.sider.editor'
@@ -6492,7 +6692,7 @@ index da9c75438..d590db363 100644
    | 'settings.sider.general'
    | 'settings.sider.groupAbout'
    | 'settings.sider.groupAiModels'
-@@ -4379,11 +4404,6 @@ export type I18nKey =
+@@ -4380,11 +4404,6 @@ export type I18nKey =
    | 'settings.webui.activityLog.title'
    | 'settings.webui.activityLog.viewAll'
    | 'settings.webui.allowRemote'
@@ -6504,7 +6704,7 @@ index da9c75438..d590db363 100644
    | 'settings.webui.allowRemoteDesc'
    | 'settings.webui.browserNotSupported'
    | 'settings.webui.browserNotSupportedDesc'
-@@ -4413,8 +4433,6 @@ export type I18nKey =
+@@ -4414,8 +4433,6 @@ export type I18nKey =
    | 'settings.webui.goToChannels'
    | 'settings.webui.initialPassword'
    | 'settings.webui.initialPasswordDesc'
@@ -6513,7 +6713,7 @@ index da9c75438..d590db363 100644
    | 'settings.webui.localUrl'
    | 'settings.webui.loginInfo'
    | 'settings.webui.networkUrl'
-@@ -4658,7 +4676,6 @@ export type I18nKey =
+@@ -4659,7 +4676,6 @@ export type I18nKey =
    | 'skills.import.zip.placeholder'
    | 'skills.scanLibrary.done'
    | 'skills.scanLibrary.failed'
@@ -6521,6 +6721,24 @@ index da9c75438..d590db363 100644
    | 'skills.search.empty'
    | 'skills.search.emptyLibrary'
    | 'skills.search.placeholder'
+@@ -5053,7 +5069,6 @@ export type I18nKey =
+   | 'workflow.view.conversation'
+   | 'workflow.view.workflow'
+   | 'workflows.actions.build'
+-  | 'workflows.actions.export'
+   | 'workflows.actions.import'
+   | 'workflows.actions.launch'
+   | 'workflows.actions.runOn'
+@@ -5065,9 +5080,6 @@ export type I18nKey =
+   | 'workflows.count_other'
+   | 'workflows.depends.openSkill'
+   | 'workflows.depends.title'
+-  | 'workflows.exportFailed'
+-  | 'workflows.exportOk'
+-  | 'workflows.exportRedacted'
+   | 'workflows.import.done'
+   | 'workflows.import.sourcePrompt'
+   | 'workflows.import.title'
 diff --git a/src/renderer/services/i18n/index.ts b/src/renderer/services/i18n/index.ts
 index dfed662be..11974739a 100644
 --- a/src/renderer/services/i18n/index.ts
@@ -6570,14 +6788,25 @@ index 0bbb8291a..fcc11caf6 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/de-DE/conversation.json b/src/renderer/services/i18n/locales/de-DE/conversation.json
-index 3c332357c..cedbef2ba 100644
+index 50fc4b808..cedbef2ba 100644
 --- a/src/renderer/services/i18n/locales/de-DE/conversation.json
 +++ b/src/renderer/services/i18n/locales/de-DE/conversation.json
-@@ -438,6 +438,13 @@
+@@ -438,17 +438,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
+-  },
+-  "notification": {
+-    "untitled": "Unbenannter Chat",
+-    "agentFinished": {
+-      "title": "Aufgabe abgeschlossen",
+-      "body": "{{title}} ist fertig und wartet auf dich."
+-    },
+-    "agentError": {
+-      "title": "Aufgabe fehlgeschlagen",
+-      "body": "{{title}} wurde mit einem Fehler beendet. {{detail}}"
+-    }
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
 +    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
@@ -6669,7 +6898,7 @@ index 36ace9739..9449d4afc 100644
    }
  }
 diff --git a/src/renderer/services/i18n/locales/en-US/settings.json b/src/renderer/services/i18n/locales/en-US/settings.json
-index 6842c9ace..199a38230 100644
+index d68584ac0..199a38230 100644
 --- a/src/renderer/services/i18n/locales/en-US/settings.json
 +++ b/src/renderer/services/i18n/locales/en-US/settings.json
 @@ -118,10 +118,6 @@
@@ -6726,6 +6955,14 @@ index 6842c9ace..199a38230 100644
      "migrate": "Migrate",
      "theme": "Theme & Display",
      "editor": "Editor",
+@@ -1805,7 +1796,6 @@
+       "chatgptOffline": "Couldn't reach OpenAI. Check your connection and try again.",
+       "chatgptCancelled": "ChatGPT sign-in was cancelled.",
+       "chatgptFailed": "ChatGPT sign-in failed. Please try again.",
+-      "chatgptHeadless": "This machine has no browser, so ChatGPT sign-in can't open one. Forward the sign-in port over SSH — run `ssh -L 1455:localhost:1455 user@host`, then click Sign in again and finish in your local browser. Or run `codex login` on your own machine, copy ~/.codex/auth.json to this host, and Wayland will reuse it.",
+       "browse": "Browse all 30+ providers →",
+       "thatProvider": "that provider",
+       "errorUnauthorized": "That {{provider}} key was rejected, unauthorized. Check the key and try again.",
 diff --git a/src/renderer/services/i18n/locales/es-ES/agentMode.json b/src/renderer/services/i18n/locales/es-ES/agentMode.json
 index 7e1851b36..383fc30ae 100644
 --- a/src/renderer/services/i18n/locales/es-ES/agentMode.json
@@ -6745,14 +6982,25 @@ index 7e1851b36..383fc30ae 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/es-ES/conversation.json b/src/renderer/services/i18n/locales/es-ES/conversation.json
-index 56776d2a8..1dd782048 100644
+index d6b59241c..1dd782048 100644
 --- a/src/renderer/services/i18n/locales/es-ES/conversation.json
 +++ b/src/renderer/services/i18n/locales/es-ES/conversation.json
-@@ -438,6 +438,13 @@
+@@ -438,17 +438,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
+-  },
+-  "notification": {
+-    "untitled": "Chat sin título",
+-    "agentFinished": {
+-      "title": "Tarea completada",
+-      "body": "{{title}} ha terminado y te está esperando."
+-    },
+-    "agentError": {
+-      "title": "La tarea falló",
+-      "body": "{{title}} se detuvo con un error. {{detail}}"
+-    }
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
 +    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
@@ -6782,14 +7030,25 @@ index ffdb3e008..4a4683862 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/fr-FR/conversation.json b/src/renderer/services/i18n/locales/fr-FR/conversation.json
-index a8f429a3e..f8fc36198 100644
+index 09f9afda8..f8fc36198 100644
 --- a/src/renderer/services/i18n/locales/fr-FR/conversation.json
 +++ b/src/renderer/services/i18n/locales/fr-FR/conversation.json
-@@ -438,6 +438,13 @@
+@@ -438,17 +438,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
+-  },
+-  "notification": {
+-    "untitled": "Discussion sans titre",
+-    "agentFinished": {
+-      "title": "Tâche terminée",
+-      "body": "{{title}} est terminé et vous attend."
+-    },
+-    "agentError": {
+-      "title": "Échec de la tâche",
+-      "body": "{{title}} s’est arrêté avec une erreur. {{detail}}"
+-    }
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
 +    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
@@ -6819,14 +7078,25 @@ index 45c8df55c..a3cfc59ec 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/ja-JP/conversation.json b/src/renderer/services/i18n/locales/ja-JP/conversation.json
-index edac437f5..3a2b9e2e2 100644
+index c427b64f4..3a2b9e2e2 100644
 --- a/src/renderer/services/i18n/locales/ja-JP/conversation.json
 +++ b/src/renderer/services/i18n/locales/ja-JP/conversation.json
-@@ -438,6 +438,13 @@
+@@ -438,17 +438,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
+-  },
+-  "notification": {
+-    "untitled": "無題のチャット",
+-    "agentFinished": {
+-      "title": "タスク完了",
+-      "body": "{{title}} が完了し、あなたを待っています。"
+-    },
+-    "agentError": {
+-      "title": "タスク失敗",
+-      "body": "{{title}} はエラーで停止しました。{{detail}}"
+-    }
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
 +    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
@@ -6856,14 +7126,25 @@ index d3438c1b9..8b6cee311 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/ko-KR/conversation.json b/src/renderer/services/i18n/locales/ko-KR/conversation.json
-index 9cdb43fac..d8be5ca9b 100644
+index 8325729a8..d8be5ca9b 100644
 --- a/src/renderer/services/i18n/locales/ko-KR/conversation.json
 +++ b/src/renderer/services/i18n/locales/ko-KR/conversation.json
-@@ -438,6 +438,13 @@
+@@ -438,17 +438,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
+-  },
+-  "notification": {
+-    "untitled": "제목 없는 대화",
+-    "agentFinished": {
+-      "title": "작업 완료",
+-      "body": "{{title}}이(가) 완료되어 기다리고 있습니다."
+-    },
+-    "agentError": {
+-      "title": "작업 실패",
+-      "body": "{{title}}이(가) 오류로 중지되었습니다. {{detail}}"
+-    }
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
 +    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
@@ -6893,7 +7174,7 @@ index 6b1be7899..c23cb0a42 100644
 +  "configToml": "Personalizado(config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/pt-BR/conversation.json b/src/renderer/services/i18n/locales/pt-BR/conversation.json
-index fe91def75..db5b54e37 100644
+index dd080319b..db5b54e37 100644
 --- a/src/renderer/services/i18n/locales/pt-BR/conversation.json
 +++ b/src/renderer/services/i18n/locales/pt-BR/conversation.json
 @@ -413,8 +413,8 @@
@@ -6907,7 +7188,7 @@ index fe91def75..db5b54e37 100644
      "enabledCount": "{{count}} enabled",
      "recommended": "Recommended",
      "searchPlaceholder": "Search models…",
-@@ -426,18 +426,37 @@
+@@ -426,29 +426,37 @@
      "unavailable": "Currently unavailable",
      "pinAria": "Pin {{name}}",
      "unpinAria": "Unpin {{name}}",
@@ -6933,6 +7214,17 @@ index fe91def75..db5b54e37 100644
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
+-  },
+-  "notification": {
+-    "untitled": "Conversa sem título",
+-    "agentFinished": {
+-      "title": "Tarefa concluída",
+-      "body": "{{title}} terminou e está esperando por você."
+-    },
+-    "agentError": {
+-      "title": "A tarefa falhou",
+-      "body": "{{title}} parou com um erro. {{detail}}"
+-    }
 +    "manageModels": "Manage models",
 +    "effortXhigh": "Extra alto",
 +    "effortXhighDesc": "Raciocínio extra para trabalhos difíceis",
@@ -7011,14 +7303,25 @@ index fcd045b53..ab6851b1e 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/ru-RU/conversation.json b/src/renderer/services/i18n/locales/ru-RU/conversation.json
-index e183cc063..5703ce7f1 100644
+index 8414f7e40..5703ce7f1 100644
 --- a/src/renderer/services/i18n/locales/ru-RU/conversation.json
 +++ b/src/renderer/services/i18n/locales/ru-RU/conversation.json
-@@ -438,6 +438,13 @@
+@@ -438,17 +438,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
+-  },
+-  "notification": {
+-    "untitled": "Чат без названия",
+-    "agentFinished": {
+-      "title": "Задача выполнена",
+-      "body": "{{title}} завершено и ожидает вас."
+-    },
+-    "agentError": {
+-      "title": "Задача не выполнена",
+-      "body": "{{title}} остановлено с ошибкой. {{detail}}"
+-    }
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
 +    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
@@ -7048,14 +7351,25 @@ index 02d643181..49a863104 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/tr-TR/conversation.json b/src/renderer/services/i18n/locales/tr-TR/conversation.json
-index 9ef78e4a1..974e66e19 100644
+index 25458d523..974e66e19 100644
 --- a/src/renderer/services/i18n/locales/tr-TR/conversation.json
 +++ b/src/renderer/services/i18n/locales/tr-TR/conversation.json
-@@ -440,6 +440,13 @@
+@@ -440,17 +440,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
+-  },
+-  "notification": {
+-    "untitled": "Başlıksız sohbet",
+-    "agentFinished": {
+-      "title": "Görev tamamlandı",
+-      "body": "{{title}} tamamlandı ve sizi bekliyor."
+-    },
+-    "agentError": {
+-      "title": "Görev başarısız",
+-      "body": "{{title}} bir hatayla durdu. {{detail}}"
+-    }
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
 +    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
@@ -7085,14 +7399,25 @@ index 7e6d2b50d..ff7507c19 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/uk-UA/conversation.json b/src/renderer/services/i18n/locales/uk-UA/conversation.json
-index ac75f08af..7f6a6e1e1 100644
+index 214835293..7f6a6e1e1 100644
 --- a/src/renderer/services/i18n/locales/uk-UA/conversation.json
 +++ b/src/renderer/services/i18n/locales/uk-UA/conversation.json
-@@ -438,6 +438,13 @@
+@@ -438,17 +438,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
+-  },
+-  "notification": {
+-    "untitled": "Чат без назви",
+-    "agentFinished": {
+-      "title": "Завдання виконано",
+-      "body": "{{title}} завершено й очікує на вас."
+-    },
+-    "agentError": {
+-      "title": "Завдання не виконано",
+-      "body": "{{title}} зупинено через помилку. {{detail}}"
+-    }
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
 +    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
@@ -7122,14 +7447,25 @@ index 04115f2a6..4d4235325 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/zh-CN/conversation.json b/src/renderer/services/i18n/locales/zh-CN/conversation.json
-index 75a7a2626..073d29c6e 100644
+index 72719ff1b..073d29c6e 100644
 --- a/src/renderer/services/i18n/locales/zh-CN/conversation.json
 +++ b/src/renderer/services/i18n/locales/zh-CN/conversation.json
-@@ -438,6 +438,13 @@
+@@ -438,17 +438,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
+-  },
+-  "notification": {
+-    "untitled": "未命名对话",
+-    "agentFinished": {
+-      "title": "任务完成",
+-      "body": "{{title}} 已完成，正在等待你。"
+-    },
+-    "agentError": {
+-      "title": "任务失败",
+-      "body": "{{title}} 因错误而停止。{{detail}}"
+-    }
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
 +    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
@@ -7159,14 +7495,25 @@ index e2fe578a2..17ee6c11c 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/zh-TW/conversation.json b/src/renderer/services/i18n/locales/zh-TW/conversation.json
-index 8b2037463..4ce993bdd 100644
+index 0acaf380b..4ce993bdd 100644
 --- a/src/renderer/services/i18n/locales/zh-TW/conversation.json
 +++ b/src/renderer/services/i18n/locales/zh-TW/conversation.json
-@@ -438,6 +438,13 @@
+@@ -438,17 +438,13 @@
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
+-  },
+-  "notification": {
+-    "untitled": "未命名對話",
+-    "agentFinished": {
+-      "title": "任務完成",
+-      "body": "{{title}} 已完成，正在等待你。"
+-    },
+-    "agentError": {
+-      "title": "任務失敗",
+-      "body": "{{title}} 因錯誤而停止。{{detail}}"
+-    }
 +    "manageModels": "Manage models",
 +    "effortXhigh": "XHigh",
 +    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
@@ -7546,7 +7893,7 @@ index a8dc0c002..5820e8242 100644
 
      it('returns ok on successful hello handshake', async () => {
 diff --git a/tests/unit/renderer/GuidActionRow.dom.test.tsx b/tests/unit/renderer/GuidActionRow.dom.test.tsx
-index 6f2bb3023..1facc4894 100644
+index 6f2bb3023..35dcfe104 100644
 --- a/tests/unit/renderer/GuidActionRow.dom.test.tsx
 +++ b/tests/unit/renderer/GuidActionRow.dom.test.tsx
 @@ -2,6 +2,8 @@ import { fireEvent, render, screen } from '@testing-library/react';
@@ -7558,14 +7905,26 @@ index 6f2bb3023..1facc4894 100644
  vi.mock('react-i18next', () => ({
    useTranslation: () => ({
      t: (key: string) => key,
-@@ -71,12 +73,24 @@ vi.mock('lucide-react', async (importOriginal) => ({
+@@ -71,12 +73,36 @@ vi.mock('lucide-react', async (importOriginal) => ({
    Upload: () => <span>UploadOne</span>,
  }));
 
 +vi.mock('@/renderer/components/settings/DirectorySelectionModal', () => ({
-+  default: ({ visible, onConfirm }: { visible: boolean; onConfirm: (paths: string[] | undefined) => void }) =>
++  default: ({
++    visible,
++    initialPath,
++    onConfirm,
++  }: {
++    visible: boolean;
++    initialPath?: string;
++    onConfirm: (paths: string[] | undefined) => void;
++  }) =>
 +    visible ? (
-+      <button data-testid='web-workspace-modal' onClick={() => onConfirm(['/web/chosen/path'])}>
++      <button
++        data-testid='web-workspace-modal'
++        data-initial-path={initialPath}
++        onClick={() => onConfirm(['/web/chosen/path'])}
++      >
 +        WebWorkspaceModal
 +      </button>
 +    ) : null,
@@ -7584,7 +7943,7 @@ index 6f2bb3023..1facc4894 100644
  }));
 
  vi.mock('@/renderer/hooks/context/LayoutContext', () => ({
-@@ -151,6 +165,28 @@ describe('GuidActionRow', () => {
+@@ -151,6 +177,28 @@ describe('GuidActionRow', () => {
      expect(screen.getByText('ArrowUp')).toBeInTheDocument();
    });
 
@@ -7613,11 +7972,11 @@ index 6f2bb3023..1facc4894 100644
    // NOTE: builtin-skill count + toggle moved out of GuidActionRow's inline "+"
    // menu into the shared ComposerAddMenu. That behaviour is now covered by
    // ComposerAddMenu.dom.test.tsx (count pill) and useComposerSkills.dom.test.ts
-@@ -168,12 +204,30 @@ describe('GuidActionRow', () => {
+@@ -168,12 +216,32 @@ describe('GuidActionRow', () => {
 
      await vi.waitFor(() => {
        expect(ipcBridge.dialog.showOpen.invoke).toHaveBeenCalledWith({
-+        defaultPath: '/home/ubuntu/GitHub',
++        defaultPath: '/home/ubuntu/Servers',
          properties: ['openDirectory', 'createDirectory'],
        });
        expect(onSelectWorkspace).toHaveBeenCalledWith('/chosen/path');
@@ -7636,7 +7995,9 @@ index 6f2bb3023..1facc4894 100644
 +    fireEvent.click(screen.getByText('conversation.welcome.specifyWorkspace'));
 +
 +    expect(ipcBridge.dialog.showOpen.invoke).not.toHaveBeenCalled();
-+    fireEvent.click(screen.getByTestId('web-workspace-modal'));
++    const workspaceModal = screen.getByTestId('web-workspace-modal');
++    expect(workspaceModal).toHaveAttribute('data-initial-path', '/home/ubuntu/Servers');
++    fireEvent.click(workspaceModal);
 +
 +    expect(onSelectWorkspace).toHaveBeenCalledWith('/web/chosen/path');
 +  });
@@ -7677,7 +8038,7 @@ index 62e56ae1b..4b3f1f41a 100644
 +  });
 +});
 diff --git a/tests/unit/renderer/guidModelSelector.dom.test.tsx b/tests/unit/renderer/guidModelSelector.dom.test.tsx
-index f882e5c9e..6ba3330ee 100644
+index f882e5c9e..b22ab76c6 100644
 --- a/tests/unit/renderer/guidModelSelector.dom.test.tsx
 +++ b/tests/unit/renderer/guidModelSelector.dom.test.tsx
 @@ -25,7 +25,7 @@
@@ -7689,12 +8050,16 @@ index f882e5c9e..6ba3330ee 100644
  import React from 'react';
  import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-@@ -89,6 +89,12 @@ vi.mock('@arco-design/web-react', () => {
+@@ -89,6 +89,16 @@ vi.mock('@arco-design/web-react', () => {
          {children}
        </div>
      ),
-+    SubMenu: ({ children, title }: React.PropsWithChildren & { title?: React.ReactNode }) => (
-+      <div>
++    SubMenu: ({
++      children,
++      title,
++      className,
++    }: React.PropsWithChildren & { title?: React.ReactNode; className?: string }) => (
++      <div className={className}>
 +        <div>{title}</div>
 +        {children}
 +      </div>
@@ -7702,7 +8067,7 @@ index f882e5c9e..6ba3330ee 100644
    });
    // The picker added an Arco search Input above the model list (Packet 3B).
    const Input = ({
-@@ -105,6 +111,23 @@ vi.mock('@arco-design/web-react', () => {
+@@ -105,6 +115,32 @@ vi.mock('@arco-design/web-react', () => {
      Dropdown: ({ droplist }: React.PropsWithChildren & { droplist?: React.ReactNode }) => <>{droplist}</>,
      Input,
      Menu,
@@ -7710,15 +8075,24 @@ index f882e5c9e..6ba3330ee 100644
 +    Slider: ({
 +      value,
 +      onChange,
++      min = 0,
++      max = 100,
++      step = 1,
 +      'aria-label': ariaLabel,
 +    }: {
 +      value?: number;
 +      onChange?: (value: number) => void;
++      min?: number;
++      max?: number;
++      step?: number;
 +      'aria-label'?: string;
 +    }) => (
 +      <input
 +        aria-label={ariaLabel}
 +        type='range'
++        min={min}
++        max={max}
++        step={step}
 +        value={value ?? 0}
 +        onChange={(event) => onChange?.(Number(event.target.value))}
 +      />
@@ -7726,7 +8100,7 @@ index f882e5c9e..6ba3330ee 100644
      Tooltip: ({ children }: React.PropsWithChildren) => <>{children}</>,
    };
  });
-@@ -215,6 +238,12 @@ const baseProps = {
+@@ -215,6 +251,12 @@ const baseProps = {
    currentAcpCachedModelInfo: null,
    selectedAcpModel: null,
    setSelectedAcpModel: vi.fn(),
@@ -7739,7 +8113,7 @@ index f882e5c9e..6ba3330ee 100644
  };
 
  beforeEach(() => {
-@@ -226,6 +255,10 @@ beforeEach(() => {
+@@ -226,6 +268,10 @@ beforeEach(() => {
    // resolves cleanly and stays silent in tests that don't exercise it.
    mockResolveForChatStart.mockResolvedValue({ ok: false, error: 'not-connected' });
    baseProps.setCurrentModel.mockClear();
@@ -7750,7 +8124,7 @@ index f882e5c9e..6ba3330ee 100644
  });
 
  afterEach(() => {
-@@ -513,11 +546,180 @@ describe('GuidModelSelector home picker', () => {
+@@ -513,11 +559,201 @@ describe('GuidModelSelector home picker', () => {
 
      // Sonnet (3/15) blended ≈ 12 → $$. Haiku (0.8/4) blended ≈ 3.2 → $.
      // Two rows match Sonnet (regular + 1M context); both should render $$.
@@ -7771,6 +8145,14 @@ index f882e5c9e..6ba3330ee 100644
 +      currentModelId: 'gpt-5.5/xhigh',
 +      currentModelLabel: 'GPT-5.5 (xhigh)',
 +      availableModels: [
++        { id: 'gpt-5.6-sol/low', label: 'GPT-5.6 Sol (low)' },
++        { id: 'gpt-5.6-sol/medium', label: 'GPT-5.6 Sol (medium)' },
++        { id: 'gpt-5.6-sol/high', label: 'GPT-5.6 Sol (high)' },
++        { id: 'gpt-5.6-sol/xhigh', label: 'GPT-5.6 Sol (xhigh)' },
++        { id: 'gpt-5.6-sol/ultra', label: 'GPT-5.6 Sol (ultra)' },
++        { id: 'gpt-5.6-terra/low', label: 'GPT-5.6 Terra (low)' },
++        { id: 'gpt-5.6-terra/medium', label: 'GPT-5.6 Terra (medium)' },
++        { id: 'gpt-5.6-luna/xhigh', label: 'GPT-5.6 Luna (xhigh)' },
 +        { id: 'gpt-5.5/low', label: 'GPT-5.5 (low)' },
 +        { id: 'gpt-5.5/medium', label: 'GPT-5.5 (medium)' },
 +        { id: 'gpt-5.5/high', label: 'GPT-5.5 (high)' },
@@ -7820,10 +8202,17 @@ index f882e5c9e..6ba3330ee 100644
 +          {
 +            id: 'power',
 +            type: 'select',
-+            currentValue: 'gpt-5.5:xhigh',
++            currentValue: 'gpt-5.6-luna:xhigh',
 +            options: [
-+              { value: 'gpt-5.4:high', name: '5.4 High' },
-+              { value: 'gpt-5.5:xhigh', name: '5.5 Extra High' },
++              { value: 'gpt-5.6-terra:low', name: '5.6 Terra Low' },
++              { value: 'gpt-5.6-terra:medium', name: '5.6 Terra Medium' },
++              { value: 'gpt-5.6-luna:xhigh', name: '5.6 Luna Extra High' },
++              { value: 'gpt-5.6-sol:low', name: '5.6 Sol Low' },
++              { value: 'gpt-5.6-sol:medium', name: '5.6 Sol Medium' },
++              { value: 'gpt-5.6-sol:high', name: '5.6 Sol High' },
++              { value: 'gpt-5.6-sol:xhigh', name: '5.6 Sol Extra High' },
++              { value: 'gpt-5.6-sol:max', name: '5.6 Sol Max' },
++              { value: 'gpt-5.6-sol:ultra', name: '5.6 Sol Ultra' },
 +            ],
 +          },
 +        ]}
@@ -7834,6 +8223,10 @@ index f882e5c9e..6ba3330ee 100644
 +    expect(await screen.findByText('conversation.modelSelector.title')).toBeInTheDocument();
 +    expect(screen.getByText('5.5')).toBeInTheDocument();
 +    expect(screen.queryByText('GPT-5.5 (xhigh)')).not.toBeInTheDocument();
++    expect(screen.queryByText('conversation.modelSelector.effortLowDesc')).not.toBeInTheDocument();
++    expect(document.querySelector('.guid-intelligence-submenu-model')).toBeInTheDocument();
++    expect(document.querySelector('.guid-intelligence-submenu-effort')).toBeInTheDocument();
++    expect(document.querySelector('.guid-intelligence-submenu-speed')).toBeInTheDocument();
 +
 +    fireEventClick(await screen.findByText('GPT-5.4'));
 +    expect(setSelectedAcpModel).toHaveBeenCalledWith('gpt-5.4');
@@ -7848,7 +8241,9 @@ index f882e5c9e..6ba3330ee 100644
 +    expect(onConfigOptionSelect).toHaveBeenCalledWith('service_tier', 'priority');
 +
 +    fireEventClick(screen.getByText('conversation.modelSelector.advanced'));
-+    expect(screen.getByRole('slider', { name: 'conversation.modelSelector.powerAria' })).toBeInTheDocument();
++    const powerSlider = screen.getByRole('slider', { name: 'conversation.modelSelector.powerAria' });
++    expect(powerSlider).toBeInTheDocument();
++    expect(powerSlider).toHaveAttribute('max', '5');
 +  });
 +
 +  it('does not use curated provider rows as cold-start ACP models', async () => {
@@ -7932,7 +8327,7 @@ index f882e5c9e..6ba3330ee 100644
    it('passes the non-secret chat-start handle through to setCurrentModel (audit C4)', async () => {
      // The resolver hands back the NON-SECRET handle (platform + baseUrl +
      // account binding) - no decrypted key. The picker writes the binding into
-@@ -546,7 +748,6 @@ describe('GuidModelSelector home picker', () => {
+@@ -546,7 +782,6 @@ describe('GuidModelSelector home picker', () => {
      // The cold-start auto-pick fires resolveForChatStart→setCurrentModel once on
      // mount (no prior selection). Clear it so this assertion counts only the
      // explicit click being tested here.

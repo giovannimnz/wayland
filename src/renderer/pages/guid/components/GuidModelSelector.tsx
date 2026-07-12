@@ -128,6 +128,15 @@ type GuidPowerSelection = {
   description?: string;
 };
 
+const CODEX_56_POWER_LADDER_IDS = [
+  'gpt-5.6-terra:low',
+  'gpt-5.6-sol:low',
+  'gpt-5.6-sol:medium',
+  'gpt-5.6-sol:high',
+  'gpt-5.6-sol:xhigh',
+  'gpt-5.6-sol:ultra',
+] as const;
+
 const parsePowerSelection = (value: string, label?: string, description?: string): GuidPowerSelection | null => {
   const separator = value.lastIndexOf(':');
   if (separator <= 0) return null;
@@ -618,7 +627,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
 
   const powerSelections = React.useMemo<GuidPowerSelection[]>(() => {
     const availableModelIds = new Set(acpModels.map((model) => model.id));
-    return (
+    const parsed =
       powerOption?.options
         ?.map((option) =>
           parsePowerSelection(
@@ -629,7 +638,15 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
         )
         .filter((selection): selection is GuidPowerSelection =>
           Boolean(selection && availableModelIds.has(selection.modelId))
-        ) ?? []
+        ) ?? [];
+
+    // Older ACP sessions persisted the full model x effort Cartesian product.
+    // Keep the home picker stable across upgrades by projecting any 5.6 cache
+    // onto the same six-position ladder emitted by the current adapter.
+    if (!parsed.some((selection) => selection.modelId.startsWith('gpt-5.6-'))) return parsed;
+    const byId = new Map(parsed.map((selection) => [selection.id, selection]));
+    return CODEX_56_POWER_LADDER_IDS.map((id) => byId.get(id)).filter(
+      (selection): selection is GuidPowerSelection => Boolean(selection)
     );
   }, [acpModels, powerOption]);
 
@@ -642,9 +659,20 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
         : typeof powerOption?.selectedValue === 'string'
           ? powerOption.selectedValue
           : undefined;
+    const normalizedEffort =
+      currentEffort === 'minimal' || currentEffort === 'low'
+        ? 'low'
+        : currentEffort === 'max'
+          ? 'xhigh'
+          : currentEffort;
+    const nearestId = normalizedEffort
+      ? `${normalizedEffort === 'low' ? 'gpt-5.6-terra' : 'gpt-5.6-sol'}:${normalizedEffort}`
+      : undefined;
     return (
       powerSelections.find((selection) => selection.id === explicitId) ??
       powerSelections.find((selection) => selection.id === configuredId) ??
+      powerSelections.find((selection) => selection.id === nearestId) ??
+      powerSelections[0] ??
       null
     );
   }, [currentEffort, powerOption, powerSelections, selectedBaseModelId]);
@@ -819,6 +847,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
             <Menu className='guid-intelligence-menu-list'>
               <Menu.SubMenu
                 key='model-submenu'
+                className='guid-intelligence-submenu guid-intelligence-submenu-model'
                 title={menuRowTitle(
                   t('conversation.modelSelector.title', { defaultValue: 'Model' }),
                   compactModelLabel
@@ -881,6 +910,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
               {effortOptions.length > 0 && (
                 <Menu.SubMenu
                   key='effort-submenu'
+                  className='guid-intelligence-submenu guid-intelligence-submenu-effort'
                   title={menuRowTitle(
                     t('conversation.modelSelector.effort', { defaultValue: 'Reasoning' }),
                     currentEffortLabel ||
@@ -894,11 +924,15 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
                     });
                     const description = t(`${effortLabelKey(effort)}Desc`, { defaultValue: '' });
                     return (
-                      <Menu.Item key={`effort-${effort}`} onClick={() => handleSelectEffort(effort)}>
+                      <Menu.Item
+                        key={`effort-${effort}`}
+                        title={description || undefined}
+                        aria-label={description ? `${label}. ${description}` : label}
+                        onClick={() => handleSelectEffort(effort)}
+                      >
                         <span className='guid-intelligence-option'>
-                          <span className='min-w-0'>
-                            <span className='block truncate'>{label}</span>
-                            {description && <span className='block text-12px text-t-tertiary'>{description}</span>}
+                          <span className='guid-intelligence-option-copy'>
+                            <span className='guid-intelligence-option-label'>{label}</span>
                           </span>
                           {currentEffort === effort && <Check size={15} className='shrink-0' />}
                         </span>
@@ -911,6 +945,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
               {serviceTierOptions.length > 0 && currentServiceTier && (
                 <Menu.SubMenu
                   key='speed-submenu'
+                  className='guid-intelligence-submenu guid-intelligence-submenu-speed'
                   title={menuRowTitle(
                     t('conversation.modelSelector.speed', { defaultValue: 'Speed' }),
                     currentServiceTierLabel
@@ -926,9 +961,9 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
                     return (
                       <Menu.Item key={`speed-${tier}`} onClick={() => handleSelectServiceTier(tier)}>
                         <span className='guid-intelligence-option'>
-                          <span className='min-w-0'>
-                            <span className='block truncate'>{label}</span>
-                            <span className='block text-12px text-t-tertiary'>{description}</span>
+                          <span className='guid-intelligence-option-copy guid-intelligence-option-copy-described'>
+                            <span className='guid-intelligence-option-label'>{label}</span>
+                            <span className='guid-intelligence-option-description'>{description}</span>
                           </span>
                           {currentServiceTier === tier && <Check size={15} className='shrink-0' />}
                         </span>
@@ -965,17 +1000,13 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
                   />
                 </button>
                 {advancedPowerOpen && (
-                  <div className='guid-intelligence-power'>
-                    <div className='guid-intelligence-power-summary'>
-                      <span>{currentPowerSelection?.label || compactSummary}</span>
-                      {currentPowerSelection?.effort === 'ultra' && (
-                        <span className='guid-intelligence-ultra-warning'>
-                          <Zap size={13} aria-hidden />
-                          {t('conversation.modelSelector.ultraUsageWarning', {
-                            defaultValue: 'Consumes usage limits faster',
-                          })}
-                        </span>
-                      )}
+                  <div
+                    className='guid-intelligence-power'
+                    data-ultra={currentPowerSelection?.effort === 'ultra'}
+                  >
+                    <div className='guid-intelligence-power-ends' aria-hidden>
+                      <span>{t('conversation.modelSelector.powerFaster', { defaultValue: 'Faster' })}</span>
+                      <span>{t('conversation.modelSelector.powerSmarter', { defaultValue: 'Smarter' })}</span>
                     </div>
                     <Slider
                       min={0}
@@ -994,10 +1025,14 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
                         defaultValue: 'Model and reasoning power',
                       })}
                     />
-                    <div className='guid-intelligence-power-ends' aria-hidden>
-                      <span>{t('conversation.modelSelector.powerFaster', { defaultValue: 'Faster' })}</span>
-                      <span>{t('conversation.modelSelector.powerSmarter', { defaultValue: 'Smarter' })}</span>
-                    </div>
+                    {currentPowerSelection?.effort === 'ultra' && (
+                      <span className='guid-intelligence-ultra-warning'>
+                        <Zap size={13} aria-hidden />
+                        {t('conversation.modelSelector.ultraUsageWarning', {
+                          defaultValue: 'Consumes usage limits faster',
+                        })}
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
