@@ -183,7 +183,7 @@ class AgentRegistry {
 
   // prettier-ignore
   private merge(): void {
-    this.detectedAgents = this.deduplicate([
+    const merged = this.deduplicate([
       this.createWCoreAgent(),
       this.createGeminiAgent(),
       ...this.builtinAgents,
@@ -192,6 +192,14 @@ class AgentRegistry {
       ...this.extensionAgents,
       ...this.customAgents,
     ]);
+    const configuredBackends = (process.env.WAYLAND_LOCAL_AGENT_BACKENDS ?? '')
+      .split(',')
+      .map((backend) => backend.trim())
+      .filter(Boolean);
+    const allowedLocalBackends = new Set(configuredBackends);
+    this.detectedAgents = configuredBackends.length === 0
+      ? merged
+      : merged.filter((agent) => agent.kind === 'remote' || allowedLocalBackends.has(agent.backend));
   }
 
   private async runExclusiveMutation<T>(task: () => Promise<T>): Promise<T> {

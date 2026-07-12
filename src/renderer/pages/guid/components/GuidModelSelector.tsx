@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Brain, ChevronDown, Gauge, Zap } from 'lucide-react';
-import { Button, Dropdown, Menu, Message, Tooltip } from '@arco-design/web-react';
+import { Brain, Check, ChevronDown, ChevronRight, RotateCcw, Zap } from 'lucide-react';
+import { Button, Dropdown, Menu, Message, Slider, Tooltip } from '@arco-design/web-react';
 import { ipcBridge } from '@/common';
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
 import type { CuratedModel, ProviderId } from '@process/providers/types';
@@ -51,15 +51,16 @@ type GuidModelSelectorProps = {
   onConfigOptionSelect?: (configId: string, value: string) => void;
 };
 
-export type GuidReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+export type GuidReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 export type GuidServiceTier = 'normal' | 'priority';
 
-const GUID_REASONING_EFFORTS: GuidReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
+const GUID_REASONING_EFFORTS: GuidReasoningEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 const GUID_SERVICE_TIERS: GuidServiceTier[] = ['normal', 'priority'];
 const REASONING_EFFORT_CONFIG_ID = 'reasoning_effort';
 const SERVICE_TIER_CONFIG_ID = 'service_tier';
-const ACP_MODEL_EFFORT_SUFFIX = /\/(low|medium|high|xhigh)$/i;
-const ACP_MODEL_LABEL_EFFORT_SUFFIX = /\s+\((low|medium|high|xhigh)\)$/i;
+const POWER_CONFIG_ID = 'power';
+const ACP_MODEL_EFFORT_SUFFIX = /\/(minimal|low|medium|high|xhigh|max|ultra)$/i;
+const ACP_MODEL_LABEL_EFFORT_SUFFIX = /\s+\((minimal|low|medium|high|xhigh|max|ultra)\)$/i;
 
 const isGuidReasoningEffort = (value: unknown): value is GuidReasoningEffort =>
   typeof value === 'string' && GUID_REASONING_EFFORTS.includes(value.toLowerCase() as GuidReasoningEffort);
@@ -114,6 +115,32 @@ export const isServiceTierConfigOption = (option: AcpSessionConfigOption): boole
 
 const getServiceTierOption = (options: AcpSessionConfigOption[] | undefined): AcpSessionConfigOption | undefined =>
   options?.find(isServiceTierConfigOption);
+
+const getPowerOption = (options: AcpSessionConfigOption[] | undefined): AcpSessionConfigOption | undefined =>
+  options?.find((option) => option.id === POWER_CONFIG_ID || option.name?.toLowerCase() === 'power');
+
+type GuidPowerSelection = {
+  id: string;
+  modelId: string;
+  effort: GuidReasoningEffort;
+  label: string;
+  description?: string;
+};
+
+const parsePowerSelection = (value: string, label?: string, description?: string): GuidPowerSelection | null => {
+  const separator = value.lastIndexOf(':');
+  if (separator <= 0) return null;
+  const modelId = value.slice(0, separator);
+  const effort = normalizeEffort(value.slice(separator + 1));
+  if (!modelId || !effort) return null;
+  return {
+    id: value,
+    modelId,
+    effort,
+    label: label?.trim() || `${modelId} ${effort}`,
+    description,
+  };
+};
 
 const effortLabelKey = (effort: GuidReasoningEffort): string =>
   `conversation.modelSelector.effort${effort === 'xhigh' ? 'Xhigh' : effort.charAt(0).toUpperCase() + effort.slice(1)}`;
@@ -223,6 +250,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
   // Open state - exposed so the frequently-used hook can defer its IPC until
   // the panel is actually visible.
   const [panelOpen, setPanelOpen] = React.useState(false);
+  const [advancedPowerOpen, setAdvancedPowerOpen] = React.useState(false);
 
   // Plain-language scope sentence for the selected agent. Reuses the same
   // copy as the Agents settings page so the explanation lives at the point
@@ -544,6 +572,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
   );
 
   const serviceTierOption = React.useMemo(() => getServiceTierOption(cachedConfigOptions), [cachedConfigOptions]);
+  const powerOption = React.useMemo(() => getPowerOption(cachedConfigOptions), [cachedConfigOptions]);
 
   const configEffort = React.useMemo(
     () => normalizeEffort(reasoningEffortOption?.currentValue || reasoningEffortOption?.selectedValue),
@@ -572,15 +601,47 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
       .filter((value): value is GuidReasoningEffort => Boolean(value));
     if (bySelectedModel.length > 0) return Array.from(new Set(bySelectedModel));
 
-    if (agentKey === 'codex' || agentKey === 'hermes') return GUID_REASONING_EFFORTS;
     return [];
   }, [agentKey, rawAcpModels, reasoningEffortOption, selectedBaseModelId]);
 
   const currentEffort =
-    selectedAcpEffort ||
+    (selectedAcpEffort && effortOptions.includes(selectedAcpEffort) ? selectedAcpEffort : null) ||
     configEffort ||
     modelEffort ||
-    (effortOptions.includes('xhigh') ? 'xhigh' : (effortOptions[0] ?? null));
+    null;
+
+  const powerSelections = React.useMemo<GuidPowerSelection[]>(() => {
+    const availableModelIds = new Set(acpModels.map((model) => model.id));
+    return (
+      powerOption?.options
+        ?.map((option) =>
+          parsePowerSelection(
+            option.value,
+            option.label || option.name,
+            'description' in option && typeof option.description === 'string' ? option.description : undefined
+          )
+        )
+        .filter((selection): selection is GuidPowerSelection =>
+          Boolean(selection && availableModelIds.has(selection.modelId))
+        ) ?? []
+    );
+  }, [acpModels, powerOption]);
+
+  const currentPowerSelection = React.useMemo(() => {
+    const explicitId =
+      selectedBaseModelId && currentEffort ? `${selectedBaseModelId}:${currentEffort}` : undefined;
+    const configuredId =
+      typeof powerOption?.currentValue === 'string'
+        ? powerOption.currentValue
+        : typeof powerOption?.selectedValue === 'string'
+          ? powerOption.selectedValue
+          : undefined;
+    return (
+      powerSelections.find((selection) => selection.id === explicitId) ??
+      powerSelections.find((selection) => selection.id === configuredId) ??
+      null
+    );
+  }, [currentEffort, powerOption, powerSelections, selectedBaseModelId]);
 
   const serviceTierOptions = React.useMemo<GuidServiceTier[]>(() => {
     const fromConfig = serviceTierOption?.options
@@ -622,6 +683,24 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
     [agentKey, onConfigOptionSelect, recordTelemetry, setSelectedAcpServiceTier]
   );
 
+  const handleSelectPower = React.useCallback(
+    (selection: GuidPowerSelection) => {
+      setSelectedAcpModel(selection.modelId);
+      setSelectedAcpEffort?.(selection.effort);
+      onConfigOptionSelect?.(POWER_CONFIG_ID, selection.id);
+      recordTelemetry({
+        eventType: 'guid.model_selected',
+        cliBackend: agentKey,
+        metadata: {
+          modelId: selection.modelId,
+          effort: selection.effort,
+          source: 'acp-power',
+        },
+      });
+    },
+    [agentKey, onConfigOptionSelect, recordTelemetry, setSelectedAcpEffort, setSelectedAcpModel]
+  );
+
   const acpSelectedLabel = React.useMemo(() => {
     return resolveAcpSelectedLabel({
       selectedAcpModel,
@@ -659,82 +738,6 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
         defaultValue: currentServiceTier === 'priority' ? 'Fast' : 'Default',
       })
     : '';
-
-  const effortSelectorNode =
-    effortOptions.length > 0 && currentEffort ? (
-      <Dropdown
-        trigger='click'
-        droplist={
-          <Menu selectedKeys={[currentEffort]}>
-            <Menu.ItemGroup title={t('conversation.modelSelector.effort')}>
-              {effortOptions.map((effort) => {
-                const label = t(effortLabelKey(effort), {
-                  defaultValue: effort === 'xhigh' ? 'XHigh' : effort.charAt(0).toUpperCase() + effort.slice(1),
-                });
-                return (
-                  <Menu.Item key={effort} onClick={() => handleSelectEffort(effort)}>
-                    <div className='flex items-center gap-8px w-full'>
-                      {effort === currentEffort && <span className='text-primary shrink-0'>✓</span>}
-                      <span className={`flex-1 min-w-0 truncate ${effort !== currentEffort ? 'ml-16px' : ''}`}>
-                        {label}
-                      </span>
-                    </div>
-                  </Menu.Item>
-                );
-              })}
-            </Menu.ItemGroup>
-          </Menu>
-        }
-      >
-        <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
-          <span className='flex items-center gap-6px min-w-0'>
-            <Zap size={14} color={iconColors.secondary} className='shrink-0' />
-            <span className='truncate'>{currentEffortLabel}</span>
-            <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
-          </span>
-        </Button>
-      </Dropdown>
-    ) : null;
-
-  const speedSelectorNode =
-    serviceTierOptions.length > 0 && currentServiceTier ? (
-      <Dropdown
-        trigger='click'
-        droplist={
-          <Menu selectedKeys={[currentServiceTier]}>
-            <Menu.ItemGroup title={t('conversation.modelSelector.speed')}>
-              {serviceTierOptions.map((tier) => {
-                const label = t(serviceTierLabelKey(tier), {
-                  defaultValue: tier === 'priority' ? 'Fast' : 'Default',
-                });
-                const description = t(serviceTierDescriptionKey(tier), {
-                  defaultValue: tier === 'priority' ? '1.5x speed, increased usage' : 'Default speed',
-                });
-                return (
-                  <Menu.Item key={tier} onClick={() => handleSelectServiceTier(tier)}>
-                    <div className='flex items-start gap-8px w-full'>
-                      {tier === currentServiceTier && <span className='text-primary shrink-0 mt-2px'>✓</span>}
-                      <span className={`flex flex-col min-w-0 ${tier !== currentServiceTier ? 'ml-16px' : ''}`}>
-                        <span className='truncate'>{label}</span>
-                        <span className='text-12px text-t-tertiary truncate'>{description}</span>
-                      </span>
-                    </div>
-                  </Menu.Item>
-                );
-              })}
-            </Menu.ItemGroup>
-          </Menu>
-        }
-      >
-        <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
-          <span className='flex items-center gap-6px min-w-0'>
-            <Gauge size={14} color={iconColors.secondary} className='shrink-0' />
-            <span className='truncate'>{currentServiceTierLabel}</span>
-            <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
-          </span>
-        </Button>
-      </Dropdown>
-    ) : null;
 
   // ── Provider-based agents (Gemini / Wayland Core) - three-tier picker ────
   if (isGeminiMode) {
@@ -774,18 +777,47 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
   // model to show. The cold-start path is handled by getStaticModelInfo so this
   // never needs to substitute a generic provider catalog.
   if (showAcpFlux || acpModels.length > 0) {
-    // Inline scope caption - keeps the Arco Menu legal (no raw <div> kids).
-    const scopeCaptionItem = (
-      <Menu.Item key='scope-caption' disabled className='px-12px pt-8px pb-6px text-11px text-t-tertiary leading-snug'>
-        {scopeCaption}
-      </Menu.Item>
+    const compactModelLabel = acpButtonDisplayLabel.replace(/^gpt[-\s]?/i, '').replace(/-/g, ' ');
+    const compactSummary = [compactModelLabel, currentEffortLabel].filter(Boolean).join(' ');
+    const selectedPowerIndex = Math.max(
+      0,
+      powerSelections.findIndex((selection) => selection.id === currentPowerSelection?.id)
     );
+    const resetModel = splitAcpModelEffort(currentAcpCachedModelInfo?.currentModelId).modelId;
+    const resetEffort =
+      normalizeEffort(reasoningEffortOption?.currentValue || reasoningEffortOption?.selectedValue) || null;
+
+    const resetConfiguration = () => {
+      if (resetModel) setSelectedAcpModel(resetModel);
+      if (resetEffort) handleSelectEffort(resetEffort);
+      if (serviceTierOptions.includes('normal')) handleSelectServiceTier('normal');
+      setAdvancedPowerOpen(false);
+    };
+
+    const menuRowTitle = (label: string, value: string) => (
+      <span className='guid-intelligence-row'>
+        <span className='guid-intelligence-row-label'>{label}</span>
+        <span className='guid-intelligence-row-value'>{value}</span>
+        <ChevronRight size={15} className='guid-intelligence-row-chevron' aria-hidden />
+      </span>
+    );
+
     return (
-      <>
-        <Dropdown
-          trigger='click'
-          droplist={
-            <Menu selectedKeys={selectedBaseModelId ? [selectedBaseModelId] : []}>
+      <Dropdown
+        trigger='click'
+        position='bl'
+        popupVisible={panelOpen}
+        onVisibleChange={setPanelOpen}
+        droplist={
+          <div className='guid-intelligence-menu' data-advanced-open={advancedPowerOpen}>
+            <Menu className='guid-intelligence-menu-list'>
+              <Menu.SubMenu
+                key='model-submenu'
+                title={menuRowTitle(
+                  t('conversation.modelSelector.title', { defaultValue: 'Model' }),
+                  compactModelLabel
+                )}
+              >
               {showAcpFlux && (
                 <Menu.ItemGroup title={t('conversation.welcome.fluxGroupLabel')}>
                   {FLUX_MODEL_IDS.map((fluxId) => (
@@ -803,12 +835,12 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
                       <div className='flex items-center gap-8px w-full'>
                         <FluxRouterMark size={14} className='shrink-0' />
                         <span className='flex-1 min-w-0 truncate'>{FLUX_MODEL_DISPLAY[fluxId]}</span>
+                        {selectedBaseModelId === fluxId && <Check size={15} className='shrink-0' />}
                       </div>
                     </Menu.Item>
                   ))}
                 </Menu.ItemGroup>
               )}
-              {scopeCaptionItem}
               {acpModels.map((model) => {
                 const tier = acpTierFor(model.id, model.label);
                 return (
@@ -833,24 +865,148 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
                           {tier}
                         </span>
                       )}
+                      {selectedBaseModelId === model.id && <Check size={15} className='shrink-0' />}
                     </div>
                   </Menu.Item>
                 );
               })}
+              </Menu.SubMenu>
+
+              {effortOptions.length > 0 && (
+                <Menu.SubMenu
+                  key='effort-submenu'
+                  title={menuRowTitle(
+                    t('conversation.modelSelector.effort', { defaultValue: 'Reasoning' }),
+                    currentEffortLabel ||
+                      t('conversation.modelSelector.speedDefault', { defaultValue: 'Default' })
+                  )}
+                >
+                  {effortOptions.map((effort) => {
+                    const label = t(effortLabelKey(effort), {
+                      defaultValue:
+                        effort === 'xhigh' ? 'Extra High' : effort.charAt(0).toUpperCase() + effort.slice(1),
+                    });
+                    const description = t(`${effortLabelKey(effort)}Desc`, { defaultValue: '' });
+                    return (
+                      <Menu.Item key={`effort-${effort}`} onClick={() => handleSelectEffort(effort)}>
+                        <span className='guid-intelligence-option'>
+                          <span className='min-w-0'>
+                            <span className='block truncate'>{label}</span>
+                            {description && <span className='block text-12px text-t-tertiary'>{description}</span>}
+                          </span>
+                          {currentEffort === effort && <Check size={15} className='shrink-0' />}
+                        </span>
+                      </Menu.Item>
+                    );
+                  })}
+                </Menu.SubMenu>
+              )}
+
+              {serviceTierOptions.length > 0 && currentServiceTier && (
+                <Menu.SubMenu
+                  key='speed-submenu'
+                  title={menuRowTitle(
+                    t('conversation.modelSelector.speed', { defaultValue: 'Speed' }),
+                    currentServiceTierLabel
+                  )}
+                >
+                  {serviceTierOptions.map((tier) => {
+                    const label = t(serviceTierLabelKey(tier), {
+                      defaultValue: tier === 'priority' ? 'Fast' : 'Default',
+                    });
+                    const description = t(serviceTierDescriptionKey(tier), {
+                      defaultValue: tier === 'priority' ? '1.5x speed, increased usage' : 'Default speed',
+                    });
+                    return (
+                      <Menu.Item key={`speed-${tier}`} onClick={() => handleSelectServiceTier(tier)}>
+                        <span className='guid-intelligence-option'>
+                          <span className='min-w-0'>
+                            <span className='block truncate'>{label}</span>
+                            <span className='block text-12px text-t-tertiary'>{description}</span>
+                          </span>
+                          {currentServiceTier === tier && <Check size={15} className='shrink-0' />}
+                        </span>
+                      </Menu.Item>
+                    );
+                  })}
+                </Menu.SubMenu>
+              )}
+
+              <Menu.Item key='reset' onClick={resetConfiguration}>
+                <span className='guid-intelligence-reset'>
+                  <span>{t('conversation.modelSelector.resetDefault', { defaultValue: 'Reset to default' })}</span>
+                  <RotateCcw size={15} aria-hidden />
+                </span>
+              </Menu.Item>
             </Menu>
-          }
-        >
-          <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
-            <span className='flex items-center gap-6px min-w-0'>
-              <Brain size={14} color={iconColors.secondary} className='shrink-0' />
-              <span className='truncate min-w-0'>{acpButtonDisplayLabel}</span>
-              <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
-            </span>
-          </Button>
-        </Dropdown>
-        {effortSelectorNode}
-        {speedSelectorNode}
-      </>
+
+            {powerSelections.length > 1 && (
+              <div className='guid-intelligence-advanced'>
+                <button
+                  type='button'
+                  className='guid-intelligence-advanced-toggle'
+                  aria-expanded={advancedPowerOpen}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setAdvancedPowerOpen((open) => !open);
+                  }}
+                >
+                  <span>{t('conversation.modelSelector.advanced', { defaultValue: 'Advanced' })}</span>
+                  <ChevronDown
+                    size={15}
+                    className={advancedPowerOpen ? 'rotate-180 transition-transform' : 'transition-transform'}
+                    aria-hidden
+                  />
+                </button>
+                {advancedPowerOpen && (
+                  <div className='guid-intelligence-power'>
+                    <div className='guid-intelligence-power-summary'>
+                      <span>{currentPowerSelection?.label || compactSummary}</span>
+                      {currentPowerSelection?.effort === 'ultra' && (
+                        <span className='guid-intelligence-ultra-warning'>
+                          <Zap size={13} aria-hidden />
+                          {t('conversation.modelSelector.ultraUsageWarning', {
+                            defaultValue: 'Consumes usage limits faster',
+                          })}
+                        </span>
+                      )}
+                    </div>
+                    <Slider
+                      min={0}
+                      max={powerSelections.length - 1}
+                      step={1}
+                      showTicks
+                      value={selectedPowerIndex}
+                      marks={Object.fromEntries(powerSelections.map((_, index) => [index, '']))}
+                      formatTooltip={(value) => powerSelections[Number(value)]?.label || ''}
+                      onChange={(value) => {
+                        const index = Array.isArray(value) ? value[0] : value;
+                        const selection = powerSelections[Number(index)];
+                        if (selection) handleSelectPower(selection);
+                      }}
+                      aria-label={t('conversation.modelSelector.powerAria', {
+                        defaultValue: 'Model and reasoning power',
+                      })}
+                    />
+                    <div className='guid-intelligence-power-ends' aria-hidden>
+                      <span>{t('conversation.modelSelector.powerFaster', { defaultValue: 'Faster' })}</span>
+                      <span>{t('conversation.modelSelector.powerSmarter', { defaultValue: 'Smarter' })}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        }
+      >
+        <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
+          <span className='flex items-center gap-6px min-w-0'>
+            <Brain size={14} color={iconColors.secondary} className='shrink-0' />
+            <span className='truncate min-w-0'>{compactSummary || acpButtonDisplayLabel}</span>
+            <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
+          </span>
+        </Button>
+      </Dropdown>
     );
   }
 

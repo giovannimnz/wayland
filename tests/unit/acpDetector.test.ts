@@ -55,6 +55,7 @@ async function createFreshRegistry() {
 describe('AgentRegistry', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.WAYLAND_LOCAL_AGENT_BACKENDS;
     mockDetectBuiltinAgents.mockResolvedValue([]);
     mockDetectExtensionAgents.mockResolvedValue([]);
     mockDetectCustomAgents.mockResolvedValue([]);
@@ -84,6 +85,20 @@ describe('AgentRegistry', () => {
       expect(agents[1].backend).toBe('gemini');
       expect(agents[2]).toMatchObject({ backend: 'claude', cliPath: 'claude' });
       expect(agents[3]).toMatchObject({ backend: 'qwen', cliPath: 'qwen' });
+    });
+
+    it('limits local runtime agents to the configured Codex and Hermes CLIs', async () => {
+      process.env.WAYLAND_LOCAL_AGENT_BACKENDS = 'codex,hermes';
+      mockDetectBuiltinAgents.mockResolvedValue([
+        makeAcpAgent({ id: 'codex', name: 'Codex', backend: 'codex', cliPath: 'codex-acp-atius' }),
+        makeAcpAgent({ id: 'hermes', name: 'Hermes Agent', backend: 'hermes', cliPath: 'hermes-acp' }),
+        makeAcpAgent({ id: 'claude', name: 'Claude Code', backend: 'claude', cliPath: 'claude' }),
+      ]);
+
+      const registry = await createFreshRegistry();
+      await registry.initialize();
+
+      expect(registry.getDetectedAgents().map((agent) => agent.backend)).toEqual(['codex', 'hermes']);
     });
 
     it('should skip built-in CLIs that are not available', async () => {

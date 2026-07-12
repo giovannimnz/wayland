@@ -201,7 +201,7 @@ describe('remoteAgentBridge', () => {
       expect(result).toBeDefined();
     });
 
-    it('creates agent without device identity for non-openclaw protocol', async () => {
+    it('creates an ACP agent with the OpenClaw device identity used by its gateway transport', async () => {
       const handler = providerMap.get('create')!;
       await handler({
         name: 'AcpAgent',
@@ -212,9 +212,9 @@ describe('remoteAgentBridge', () => {
 
       expect(mockDb.createRemoteAgent).toHaveBeenCalledWith(
         expect.objectContaining({
-          deviceId: undefined,
-          devicePublicKey: undefined,
-          devicePrivateKey: undefined,
+          deviceId: 'dev-id',
+          devicePublicKey: 'pub-pem',
+          devicePrivateKey: 'priv-pem',
         })
       );
     });
@@ -342,7 +342,7 @@ describe('remoteAgentBridge', () => {
       expect(result).toEqual({ status: 'error', error: 'Remote agent not found' });
     });
 
-    it('returns ok immediately for non-openclaw protocol', async () => {
+    it('performs the OpenClaw gateway handshake for the ACP transport', async () => {
       mockDb.getRemoteAgent.mockReturnValueOnce({
         id: 'a2',
         name: 'AcpAgent',
@@ -354,8 +354,14 @@ describe('remoteAgentBridge', () => {
       });
 
       const handler = providerMap.get('handshake')!;
-      const result = await handler({ id: 'a2' });
+      const resultPromise = handler({ id: 'a2' });
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      capturedConnCallbacks.onHelloOk!({});
+
+      const result = await resultPromise;
       expect(result).toEqual({ status: 'ok' });
+      expect(mockDb.updateRemoteAgent).toHaveBeenCalledWith('a2', expect.objectContaining({ status: 'connected' }));
     });
 
     it('returns ok on successful hello handshake', async () => {

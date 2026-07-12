@@ -1529,7 +1529,7 @@ export interface ICreateConversationParams {
      * (Codex / WCore / Claude-ACP). Persisted on the conversation and read by
      * each backend's config builder on the next turn. Absent => backend default.
      */
-    effort?: 'low' | 'medium' | 'high' | 'xhigh';
+    effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
     /**
      * Per-conversation Codex service tier / speed.
      * `priority` maps to the Fast tier; absent preserves the backend default.

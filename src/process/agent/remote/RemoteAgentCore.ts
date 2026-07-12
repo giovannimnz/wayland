@@ -205,7 +205,8 @@ export class RemoteAgentCore {
       }
     }
 
-    const defaultKey = this.id;
+    const defaultKey =
+      this.remoteConfig.protocol === 'acp' ? `agent:codex:acp:${this.id}` : this.id;
     try {
       const resetResult = await this.connection.sessionsReset({ key: defaultKey, reason: 'new' });
       this.connection.sessionKey = resetResult.key;
@@ -240,6 +241,7 @@ export class RemoteAgentCore {
         this.handleAgentEvent(evt.payload);
         break;
       case 'exec.approval.request':
+      case 'exec.approval.requested':
         this.handleApprovalRequest(evt.payload);
         break;
       case 'shutdown':

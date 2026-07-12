@@ -50,9 +50,9 @@ export function initRemoteAgentBridge(): void {
     const db = await getDatabase();
     const now = Date.now();
 
-    // Generate independent device identity for OpenClaw protocol agents
+    // Remote ACP uses the OpenClaw Gateway transport and the same device pairing contract.
     const device =
-      input.protocol === 'openclaw'
+      input.protocol === 'openclaw' || input.protocol === 'acp'
         ? generateIdentity()
         : { deviceId: undefined, publicKeyPem: undefined, privateKeyPem: undefined };
 
@@ -166,7 +166,7 @@ export function initRemoteAgentBridge(): void {
       return { status: 'error' as const, error: 'Remote agent not found' };
     }
 
-    if (agent.protocol !== 'openclaw') {
+    if (agent.protocol !== 'openclaw' && agent.protocol !== 'acp') {
       return { status: 'ok' as const };
     }
 

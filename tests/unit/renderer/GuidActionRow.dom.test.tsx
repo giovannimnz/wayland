@@ -2,6 +2,8 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
+const acpConfigSelectorSpy = vi.hoisted(() => vi.fn());
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
@@ -85,7 +87,10 @@ vi.mock('@/renderer/components/agent/AgentModeSelector', () => ({
 }));
 
 vi.mock('@/renderer/components/agent/AcpConfigSelector', () => ({
-  default: () => null,
+  default: (props: unknown) => {
+    acpConfigSelectorSpy(props);
+    return null;
+  },
 }));
 
 vi.mock('@/renderer/hooks/context/LayoutContext', () => ({
@@ -158,6 +163,28 @@ describe('GuidActionRow', () => {
     render(<GuidActionRow {...defaultProps} />);
     expect(screen.getByLabelText('speech-input')).toBeInTheDocument();
     expect(screen.getByText('ArrowUp')).toBeInTheDocument();
+  });
+
+  it('keeps Codex model, effort, speed and power inside the unified selector', () => {
+    acpConfigSelectorSpy.mockClear();
+    render(
+      <GuidActionRow
+        {...defaultProps}
+        cachedConfigOptions={[
+          { id: 'model', category: 'model', type: 'select', currentValue: 'gpt-5.6-sol' },
+          { id: 'reasoning_effort', category: 'thought_level', type: 'select', currentValue: 'high' },
+          { id: 'service_tier', category: 'service_tier', type: 'select', currentValue: 'normal' },
+          { id: 'power', type: 'select', currentValue: 'gpt-5.6-sol:high' },
+          { id: 'vendor_option', type: 'select', currentValue: 'on' },
+        ]}
+      />
+    );
+
+    expect(acpConfigSelectorSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        initialConfigOptions: [expect.objectContaining({ id: 'vendor_option' })],
+      })
+    );
   });
 
   // NOTE: builtin-skill count + toggle moved out of GuidActionRow's inline "+"

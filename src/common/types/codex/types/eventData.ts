@@ -57,7 +57,7 @@ export type CodexEventMsg =
 export interface SessionConfiguredData {
   session_id: string;
   model?: string;
-  reasoning_effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | null;
+  reasoning_effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra' | null;
   history_log_id?: number;
   history_entry_count?: number;
   initial_messages?: unknown[] | null;

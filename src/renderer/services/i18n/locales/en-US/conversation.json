@@ -506,6 +506,8 @@
     "pinAria": "Pin {{name}}",
     "unpinAria": "Unpin {{name}}",
     "effort": "Effort",
+    "effortMinimal": "Minimal",
+    "effortMinimalDesc": "Minimal reasoning for direct tasks",
     "effortLow": "Low",
     "effortMedium": "Medium",
     "effortHigh": "High",
@@ -521,11 +523,21 @@
     "claudeSubscriptionNotice": "Claude Code runs on your Claude subscription (Anthropic), so this chat stays on Claude models. To use a different provider like ChatGPT or Gemini, start a new chat and pick that agent.",
     "effortXhigh": "XHigh",
     "effortXhighDesc": "Maximum reasoning depth for the hardest work",
+    "effortMax": "Max",
+    "effortMaxDesc": "Maximum reasoning depth for the hardest problems",
+    "effortUltra": "Ultra",
+    "effortUltraDesc": "Maximum reasoning with proactive delegation",
     "speed": "Speed",
     "speedDefault": "Default",
     "speedDefaultDescription": "Default speed",
     "speedFast": "Fast",
-    "speedFastDescription": "1.5x speed, increased usage"
+    "speedFastDescription": "1.5x speed, increased usage",
+    "resetDefault": "Reset to default",
+    "advanced": "Advanced",
+    "powerAria": "Model and reasoning power",
+    "powerFaster": "Faster",
+    "powerSmarter": "Smarter",
+    "ultraUsageWarning": "Consumes usage limits faster"
   },
   "tool": {
     "openGoogleConsent": "Open Google sign-in"

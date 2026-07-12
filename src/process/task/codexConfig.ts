@@ -334,7 +334,7 @@ export async function materializeFluxCodexHome(
   baseURL: string = FLUX_SURFACE.responses,
   userConfigPath: string = getCodexConfigPath(),
   /** Per-conversation reasoning effort. When set, written as `model_reasoning_effort`. */
-  effort?: 'low' | 'medium' | 'high' | 'xhigh',
+  effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra',
   /** Per-conversation service tier / speed. When set, written as `service_tier`. */
   serviceTier?: CodexServiceTier | null
 ): Promise<string> {

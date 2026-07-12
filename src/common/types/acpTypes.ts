@@ -988,6 +988,7 @@ export interface AcpConfigSelectOption {
   value: string;
   name?: string;
   label?: string; // Some agents may use label instead of name
+  description?: string;
 }
 
 /** A configuration option returned by session/new */

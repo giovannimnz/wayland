@@ -118,7 +118,7 @@ interface AcpAgentManagerData {
   /** Pending config option selections from Guid page (applied after session creation) */
   pendingConfigOptions?: Record<string, string>;
   /** Per-conversation reasoning effort (codex/claude). Absent => backend default. */
-  effort?: 'low' | 'medium' | 'high' | 'xhigh';
+  effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
   /** Per-conversation Codex service tier / speed. `priority` selects the Fast tier. */
   serviceTier?: CodexServiceTier;
   /** Per-conversation active MCP server ids (#348): undefined = all enabled, [] = none. */

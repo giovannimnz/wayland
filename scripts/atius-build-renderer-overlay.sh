@@ -47,9 +47,18 @@ if [[ -z "$BUN_BIN" ]]; then
     exit 1
   fi
 fi
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
 cd "$ROOT"
 bash scripts/atius-apply-source-patch.sh
-"$BUN_BIN" install --frozen-lockfile --ignore-scripts
+if [[ "${ATIUS_SKIP_DEP_INSTALL:-0}" == "1" ]]; then
+  if [[ ! -x node_modules/.bin/vite || ! -f node_modules/@office-ai/aioncli-core/package.json ]]; then
+    echo "[atius-build] refusing to skip install: required dependencies are missing" >&2
+    exit 1
+  fi
+  echo "[atius-build] using the verified existing dependency tree"
+else
+  "$BUN_BIN" install --frozen-lockfile --ignore-scripts
+fi
 "$BUN_BIN" x vite build --config vite.renderer.config.ts
 node scripts/build-server.mjs
 python3 - <<'PY'

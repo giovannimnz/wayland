@@ -70,8 +70,8 @@ export type GuidAgentSelectionResult = {
   customAgentAvatarMap: Map<string, string | undefined>;
 };
 
-const GUID_REASONING_EFFORTS: GuidReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
-const MODEL_EFFORT_SUFFIX = /\/(low|medium|high|xhigh)$/i;
+const GUID_REASONING_EFFORTS: GuidReasoningEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+const MODEL_EFFORT_SUFFIX = /\/(minimal|low|medium|high|xhigh|max|ultra)$/i;
 
 const normalizeEffort = (value: unknown): GuidReasoningEffort | null => {
   if (typeof value !== 'string') return null;
@@ -102,9 +102,6 @@ const effortFromConfigOptions = (options: AcpSessionConfigOption[] | undefined):
   );
   return normalizeEffort(option?.currentValue || option?.selectedValue);
 };
-
-const defaultEffortForBackend = (backend: string): GuidReasoningEffort | null =>
-  backend === 'codex' || backend === 'hermes' ? 'xhigh' : null;
 
 type UseGuidAgentSelectionOptions = {
   modelList: IProvider[];
@@ -180,7 +177,16 @@ export const useGuidAgentSelection = ({
     _setSelectedAcpModel((prev) => {
       const rawModelId = typeof modelId === 'function' ? modelId(prev) : modelId;
       const { modelId: newModelId, effort } = splitModelEffort(rawModelId);
-      if (effort) _setSelectedAcpEffort(effort);
+      const previousModelId = splitModelEffort(prev).modelId;
+      if (effort) {
+        _setSelectedAcpEffort(effort);
+      } else if (newModelId !== previousModelId) {
+        _setSelectedAcpEffort(null);
+        setPendingConfigOptions((pending) => {
+          const { reasoning_effort: _reasoningEffort, power: _power, ...rest } = pending;
+          return rest;
+        });
+      }
       const agentKey = selectedAgentRef.current;
       if (agentKey && agentKey !== 'gemini' && agentKey !== 'custom' && newModelId) {
         void savePreferredModelId(agentKey, newModelId);
@@ -439,14 +445,14 @@ export const useGuidAgentSelection = ({
         // Keep reasoning_effort and service_tier here so the GUID can render them as dedicated selectors.
         const filtered = typedOptions.filter((opt) => opt.category !== 'model' && opt.category !== 'mode');
         setCachedConfigOptions(filtered);
-        _setSelectedAcpEffort(effortFromConfigOptions(typedOptions) ?? defaultEffortForBackend(backend));
+        _setSelectedAcpEffort(effortFromConfigOptions(typedOptions));
         _setSelectedAcpServiceTier(null);
         setPendingConfigOptions({});
       })
       .catch(() => {
         if (!isActive) return;
         setCachedConfigOptions([]);
-        _setSelectedAcpEffort(defaultEffortForBackend(backend));
+        _setSelectedAcpEffort(null);
         _setSelectedAcpServiceTier(null);
         setPendingConfigOptions({});
       });
@@ -525,7 +531,7 @@ export const useGuidAgentSelection = ({
       // 4. No signal (non-claude backend, or claude without a native login).
       if (!cancelled) {
         _setSelectedAcpModel(null);
-        _setSelectedAcpEffort(defaultEffortForBackend(backend));
+        _setSelectedAcpEffort(null);
         _setSelectedAcpServiceTier(null);
       }
     };

@@ -17,7 +17,7 @@ import { type TFunction } from 'i18next';
 import type { NavigateFunction } from 'react-router-dom';
 import type { AcpBackend, AvailableAgent, EffectiveAgentInfo } from '../types';
 
-type GuidReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+type GuidReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 type GuidServiceTier = 'normal' | 'priority';
 
 export type GuidSendDeps = {
@@ -465,10 +465,22 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
         console.warn(`${acpBackend} CLI not found, but proceeding to let conversation panel handle it.`);
       }
       const agentBackend = acpBackend || selectedAgent;
+      const advertisedConfigIds = new Set(cachedConfigOptions.map((option) => option.id));
+      const transportablePendingConfigOptions = Object.fromEntries(
+        Object.entries(pendingConfigOptions).filter(
+          ([configId]) =>
+            (configId !== 'reasoning_effort' && configId !== 'service_tier') ||
+            advertisedConfigIds.has(configId)
+        )
+      );
       const effectivePendingConfigOptions: Record<string, string> = {
-        ...pendingConfigOptions,
-        ...(selectedAcpEffort ? { reasoning_effort: selectedAcpEffort } : {}),
-        ...(selectedAcpServiceTier ? { service_tier: selectedAcpServiceTier } : {}),
+        ...transportablePendingConfigOptions,
+        ...(selectedAcpEffort && advertisedConfigIds.has('reasoning_effort')
+          ? { reasoning_effort: selectedAcpEffort }
+          : {}),
+        ...(selectedAcpServiceTier && advertisedConfigIds.has('service_tier')
+          ? { service_tier: selectedAcpServiceTier }
+          : {}),
       };
       const agentConversationParams = buildAgentConversationParams({
         backend: agentBackend,

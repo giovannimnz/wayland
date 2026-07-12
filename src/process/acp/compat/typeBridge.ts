@@ -161,6 +161,7 @@ export function toAcpConfigOptions(options: ConfigOption[]): AcpSessionConfigOpt
         value: subopt.id,
         name: subopt.name,
         label: subopt.name, // Duplicate for compatibility
+        description: subopt.description,
       }));
     }
 

@@ -89,6 +89,12 @@ vi.mock('@arco-design/web-react', () => {
         {children}
       </div>
     ),
+    SubMenu: ({ children, title }: React.PropsWithChildren & { title?: React.ReactNode }) => (
+      <div>
+        <div>{title}</div>
+        {children}
+      </div>
+    ),
   });
   // The picker added an Arco search Input above the model list (Packet 3B).
   const Input = ({
@@ -105,6 +111,23 @@ vi.mock('@arco-design/web-react', () => {
     Dropdown: ({ droplist }: React.PropsWithChildren & { droplist?: React.ReactNode }) => <>{droplist}</>,
     Input,
     Menu,
+    Message: { warning: vi.fn() },
+    Slider: ({
+      value,
+      onChange,
+      'aria-label': ariaLabel,
+    }: {
+      value?: number;
+      onChange?: (value: number) => void;
+      'aria-label'?: string;
+    }) => (
+      <input
+        aria-label={ariaLabel}
+        type='range'
+        value={value ?? 0}
+        onChange={(event) => onChange?.(Number(event.target.value))}
+      />
+    ),
     Tooltip: ({ children }: React.PropsWithChildren) => <>{children}</>,
   };
 });
@@ -523,12 +546,12 @@ describe('GuidModelSelector home picker', () => {
 
     // Sonnet (3/15) blended ≈ 12 → $$. Haiku (0.8/4) blended ≈ 3.2 → $.
     // Two rows match Sonnet (regular + 1M context); both should render $$.
-    await screen.findByText('Sonnet');
+    await screen.findAllByText('Sonnet');
     expect(screen.getAllByText('$$').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('$')).toBeInTheDocument();
   });
 
-  it('collapses Codex ACP model/effort variants into one model row plus a separate effort selector', async () => {
+  it('collapses Codex model, effort, speed and Power into one compact configuration menu', async () => {
     mockCuratedForAgent.mockResolvedValue([]);
     const fireEventClick = (await import('@testing-library/react')).fireEvent.click;
     const setSelectedAcpModel = vi.fn();
@@ -585,16 +608,25 @@ describe('GuidModelSelector home picker', () => {
               { value: 'priority', name: 'Fast' },
             ],
           },
+          {
+            id: 'power',
+            type: 'select',
+            currentValue: 'gpt-5.5:xhigh',
+            options: [
+              { value: 'gpt-5.4:high', name: '5.4 High' },
+              { value: 'gpt-5.5:xhigh', name: '5.5 Extra High' },
+            ],
+          },
         ]}
         onConfigOptionSelect={onConfigOptionSelect}
       />
     );
 
-    expect(await screen.findByText('GPT-5.5')).toBeInTheDocument();
-    expect(screen.getByText('GPT-5.4')).toBeInTheDocument();
+    expect(await screen.findByText('conversation.modelSelector.title')).toBeInTheDocument();
+    expect(screen.getByText('5.5')).toBeInTheDocument();
     expect(screen.queryByText('GPT-5.5 (xhigh)')).not.toBeInTheDocument();
 
-    fireEventClick(screen.getByText('GPT-5.4'));
+    fireEventClick(await screen.findByText('GPT-5.4'));
     expect(setSelectedAcpModel).toHaveBeenCalledWith('gpt-5.4');
 
     fireEventClick(screen.getByText('conversation.modelSelector.effortLow'));
@@ -605,6 +637,9 @@ describe('GuidModelSelector home picker', () => {
     fireEventClick(screen.getByText('conversation.modelSelector.speedFast'));
     expect(setSelectedAcpServiceTier).toHaveBeenCalledWith('priority');
     expect(onConfigOptionSelect).toHaveBeenCalledWith('service_tier', 'priority');
+
+    fireEventClick(screen.getByText('conversation.modelSelector.advanced'));
+    expect(screen.getByRole('slider', { name: 'conversation.modelSelector.powerAria' })).toBeInTheDocument();
   });
 
   it('does not use curated provider rows as cold-start ACP models', async () => {
@@ -651,7 +686,7 @@ describe('GuidModelSelector home picker', () => {
       />
     );
 
-    expect(await screen.findByText('gpt-5.4')).toBeInTheDocument();
+    expect(await screen.findByText('5.4')).toBeInTheDocument();
     expect(screen.queryByText('conversation.modelSelector.speedDefault')).not.toBeInTheDocument();
     expect(screen.queryByText('conversation.modelSelector.speedFast')).not.toBeInTheDocument();
   });

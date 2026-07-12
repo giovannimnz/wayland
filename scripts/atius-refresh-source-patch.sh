@@ -27,15 +27,21 @@ FILES=(
   scripts/atius-wayland-https-proxy.js
   src/common/adapter/ipcBridge.ts
   src/common/config/storage.ts
+  src/common/types/acpTypes.ts
   src/common/types/codex/codexModes.ts
   src/common/types/codex/types/eventData.ts
   src/process/agent/acp/AcpDetector.ts
+  src/process/agent/acp/acpConnectors.ts
+  src/process/agent/remote/RemoteAgentCore.ts
+  src/process/acp/compat/typeBridge.ts
+  src/process/bridge/remoteAgentBridge.ts
   src/process/extensions/data/bundle-vendored/agentProfileMerge.ts
   src/process/extensions/resolvers/ChannelPluginResolver.ts
   src/process/task/AcpAgentManager.ts
   src/process/task/WCoreManager.ts
   src/process/task/claudeConfig.ts
   src/process/task/codexConfig.ts
+  src/process/task/codexStaticModelInfo.ts
   src/process/task/hermesConfig.ts
   src/process/utils/initStorage.ts
   src/process/utils/shellEnv.ts
@@ -64,6 +70,7 @@ FILES=(
   src/renderer/pages/guid/components/newChatStarter/IntentPillBar.module.css
   src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
   src/renderer/pages/guid/hooks/useGuidSend.ts
+  src/renderer/pages/settings/AgentSettings/RemoteAgentManagement.tsx
   src/renderer/services/i18n/i18n-keys.d.ts
   src/renderer/services/i18n/index.ts
   src/renderer/utils/model/agentModes.ts
@@ -86,6 +93,8 @@ FILES=(
   src/renderer/services/i18n/locales/ja-JP/conversation.json
   src/renderer/services/i18n/locales/ko-KR/conversation.json
   src/renderer/services/i18n/locales/pt-BR/conversation.json
+  src/renderer/services/i18n/locales/en-US/settings.json
+  src/renderer/services/i18n/locales/pt-BR/settings.json
   src/renderer/services/i18n/locales/ru-RU/conversation.json
   src/renderer/services/i18n/locales/tr-TR/conversation.json
   src/renderer/services/i18n/locales/uk-UA/conversation.json
@@ -94,6 +103,9 @@ FILES=(
   src/renderer/styles/layout.css
   tests/unit/WebSocketManager.test.ts
   tests/unit/AgentPillBar.dom.test.tsx
+  tests/unit/RemoteAgentCore.test.ts
+  tests/unit/RemoteAgentManagement.dom.test.tsx
+  tests/unit/remoteAgentBridge.test.ts
   tests/unit/process/task/codexConfigEffort.test.ts
   tests/unit/process/task/codexNativeSandbox.test.ts
   tests/unit/renderer/AcpConfigSelector.dom.test.tsx

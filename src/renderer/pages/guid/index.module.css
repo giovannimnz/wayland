@@ -807,3 +807,158 @@
   width: 100%;
   margin-top: 16px;
 }
+
+/* Codex-style unified model, reasoning and speed menu. The dropdown is
+   portalled by Arco, so these selectors must remain global. */
+:global(.guid-intelligence-menu) {
+  width: min(312px, calc(100vw - 24px));
+  padding: 6px;
+  overflow: visible;
+  color: var(--color-text-1);
+  background: var(--bg-3);
+  border: 1px solid var(--color-border-2);
+  border-radius: 10px;
+  box-shadow: 0 14px 36px rgb(0 0 0 / 28%);
+  letter-spacing: 0;
+}
+
+:global(.guid-intelligence-menu-list) {
+  width: 100%;
+  min-width: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+:global(.guid-intelligence-menu-list .arco-menu-item),
+:global(.guid-intelligence-menu-list .arco-menu-inline-header) {
+  min-height: 38px;
+  margin: 1px 0 !important;
+  border-radius: 7px;
+}
+
+:global(.guid-intelligence-row) {
+  display: grid;
+  grid-template-columns: minmax(72px, auto) minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+:global(.guid-intelligence-row-label) {
+  color: var(--color-text-1);
+  font-size: 14px;
+}
+
+:global(.guid-intelligence-row-value) {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-3);
+  font-size: 13px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:global(.guid-intelligence-row-chevron) {
+  color: var(--color-text-3);
+}
+
+:global(.guid-intelligence-option),
+:global(.guid-intelligence-reset) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+}
+
+:global(.guid-intelligence-reset) {
+  color: var(--color-text-3);
+}
+
+:global(.guid-intelligence-advanced) {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--color-border-2);
+}
+
+:global(.guid-intelligence-advanced-toggle) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 38px;
+  padding: 0 12px;
+  color: var(--color-text-3);
+  font: inherit;
+  font-size: 14px;
+  letter-spacing: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+:global(.guid-intelligence-advanced-toggle:hover),
+:global(.guid-intelligence-advanced-toggle:focus-visible) {
+  color: var(--color-text-1);
+  background: var(--color-fill-2);
+  outline: none;
+}
+
+:global(.guid-intelligence-power) {
+  padding: 7px 12px 10px;
+}
+
+:global(.guid-intelligence-power-summary) {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 20px;
+  margin-bottom: 3px;
+  color: var(--color-text-2);
+  font-size: 12px;
+}
+
+:global(.guid-intelligence-ultra-warning) {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: rgb(var(--warning-6));
+}
+
+:global(.guid-intelligence-power .arco-slider) {
+  margin: 8px 3px 2px;
+}
+
+:global(.guid-intelligence-power .arco-slider-track) {
+  height: 6px;
+}
+
+:global(.guid-intelligence-power .arco-slider-button) {
+  width: 18px;
+  height: 18px;
+  border-width: 2px;
+}
+
+:global(.guid-intelligence-power-ends) {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 1px;
+  color: var(--color-text-4);
+  font-size: 11px;
+}
+
+@media (max-width: 520px) {
+  :global(.guid-intelligence-menu) {
+    width: min(292px, calc(100vw - 16px));
+  }
+
+  :global(.guid-intelligence-row) {
+    grid-template-columns: minmax(68px, auto) minmax(0, 1fr) 16px;
+    gap: 8px;
+  }
+}

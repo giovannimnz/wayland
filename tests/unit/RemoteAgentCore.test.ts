@@ -407,6 +407,19 @@ describe('RemoteAgentCore', () => {
 
       expect(config.onSignalEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'acp_permission' }));
     });
+
+    it('routes the current exec.approval.requested event to handleApprovalRequest', () => {
+      const { core, config } = createConnectedCore();
+      core['connection'] = mockConnection as never;
+
+      core['handleEvent']({
+        type: 'event',
+        event: 'exec.approval.requested',
+        payload: { requestId: 'req-2' },
+      });
+
+      expect(config.onSignalEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'acp_permission' }));
+    });
   });
 
   describe('inferToolKind', () => {
@@ -538,6 +551,23 @@ describe('RemoteAgentCore', () => {
 
       expect(mockConnection.sessionsReset).toHaveBeenCalledWith({ key: 'conv-1', reason: 'new' });
       expect(mockConnection.sessionKey).toBe('reset-key');
+    });
+
+    it('uses the canonical agent-scoped ACP session key for a Codex ACP remote', async () => {
+      const base = makeConfig();
+      const cfg = makeConfig({
+        remoteConfig: { ...base.remoteConfig, protocol: 'acp' },
+      });
+      const core = new RemoteAgentCore(cfg);
+      core['connection'] = mockConnection as never;
+      mockConnection.isConnected = true;
+
+      await core['resolveSession']();
+
+      expect(mockConnection.sessionsReset).toHaveBeenCalledWith({
+        key: 'agent:codex:acp:conv-1',
+        reason: 'new',
+      });
     });
 
     it('calls onSessionKeyUpdate when session key changes', async () => {

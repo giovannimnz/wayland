@@ -38,7 +38,7 @@ export async function materializeFluxHermesHome(
   userDataDir: string,
   fluxKey: string,
   baseURL: string = FLUX_SURFACE.openai,
-  effort?: 'low' | 'medium' | 'high' | 'xhigh'
+  effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
 ): Promise<string> {
   const hermesHomeDir = join(userDataDir, 'flux-hermes-home');
   const configPath = join(hermesHomeDir, 'config.yaml');

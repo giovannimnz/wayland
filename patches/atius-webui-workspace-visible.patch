@@ -335,10 +335,10 @@ index 000000000..9bd37b712
 +exit 1
 diff --git a/scripts/atius-build-renderer-overlay.sh b/scripts/atius-build-renderer-overlay.sh
 new file mode 100755
-index 000000000..f816af9da
+index 000000000..4935ed9bc
 --- /dev/null
 +++ b/scripts/atius-build-renderer-overlay.sh
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,81 @@
 +#!/usr/bin/env bash
 +set -euo pipefail
 +ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -388,9 +388,18 @@ index 000000000..f816af9da
 +    exit 1
 +  fi
 +fi
++export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
 +cd "$ROOT"
 +bash scripts/atius-apply-source-patch.sh
-+"$BUN_BIN" install --frozen-lockfile --ignore-scripts
++if [[ "${ATIUS_SKIP_DEP_INSTALL:-0}" == "1" ]]; then
++  if [[ ! -x node_modules/.bin/vite || ! -f node_modules/@office-ai/aioncli-core/package.json ]]; then
++    echo "[atius-build] refusing to skip install: required dependencies are missing" >&2
++    exit 1
++  fi
++  echo "[atius-build] using the verified existing dependency tree"
++else
++  "$BUN_BIN" install --frozen-lockfile --ignore-scripts
++fi
 +"$BUN_BIN" x vite build --config vite.renderer.config.ts
 +node scripts/build-server.mjs
 +python3 - <<'PY'
@@ -413,10 +422,10 @@ index 000000000..f816af9da
 +PY
 diff --git a/scripts/atius-postinstall-hook.sh b/scripts/atius-postinstall-hook.sh
 new file mode 100755
-index 000000000..c931dffc2
+index 000000000..1876c23ac
 --- /dev/null
 +++ b/scripts/atius-postinstall-hook.sh
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,102 @@
 +#!/usr/bin/env bash
 +set -euo pipefail
 +ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -432,8 +441,8 @@ index 000000000..c931dffc2
 +CODEX_ACP_BIN="${UBUNTU_HOME}/.local/bin/codex-acp-atius"
 +WAYLAND_HTTP_PORT=25725
 +WAYLAND_HTTPS_PORT=25750
-+WAYLAND_TLS_CERT="/etc/wayland/tls/wayland-10.100.100.3.crt"
-+WAYLAND_TLS_KEY="/etc/wayland/tls/wayland-10.100.100.3.key"
++WAYLAND_TLS_CERT="/etc/wayland/tls/wayland-10.13.1.13.crt"
++WAYLAND_TLS_KEY="/etc/wayland/tls/wayland-10.13.1.13.key"
 +sudo install -d -m 0750 -o ubuntu -g ubuntu "${UBUNTU_HOME}/.config"
 +sudo install -d -m 0750 -o ubuntu -g ubuntu "${UBUNTU_DATA_DIR}"
 +sudo install -d -m 0750 -o ubuntu -g ubuntu "${UBUNTU_DATA_DIR}/config"
@@ -443,13 +452,7 @@ index 000000000..c931dffc2
 +  sudo chown -R ubuntu:ubuntu "${UBUNTU_DATA_DIR}"
 +fi
 +sudo install -d -m 0750 -o ubuntu -g ubuntu "${UBUNTU_HOME}/.local/bin"
-+sudo tee "${CODEX_ACP_BIN}" >/dev/null <<'SCRIPT'
-+#!/usr/bin/env bash
-+set -euo pipefail
-+exec /home/ubuntu/.cargo/bin/cargo run --quiet --manifest-path /home/ubuntu/GitHub/codex-acp/Cargo.toml -- "$@"
-+SCRIPT
-+sudo chown ubuntu:ubuntu "${CODEX_ACP_BIN}"
-+sudo chmod 0755 "${CODEX_ACP_BIN}"
++sudo install -m 0755 -o ubuntu -g ubuntu "${CODEX_ACP_ROOT}/scripts/codex-acp-atius-wrapper.sh" "${CODEX_ACP_BIN}"
 +sudo mkdir -p /etc/systemd/system/wayland.service.d
 +sudo tee /etc/systemd/system/wayland.service.d/atius-overlay.conf >/dev/null <<CONF
 +[Service]
@@ -465,25 +468,26 @@ index 000000000..c931dffc2
 +Environment=LOGS_DIR=${UBUNTU_LOGS_DIR}
 +Environment=CODEX_HOME=${UBUNTU_CODEX_HOME}
 +Environment=HERMES_HOME=${UBUNTU_HERMES_HOME}
++Environment=WAYLAND_LOCAL_AGENT_BACKENDS=codex,hermes
 +Environment=WAYLAND_CODEX_ACP_CLI=${CODEX_ACP_BIN}
 +Environment=NODE_ENV=production
 +Environment=ALLOW_REMOTE=true
 +Environment=PORT=${WAYLAND_HTTP_PORT}
 +Environment=SERVER_BASE_URL=https://wayland.atius.com.br
-+Environment=WAYLAND_ALLOWED_ORIGINS=https://wayland.atius.com.br,http://10.100.100.3:${WAYLAND_HTTP_PORT},http://10.1.1.3:${WAYLAND_HTTP_PORT},http://10.1.1.7:${WAYLAND_HTTP_PORT},https://10.100.100.3:${WAYLAND_HTTPS_PORT},https://10.1.1.3:${WAYLAND_HTTPS_PORT},https://10.1.1.7:${WAYLAND_HTTPS_PORT}
-+Environment=WAYLAND_OPERATOR_CIDRS=10.1.1.1/32
++Environment=WAYLAND_ALLOWED_ORIGINS=https://wayland.atius.com.br,http://10.13.1.13:${WAYLAND_HTTP_PORT},https://10.13.1.13:${WAYLAND_HTTPS_PORT}
++Environment=WAYLAND_OPERATOR_CIDRS=10.11.1.11/32
 +Environment=WAYLAND_DISABLE_AUTO_UPDATE=1
 +Environment=PATH=/opt/Wayland/resources/bundled-bun/linux-arm64:${UBUNTU_HOME}/.local/bin:${UBUNTU_HOME}/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/snap/bin
 +ExecStart=${BUN_BIN} ${ROOT}/dist-server/server.mjs
 +TimeoutStartSec=180
 +CONF
 +sudo install -d -m 0750 -o root -g ubuntu /etc/wayland/tls
-+if [[ ! -f "$WAYLAND_TLS_CERT" ]] || ! sudo openssl x509 -in "$WAYLAND_TLS_CERT" -noout -ext subjectAltName 2>/dev/null | grep -q 'IP Address:10.100.100.3'; then
++if [[ ! -f "$WAYLAND_TLS_CERT" ]] || ! sudo openssl x509 -in "$WAYLAND_TLS_CERT" -noout -ext subjectAltName 2>/dev/null | grep -q 'IP Address:10.13.1.13'; then
 +  sudo openssl req -x509 -newkey rsa:2048 -sha256 -days 825 -nodes \
 +    -keyout "$WAYLAND_TLS_KEY" \
 +    -out "$WAYLAND_TLS_CERT" \
-+    -subj '/CN=10.100.100.3' \
-+    -addext 'subjectAltName=IP:10.100.100.3,DNS:atius-srv-3.atius.internal,DNS:wayland.atius.com.br' \
++    -subj '/CN=10.13.1.13' \
++    -addext 'subjectAltName=IP:10.13.1.13,DNS:atius-srv-3.atius.internal,DNS:wayland.atius.com.br' \
 +    -addext 'basicConstraints=critical,CA:false' \
 +    -addext 'keyUsage=critical,digitalSignature,keyEncipherment' \
 +    -addext 'extendedKeyUsage=serverAuth'
@@ -494,7 +498,7 @@ index 000000000..c931dffc2
 +sudo install -m 0755 -o root -g root "$ROOT/scripts/atius-wayland-https-proxy.js" /usr/local/lib/wayland-https-proxy.js
 +sudo tee /etc/systemd/system/wayland-https-proxy.service >/dev/null <<CONF
 +[Unit]
-+Description=Wayland HTTPS reverse proxy for VPN access
++Description=Wayland HTTPS reverse proxy for OCI/DRG access
 +After=network-online.target wayland.service
 +Wants=network-online.target
 +Requires=wayland.service
@@ -504,7 +508,7 @@ index 000000000..c931dffc2
 +User=ubuntu
 +Group=ubuntu
 +Environment=NODE_ENV=production
-+Environment=WAYLAND_HTTPS_HOST=0.0.0.0
++Environment=WAYLAND_HTTPS_HOST=10.13.1.13
 +Environment=WAYLAND_HTTPS_PORT=${WAYLAND_HTTPS_PORT}
 +Environment=WAYLAND_HTTP_HOST=127.0.0.1
 +Environment=WAYLAND_HTTP_PORT=${WAYLAND_HTTP_PORT}
@@ -537,10 +541,10 @@ index 000000000..171b72c4f
 +bash "$ROOT/scripts/atius-build-renderer-overlay.sh"
 diff --git a/scripts/atius-refresh-source-patch.sh b/scripts/atius-refresh-source-patch.sh
 new file mode 100755
-index 000000000..a8a25097f
+index 000000000..6c7b839a2
 --- /dev/null
 +++ b/scripts/atius-refresh-source-patch.sh
-@@ -0,0 +1,173 @@
+@@ -0,0 +1,185 @@
 +#!/usr/bin/env bash
 +set -euo pipefail
 +ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -570,15 +574,21 @@ index 000000000..a8a25097f
 +  scripts/atius-wayland-https-proxy.js
 +  src/common/adapter/ipcBridge.ts
 +  src/common/config/storage.ts
++  src/common/types/acpTypes.ts
 +  src/common/types/codex/codexModes.ts
 +  src/common/types/codex/types/eventData.ts
 +  src/process/agent/acp/AcpDetector.ts
++  src/process/agent/acp/acpConnectors.ts
++  src/process/agent/remote/RemoteAgentCore.ts
++  src/process/acp/compat/typeBridge.ts
++  src/process/bridge/remoteAgentBridge.ts
 +  src/process/extensions/data/bundle-vendored/agentProfileMerge.ts
 +  src/process/extensions/resolvers/ChannelPluginResolver.ts
 +  src/process/task/AcpAgentManager.ts
 +  src/process/task/WCoreManager.ts
 +  src/process/task/claudeConfig.ts
 +  src/process/task/codexConfig.ts
++  src/process/task/codexStaticModelInfo.ts
 +  src/process/task/hermesConfig.ts
 +  src/process/utils/initStorage.ts
 +  src/process/utils/shellEnv.ts
@@ -607,6 +617,7 @@ index 000000000..a8a25097f
 +  src/renderer/pages/guid/components/newChatStarter/IntentPillBar.module.css
 +  src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
 +  src/renderer/pages/guid/hooks/useGuidSend.ts
++  src/renderer/pages/settings/AgentSettings/RemoteAgentManagement.tsx
 +  src/renderer/services/i18n/i18n-keys.d.ts
 +  src/renderer/services/i18n/index.ts
 +  src/renderer/utils/model/agentModes.ts
@@ -629,6 +640,8 @@ index 000000000..a8a25097f
 +  src/renderer/services/i18n/locales/ja-JP/conversation.json
 +  src/renderer/services/i18n/locales/ko-KR/conversation.json
 +  src/renderer/services/i18n/locales/pt-BR/conversation.json
++  src/renderer/services/i18n/locales/en-US/settings.json
++  src/renderer/services/i18n/locales/pt-BR/settings.json
 +  src/renderer/services/i18n/locales/ru-RU/conversation.json
 +  src/renderer/services/i18n/locales/tr-TR/conversation.json
 +  src/renderer/services/i18n/locales/uk-UA/conversation.json
@@ -637,6 +650,9 @@ index 000000000..a8a25097f
 +  src/renderer/styles/layout.css
 +  tests/unit/WebSocketManager.test.ts
 +  tests/unit/AgentPillBar.dom.test.tsx
++  tests/unit/RemoteAgentCore.test.ts
++  tests/unit/RemoteAgentManagement.dom.test.tsx
++  tests/unit/remoteAgentBridge.test.ts
 +  tests/unit/process/task/codexConfigEffort.test.ts
 +  tests/unit/process/task/codexNativeSandbox.test.ts
 +  tests/unit/renderer/AcpConfigSelector.dom.test.tsx
@@ -715,11 +731,11 @@ index 000000000..a8a25097f
 +  fi
 +fi
 diff --git a/scripts/atius-sync-ubuntu-runtime.mjs b/scripts/atius-sync-ubuntu-runtime.mjs
-new file mode 100644
-index 000000000..ab05d690a
+new file mode 100755
+index 000000000..64a5d3ccd
 --- /dev/null
 +++ b/scripts/atius-sync-ubuntu-runtime.mjs
-@@ -0,0 +1,306 @@
+@@ -0,0 +1,445 @@
 +#!/usr/bin/env node
 +import { execFileSync } from 'node:child_process';
 +import { existsSync, lstatSync, mkdirSync, readlinkSync, readdirSync, symlinkSync, unlinkSync, readFileSync, writeFileSync } from 'node:fs';
@@ -762,6 +778,136 @@ index 000000000..ab05d690a
 +  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 +  const match = content.match(new RegExp(`^${escaped}\\s*=\\s*"([^"]*)"`, 'm'));
 +  return match ? match[1].trim() : null;
++}
++
++function titleCase(value) {
++  return String(value || '')
++    .replace(/[_-]+/g, ' ')
++    .replace(/\b\w/g, (letter) => letter.toUpperCase());
++}
++
++function readCodexCatalog() {
++  const codexBin = process.env.CODEX_BIN?.trim() || path.join(ubuntuHome, '.local', 'bin', 'codex');
++  for (const extraArgs of [[], ['--bundled']]) {
++    try {
++      const output = execFileSync(codexBin, ['debug', 'models', ...extraArgs], {
++        encoding: 'utf8',
++        env: { ...process.env, CODEX_HOME: baseCodexHome },
++        maxBuffer: 64 * 1024 * 1024,
++        timeout: 15_000,
++      });
++      const parsed = JSON.parse(output);
++      const models = Array.isArray(parsed?.models) ? parsed.models : [];
++      const visible = models.filter(
++        (model) => model?.slug && model?.visibility === 'list' && model?.supported_in_api !== false
++      );
++      if (visible.length > 0) return visible;
++    } catch {
++      // Account-aware discovery can be unavailable during boot. The bundled
++      // catalog is the deterministic fallback and uses the same schema.
++    }
++  }
++  return [];
++}
++
++function buildCodexConfigOptions() {
++  const models = readCodexCatalog();
++  if (models.length === 0) return [];
++
++  const configToml = safeRead(path.join(baseCodexHome, 'config.toml')) || '';
++  const requestedModel = parseTomlHeader(configToml, 'model');
++  const currentModel = models.find((model) => model.slug === requestedModel) || models[0];
++  const supportedEfforts = Array.isArray(currentModel.supported_reasoning_levels)
++    ? currentModel.supported_reasoning_levels
++    : [];
++  const requestedEffort = parseTomlHeader(configToml, 'model_reasoning_effort');
++  const currentEffort = supportedEfforts.some((entry) => entry?.effort === requestedEffort)
++    ? requestedEffort
++    : currentModel.default_reasoning_level || supportedEfforts[0]?.effort;
++  const requestedTier = parseTomlHeader(configToml, 'service_tier');
++  const currentTier = ['fast', 'priority'].includes(requestedTier) ? 'priority' : 'normal';
++
++  const selectOption = (value, name, description) => ({ value, name, label: name, description });
++  const configOption = (id, name, currentValue, options, category, description) => ({
++    id,
++    name,
++    label: name,
++    type: 'select',
++    ...(category ? { category } : {}),
++    description,
++    currentValue,
++    selectedValue: currentValue,
++    options,
++  });
++
++  const options = [
++    configOption(
++      'model',
++      'Model',
++      currentModel.slug,
++      models.map((model) => selectOption(model.slug, model.display_name || model.slug, model.description)),
++      'model',
++      'Choose which model Codex should use'
++    ),
++  ];
++
++  if (currentEffort && supportedEfforts.length > 1) {
++    options.push(
++      configOption(
++        'reasoning_effort',
++        'Reasoning Effort',
++        currentEffort,
++        supportedEfforts.map((entry) =>
++          selectOption(entry.effort, titleCase(entry.effort), entry.description)
++        ),
++        'thought_level',
++        'Choose how much reasoning effort the model should use'
++      )
++    );
++  }
++
++  const serviceTiers = [selectOption('normal', 'Default', 'Use standard routing and usage')];
++  for (const tier of Array.isArray(currentModel.service_tiers) ? currentModel.service_tiers : []) {
++    if (!serviceTiers.some((entry) => entry.value === tier?.id)) {
++      serviceTiers.push(selectOption(tier.id, tier.name || titleCase(tier.id), tier.description));
++    }
++  }
++  options.push(
++    configOption(
++      'service_tier',
++      'Speed',
++      currentTier,
++      serviceTiers,
++      'service_tier',
++      'Choose standard or accelerated model routing'
++    )
++  );
++
++  if (currentEffort) {
++    const powerOptions = models.flatMap((model) =>
++      (Array.isArray(model.supported_reasoning_levels) ? model.supported_reasoning_levels : []).map((entry) =>
++        selectOption(
++          `${model.slug}:${entry.effort}`,
++          `${model.display_name || model.slug} ${titleCase(entry.effort)}`,
++          entry.description
++        )
++      )
++    );
++    if (powerOptions.length > 0) {
++      options.push(
++        configOption(
++          'power',
++          'Power',
++          `${currentModel.slug}:${currentEffort}`,
++          powerOptions,
++          undefined,
++          'Choose a model and reasoning effort together'
++        )
++      );
++    }
++  }
++
++  return options;
 +}
 +
 +function slugify(value) {
@@ -980,7 +1126,15 @@ index 000000000..ab05d690a
 +  };
 +
 +  merged['acp.cachedModels'] = undefined;
-+  merged['acp.cachedConfigOptions'] = undefined;
++  const cachedConfigOptions =
++    typeof merged['acp.cachedConfigOptions'] === 'object' && merged['acp.cachedConfigOptions']
++      ? merged['acp.cachedConfigOptions']
++      : {};
++  const codexConfigOptions = buildCodexConfigOptions();
++  merged['acp.cachedConfigOptions'] = {
++    ...cachedConfigOptions,
++    ...(codexConfigOptions.length > 0 ? { codex: codexConfigOptions } : {}),
++  };
 +  merged['acp.cachedInitializeResult'] = undefined;
 +  merged['acp.cachedModes'] = undefined;
 +
@@ -1021,6 +1175,7 @@ index 000000000..ab05d690a
 +        String(command.id || '').startsWith(generatedSlashCommandPrefix)
 +      ).length,
 +      codexSkillSync: merged['atius.codexSkillSync'],
++      codexConfigOptions: merged['acp.cachedConfigOptions']?.codex?.map((option) => option.id) || [],
 +    })
 +  );
 +}
@@ -1244,7 +1399,7 @@ index d9ba0071b..6fd211ce2 100755
      print_summary
  }
 diff --git a/src/common/adapter/ipcBridge.ts b/src/common/adapter/ipcBridge.ts
-index 4f4c0a070..7ce41c21d 100644
+index 4f4c0a070..88baa7ff0 100644
 --- a/src/common/adapter/ipcBridge.ts
 +++ b/src/common/adapter/ipcBridge.ts
 @@ -87,13 +87,6 @@ export type SkillStats = {
@@ -1280,7 +1435,7 @@ index 4f4c0a070..7ce41c21d 100644
       * each backend's config builder on the next turn. Absent => backend default.
       */
 -    effort?: 'low' | 'medium' | 'high';
-+    effort?: 'low' | 'medium' | 'high' | 'xhigh';
++    effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 +    /**
 +     * Per-conversation Codex service tier / speed.
 +     * `priority` maps to the Fast tier; absent preserves the backend default.
@@ -1290,7 +1445,7 @@ index 4f4c0a070..7ce41c21d 100644
      teamId?: string;
      /** Project ownership - stamps extra.projectId so the conversation lives under a project umbrella. */
 diff --git a/src/common/config/storage.ts b/src/common/config/storage.ts
-index 3d59005c5..0b1562f4a 100644
+index 3d59005c5..bb6383e2b 100644
 --- a/src/common/config/storage.ts
 +++ b/src/common/config/storage.ts
 @@ -531,7 +531,9 @@ export type TChatConversation =
@@ -1298,7 +1453,7 @@ index 3d59005c5..0b1562f4a 100644
            projectId?: string;
            /** Per-conversation reasoning effort (Claude-ACP `effortLevel`). Absent => backend default. */
 -          effort?: 'low' | 'medium' | 'high';
-+          effort?: 'low' | 'medium' | 'high' | 'xhigh';
++          effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 +          /** Per-conversation service tier / speed. `normal` = default, `priority` = faster Codex tier. */
 +          serviceTier?: 'normal' | 'priority';
          }
@@ -1309,7 +1464,7 @@ index 3d59005c5..0b1562f4a 100644
            projectId?: string;
            /** Per-conversation reasoning effort (Codex `model_reasoning_effort`). Absent => backend default. */
 -          effort?: 'low' | 'medium' | 'high';
-+          effort?: 'low' | 'medium' | 'high' | 'xhigh';
++          effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 +          /** Per-conversation Codex service tier / speed. `normal` = default, `priority` = faster tier. */
 +          serviceTier?: 'normal' | 'priority';
          }
@@ -1320,10 +1475,22 @@ index 3d59005c5..0b1562f4a 100644
          projectId?: string;
          /** Per-conversation reasoning effort (WCore `set_config.effort`). Absent => backend default. */
 -        effort?: 'low' | 'medium' | 'high';
-+        effort?: 'low' | 'medium' | 'high' | 'xhigh';
++        effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
        }
      >;
 
+diff --git a/src/common/types/acpTypes.ts b/src/common/types/acpTypes.ts
+index 03af7cea6..5b67447a4 100644
+--- a/src/common/types/acpTypes.ts
++++ b/src/common/types/acpTypes.ts
+@@ -988,6 +988,7 @@ export interface AcpConfigSelectOption {
+   value: string;
+   name?: string;
+   label?: string; // Some agents may use label instead of name
++  description?: string;
+ }
+
+ /** A configuration option returned by session/new */
 diff --git a/src/common/types/codex/codexModes.ts b/src/common/types/codex/codexModes.ts
 index 710274e3f..ea02a164e 100644
 --- a/src/common/types/codex/codexModes.ts
@@ -1345,7 +1512,7 @@ index 710274e3f..ea02a164e 100644
 +  return mode === CODEX_MODE_CONFIG_TOML;
 +}
 diff --git a/src/common/types/codex/types/eventData.ts b/src/common/types/codex/types/eventData.ts
-index d953cf047..27bf6b9ae 100644
+index d953cf047..fc5610b0b 100644
 --- a/src/common/types/codex/types/eventData.ts
 +++ b/src/common/types/codex/types/eventData.ts
 @@ -57,7 +57,7 @@ export type CodexEventMsg =
@@ -1353,10 +1520,22 @@ index d953cf047..27bf6b9ae 100644
    session_id: string;
    model?: string;
 -  reasoning_effort?: 'minimal' | 'low' | 'medium' | 'high' | null;
-+  reasoning_effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | null;
++  reasoning_effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra' | null;
    history_log_id?: number;
    history_entry_count?: number;
    initial_messages?: unknown[] | null;
+diff --git a/src/process/acp/compat/typeBridge.ts b/src/process/acp/compat/typeBridge.ts
+index ef8788b60..af6e1fdee 100644
+--- a/src/process/acp/compat/typeBridge.ts
++++ b/src/process/acp/compat/typeBridge.ts
+@@ -161,6 +161,7 @@ export function toAcpConfigOptions(options: ConfigOption[]): AcpSessionConfigOpt
+         value: subopt.id,
+         name: subopt.name,
+         label: subopt.name, // Duplicate for compatibility
++        description: subopt.description,
+       }));
+     }
+
 diff --git a/src/process/agent/acp/AcpDetector.ts b/src/process/agent/acp/AcpDetector.ts
 index f858dd758..93ed95a18 100644
 --- a/src/process/agent/acp/AcpDetector.ts
@@ -1416,6 +1595,83 @@ index f858dd758..93ed95a18 100644
      }
      return found;
    }
+diff --git a/src/process/agent/acp/acpConnectors.ts b/src/process/agent/acp/acpConnectors.ts
+index d026c67c1..2f10adb6a 100644
+--- a/src/process/agent/acp/acpConnectors.ts
++++ b/src/process/agent/acp/acpConnectors.ts
+@@ -127,6 +127,11 @@ function shouldPreferDirectCodexAcpPackage(): boolean {
+   return process.platform === 'win32' || process.platform === 'linux';
+ }
+
++function resolveWaylandCodexAcpCliOverride(): string | null {
++  const override = process.env.WAYLAND_CODEX_ACP_CLI?.trim();
++  return override && override.length > 0 ? override : null;
++}
++
+ function extractCodexPlatformPackageFromError(errorMessage: string): string | null {
+   const packageMatch = errorMessage.match(/Cannot find package '(@zed-industries\/codex-acp-[^']+)'/i);
+   if (packageMatch) {
+@@ -791,6 +796,13 @@ export function connectCodex(
+   customEnv?: Record<string, string>
+ ): Promise<void> {
+   return (async () => {
++    const cliOverride = resolveWaylandCodexAcpCliOverride();
++    if (cliOverride) {
++      mainWarn('[ACP codex]', `Using explicit Codex ACP CLI override: ${cliOverride}`);
++      await hooks.setup(await spawnGenericBackend('codex', cliOverride, workingDir, [], customEnv));
++      return;
++    }
++
+     const codexPlatformPackage = resolvePreferredCodexAcpPlatformPackage();
+     // Resolve the latest published codex-acp at spawn time (fallback to the
+     // pinned CODEX_ACP_NPX_PACKAGE offline).
+diff --git a/src/process/agent/remote/RemoteAgentCore.ts b/src/process/agent/remote/RemoteAgentCore.ts
+index e717e969e..8fe692f22 100644
+--- a/src/process/agent/remote/RemoteAgentCore.ts
++++ b/src/process/agent/remote/RemoteAgentCore.ts
+@@ -205,7 +205,8 @@ export class RemoteAgentCore {
+       }
+     }
+
+-    const defaultKey = this.id;
++    const defaultKey =
++      this.remoteConfig.protocol === 'acp' ? `agent:codex:acp:${this.id}` : this.id;
+     try {
+       const resetResult = await this.connection.sessionsReset({ key: defaultKey, reason: 'new' });
+       this.connection.sessionKey = resetResult.key;
+@@ -240,6 +241,7 @@ export class RemoteAgentCore {
+         this.handleAgentEvent(evt.payload);
+         break;
+       case 'exec.approval.request':
++      case 'exec.approval.requested':
+         this.handleApprovalRequest(evt.payload);
+         break;
+       case 'shutdown':
+diff --git a/src/process/bridge/remoteAgentBridge.ts b/src/process/bridge/remoteAgentBridge.ts
+index ec0560010..2cbf16781 100644
+--- a/src/process/bridge/remoteAgentBridge.ts
++++ b/src/process/bridge/remoteAgentBridge.ts
+@@ -50,9 +50,9 @@ export function initRemoteAgentBridge(): void {
+     const db = await getDatabase();
+     const now = Date.now();
+
+-    // Generate independent device identity for OpenClaw protocol agents
++    // Remote ACP uses the OpenClaw Gateway transport and the same device pairing contract.
+     const device =
+-      input.protocol === 'openclaw'
++      input.protocol === 'openclaw' || input.protocol === 'acp'
+         ? generateIdentity()
+         : { deviceId: undefined, publicKeyPem: undefined, privateKeyPem: undefined };
+
+@@ -166,7 +166,7 @@ export function initRemoteAgentBridge(): void {
+       return { status: 'error' as const, error: 'Remote agent not found' };
+     }
+
+-    if (agent.protocol !== 'openclaw') {
++    if (agent.protocol !== 'openclaw' && agent.protocol !== 'acp') {
+       return { status: 'ok' as const };
+     }
+
 diff --git a/src/process/extensions/data/bundle-vendored/agentProfileMerge.ts b/src/process/extensions/data/bundle-vendored/agentProfileMerge.ts
 index d0741ae26..c1d294f2c 100644
 --- a/src/process/extensions/data/bundle-vendored/agentProfileMerge.ts
@@ -1489,7 +1745,7 @@ index d6e86a67a..3c2e6674a 100644
 
          let PluginClass = mod.default || mod.Plugin;
 diff --git a/src/process/task/AcpAgentManager.ts b/src/process/task/AcpAgentManager.ts
-index 09d5fa5d3..716120f7e 100644
+index 09d5fa5d3..ca063cf05 100644
 --- a/src/process/task/AcpAgentManager.ts
 +++ b/src/process/task/AcpAgentManager.ts
 @@ -4,7 +4,7 @@ import { channelEventBus } from '@process/channels/agent/ChannelEventBus';
@@ -1529,7 +1785,7 @@ index 09d5fa5d3..716120f7e 100644
    pendingConfigOptions?: Record<string, string>;
    /** Per-conversation reasoning effort (codex/claude). Absent => backend default. */
 -  effort?: 'low' | 'medium' | 'high';
-+  effort?: 'low' | 'medium' | 'high' | 'xhigh';
++  effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 +  /** Per-conversation Codex service tier / speed. `priority` selects the Fast tier. */
 +  serviceTier?: CodexServiceTier;
    /** Per-conversation active MCP server ids (#348): undefined = all enabled, [] = none. */
@@ -1822,7 +2078,7 @@ index 09d5fa5d3..716120f7e 100644
 
        if (this.isYoloMode(prev) && !this.isYoloMode(mode)) {
 diff --git a/src/process/task/WCoreManager.ts b/src/process/task/WCoreManager.ts
-index 61a9c7519..906636627 100644
+index 61a9c7519..537ebca51 100644
 --- a/src/process/task/WCoreManager.ts
 +++ b/src/process/task/WCoreManager.ts
 @@ -119,7 +119,7 @@ type WCoreManagerData = {
@@ -1830,7 +2086,7 @@ index 61a9c7519..906636627 100644
    resume?: string;
    /** Per-conversation reasoning effort (sent to the engine via set_config). Absent => engine default. */
 -  effort?: 'low' | 'medium' | 'high';
-+  effort?: 'low' | 'medium' | 'high' | 'xhigh';
++  effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
    /**
     * Per-conversation MCP scoping (#348): the user-server ids active for this
     * chat. `undefined` => all enabled servers; `[]` => no user servers. Forwarded
@@ -1871,7 +2127,7 @@ index 61a9c7519..906636627 100644
              options: [
                { label: 'messages.confirmation.yesAllowOnce', value: ToolConfirmationOutcome.ProceedOnce },
 diff --git a/src/process/task/claudeConfig.ts b/src/process/task/claudeConfig.ts
-index 17ce3ae28..1cb8f3866 100644
+index 17ce3ae28..fe555ef4a 100644
 --- a/src/process/task/claudeConfig.ts
 +++ b/src/process/task/claudeConfig.ts
 @@ -37,7 +37,7 @@ export async function materializeFluxClaudeConfigDir(
@@ -1879,12 +2135,12 @@ index 17ce3ae28..1cb8f3866 100644
    realClaudeDir: string = join(homedir(), '.claude'),
    /** Per-conversation reasoning effort. When set, overrides the seeded `effortLevel`. */
 -  effort?: 'low' | 'medium' | 'high'
-+  effort?: 'low' | 'medium' | 'high' | 'xhigh'
++  effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
  ): Promise<string> {
    const configDir = join(userDataDir, 'flux-claude-home');
    const settingsPath = join(configDir, 'settings.json');
 diff --git a/src/process/task/codexConfig.ts b/src/process/task/codexConfig.ts
-index 2b5c2e30a..abcf7fb5c 100644
+index 2b5c2e30a..7966e1733 100644
 --- a/src/process/task/codexConfig.ts
 +++ b/src/process/task/codexConfig.ts
 @@ -4,7 +4,7 @@
@@ -1992,7 +2248,7 @@ index 2b5c2e30a..abcf7fb5c 100644
    userConfigPath: string = getCodexConfigPath(),
    /** Per-conversation reasoning effort. When set, written as `model_reasoning_effort`. */
 -  effort?: 'low' | 'medium' | 'high'
-+  effort?: 'low' | 'medium' | 'high' | 'xhigh',
++  effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra',
 +  /** Per-conversation service tier / speed. When set, written as `service_tier`. */
 +  serviceTier?: CodexServiceTier | null
  ): Promise<string> {
@@ -2011,8 +2267,85 @@ index 2b5c2e30a..abcf7fb5c 100644
      `sandbox_mode = "${sandboxMode}"`,
      'suppress_unstable_features_warning = true',
      '',
+diff --git a/src/process/task/codexStaticModelInfo.ts b/src/process/task/codexStaticModelInfo.ts
+new file mode 100644
+index 000000000..a538baa6b
+--- /dev/null
++++ b/src/process/task/codexStaticModelInfo.ts
+@@ -0,0 +1,71 @@
++import type { AcpModelInfo } from '@/common/types/acpTypes';
++import { getDatabase } from '@process/services/database';
++import { selectMirrorModelIds } from '@process/providers/legacyModelConfigBridge';
++import { CliAgentSource } from '@process/providers/sources/CliAgentSource';
++import { ProviderRepository } from '@process/providers/storage/ProviderRepository';
++
++type StaticModelOption = { id: string; label: string };
++
++function labelForModel(models: StaticModelOption[], modelId: string | null): string | null {
++  if (!modelId) return null;
++  return models.find((model) => model.id === modelId)?.label ?? modelId;
++}
++
++function finalizeStaticModelInfo(
++  availableModels: StaticModelOption[],
++  currentModelId: string | null,
++  sourceDetail: AcpModelInfo['sourceDetail']
++): AcpModelInfo | null {
++  if (availableModels.length === 0) return null;
++  const activeModelId =
++    currentModelId && availableModels.some((model) => model.id === currentModelId)
++      ? currentModelId
++      : availableModels[0].id;
++  return {
++    currentModelId: activeModelId,
++    currentModelLabel: labelForModel(availableModels, activeModelId),
++    availableModels,
++    canSwitch: availableModels.length > 1,
++    source: 'models',
++    sourceDetail,
++  };
++}
++
++export function preferEnabledDiscoveredModels<T extends { id: string }>(
++  discovered: T[],
++  enabledIds: ReadonlySet<string>
++): T[] {
++  if (discovered.length === 0 || enabledIds.size === 0) return discovered;
++  const filtered = discovered.filter((model) => enabledIds.has(model.id));
++  return filtered.length > 0 ? filtered : discovered;
++}
++
++export async function listEnabledRegistryModelIds(): Promise<Set<string>> {
++  const db = await getDatabase();
++  const repo = new ProviderRepository(db.getDriver());
++  const enabled = new Set<string>();
++
++  for (const provider of repo.listRegistryProviders()) {
++    if (provider.state !== 'connected') continue;
++    const ids = selectMirrorModelIds(
++      repo.getRegistryCatalog(provider.providerId),
++      repo.listRegistryOverrides(provider.providerId)
++    );
++    for (const id of ids) {
++      enabled.add(id);
++    }
++  }
++
++  return enabled;
++}
++
++export async function readCodexStaticModelInfo(): Promise<AcpModelInfo | null> {
++  const discovered = await new CliAgentSource('codex').listModels();
++  const availableModels = discovered.map((model) => ({
++    id: model.id,
++    label: model.rawName || model.id,
++  }));
++  const enabledIds = await listEnabledRegistryModelIds().catch(() => new Set<string>());
++  const effectiveModels = preferEnabledDiscoveredModels(availableModels, enabledIds);
++  return finalizeStaticModelInfo(effectiveModels, null, 'codex-stream');
++}
 diff --git a/src/process/task/hermesConfig.ts b/src/process/task/hermesConfig.ts
-index 4a8616bdc..1dd406778 100644
+index 4a8616bdc..5383f7a87 100644
 --- a/src/process/task/hermesConfig.ts
 +++ b/src/process/task/hermesConfig.ts
 @@ -37,7 +37,8 @@ import { join } from 'path';
@@ -2021,7 +2354,7 @@ index 4a8616bdc..1dd406778 100644
    fluxKey: string,
 -  baseURL: string = FLUX_SURFACE.openai
 +  baseURL: string = FLUX_SURFACE.openai,
-+  effort?: 'low' | 'medium' | 'high' | 'xhigh'
++  effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
  ): Promise<string> {
    const hermesHomeDir = join(userDataDir, 'flux-hermes-home');
    const configPath = join(hermesHomeDir, 'config.yaml');
@@ -3229,7 +3562,7 @@ index d89c8d316..d5d9c49bb 100644
            <div
              className='flex items-center justify-center cursor-pointer p-4px opacity-60 hover:opacity-100 self-center'
 diff --git a/src/renderer/pages/guid/components/GuidActionRow.tsx b/src/renderer/pages/guid/components/GuidActionRow.tsx
-index 9224d36b5..b192c7ba9 100644
+index 9224d36b5..b287c3fef 100644
 --- a/src/renderer/pages/guid/components/GuidActionRow.tsx
 +++ b/src/renderer/pages/guid/components/GuidActionRow.tsx
 @@ -6,10 +6,13 @@
@@ -3255,7 +3588,7 @@ index 9224d36b5..b192c7ba9 100644
  import { Button, Message, Tooltip } from '@arco-design/web-react';
  import React, { useCallback, useMemo, useRef, useState } from 'react';
  import { useTranslation } from 'react-i18next';
-@@ -110,11 +114,23 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -110,11 +114,26 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
    const layout = useLayoutContext();
    const modeBackend = effectiveModeAgent || selectedAgent;
    const showModeSwitch = supportsModeSwitch(modeBackend);
@@ -3264,8 +3597,11 @@ index 9224d36b5..b192c7ba9 100644
 +    () =>
 +      cachedConfigOptions?.filter(
 +        (option) =>
++          option.id !== 'model' &&
++          option.category !== 'model' &&
 +          option.id !== 'reasoning_effort' &&
 +          option.category !== 'thought_level' &&
++          option.id !== 'power' &&
 +          !isServiceTierConfigOption(option)
 +      ) ?? [],
 +    [cachedConfigOptions]
@@ -3280,7 +3616,7 @@ index 9224d36b5..b192c7ba9 100644
 
    const handleLocalFileChange = useCallback(
      async (e: React.ChangeEvent<HTMLInputElement>) => {
-@@ -165,6 +181,20 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -165,6 +184,20 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
      return [{ key: 'file', label: t('conversation.welcome.uploadFile'), onClick: openHostFilePicker }];
    }, [isWebUI, openHostFilePicker, t]);
 
@@ -3301,7 +3637,7 @@ index 9224d36b5..b192c7ba9 100644
    return (
      <div className={styles.actionRow}>
        <div className={styles.actionTools}>
-@@ -200,30 +230,14 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -200,30 +233,14 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
            )}
          </div>
 
@@ -3335,7 +3671,7 @@ index 9224d36b5..b192c7ba9 100644
 
          <div
            className={`${styles.actionConfigGroup} ${configOptionCount > 1 ? styles.actionConfigGroupWithDivider : ''}`}
-@@ -245,7 +259,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -245,7 +262,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
            <AcpConfigSelector
              backend={configOptionsBackend}
              buttonClassName='guid-config-btn'
@@ -3344,7 +3680,7 @@ index 9224d36b5..b192c7ba9 100644
              leadingIcon={<Brain size={14} color={iconColors.secondary} />}
              onOptionSelect={onConfigOptionSelect}
            />
-@@ -291,6 +305,17 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -291,6 +308,17 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
            </span>
          </Tooltip>
        </div>
@@ -3406,7 +3742,7 @@ index 8feeb4cc8..06908a37b 100644
          <div className='flex flex-wrap items-center gap-8px mt-12px mb-12px'>
            {files.map((path) => (
 diff --git a/src/renderer/pages/guid/components/GuidModelSelector.tsx b/src/renderer/pages/guid/components/GuidModelSelector.tsx
-index d2bfc8f43..b9794a15a 100644
+index d2bfc8f43..3e2c0bccb 100644
 --- a/src/renderer/pages/guid/components/GuidModelSelector.tsx
 +++ b/src/renderer/pages/guid/components/GuidModelSelector.tsx
 @@ -4,13 +4,13 @@
@@ -3414,8 +3750,9 @@ index d2bfc8f43..b9794a15a 100644
   */
 
 -import { Brain, ChevronDown } from 'lucide-react';
-+import { Brain, ChevronDown, Gauge, Zap } from 'lucide-react';
- import { Button, Dropdown, Menu, Message, Tooltip } from '@arco-design/web-react';
+-import { Button, Dropdown, Menu, Message, Tooltip } from '@arco-design/web-react';
++import { Brain, Check, ChevronDown, ChevronRight, RotateCcw, Zap } from 'lucide-react';
++import { Button, Dropdown, Menu, Message, Slider, Tooltip } from '@arco-design/web-react';
  import { ipcBridge } from '@/common';
  import type { IProvider, TProviderWithModel } from '@/common/config/storage';
  import type { CuratedModel, ProviderId } from '@process/providers/types';
@@ -3425,7 +3762,7 @@ index d2bfc8f43..b9794a15a 100644
  import { useFluxConnected } from '@/renderer/hooks/useFluxConnected';
  import { peekCuratedForAgent, useModelRegistry } from '@/renderer/hooks/useModelRegistry';
  import { useUsageTelemetry } from '@/renderer/hooks/usage/useUsageTelemetry';
-@@ -43,8 +43,87 @@ type GuidModelSelectorProps = {
+@@ -43,8 +43,114 @@ type GuidModelSelectorProps = {
    currentAcpCachedModelInfo: AcpModelInfo | null;
    selectedAcpModel: string | null;
    setSelectedAcpModel: React.Dispatch<React.SetStateAction<string | null>>;
@@ -3437,15 +3774,16 @@ index d2bfc8f43..b9794a15a 100644
 +  onConfigOptionSelect?: (configId: string, value: string) => void;
  };
 
-+export type GuidReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
++export type GuidReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 +export type GuidServiceTier = 'normal' | 'priority';
 +
-+const GUID_REASONING_EFFORTS: GuidReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
++const GUID_REASONING_EFFORTS: GuidReasoningEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 +const GUID_SERVICE_TIERS: GuidServiceTier[] = ['normal', 'priority'];
 +const REASONING_EFFORT_CONFIG_ID = 'reasoning_effort';
 +const SERVICE_TIER_CONFIG_ID = 'service_tier';
-+const ACP_MODEL_EFFORT_SUFFIX = /\/(low|medium|high|xhigh)$/i;
-+const ACP_MODEL_LABEL_EFFORT_SUFFIX = /\s+\((low|medium|high|xhigh)\)$/i;
++const POWER_CONFIG_ID = 'power';
++const ACP_MODEL_EFFORT_SUFFIX = /\/(minimal|low|medium|high|xhigh|max|ultra)$/i;
++const ACP_MODEL_LABEL_EFFORT_SUFFIX = /\s+\((minimal|low|medium|high|xhigh|max|ultra)\)$/i;
 +
 +const isGuidReasoningEffort = (value: unknown): value is GuidReasoningEffort =>
 +  typeof value === 'string' && GUID_REASONING_EFFORTS.includes(value.toLowerCase() as GuidReasoningEffort);
@@ -3501,6 +3839,32 @@ index d2bfc8f43..b9794a15a 100644
 +const getServiceTierOption = (options: AcpSessionConfigOption[] | undefined): AcpSessionConfigOption | undefined =>
 +  options?.find(isServiceTierConfigOption);
 +
++const getPowerOption = (options: AcpSessionConfigOption[] | undefined): AcpSessionConfigOption | undefined =>
++  options?.find((option) => option.id === POWER_CONFIG_ID || option.name?.toLowerCase() === 'power');
++
++type GuidPowerSelection = {
++  id: string;
++  modelId: string;
++  effort: GuidReasoningEffort;
++  label: string;
++  description?: string;
++};
++
++const parsePowerSelection = (value: string, label?: string, description?: string): GuidPowerSelection | null => {
++  const separator = value.lastIndexOf(':');
++  if (separator <= 0) return null;
++  const modelId = value.slice(0, separator);
++  const effort = normalizeEffort(value.slice(separator + 1));
++  if (!modelId || !effort) return null;
++  return {
++    id: value,
++    modelId,
++    effort,
++    label: label?.trim() || `${modelId} ${effort}`,
++    description,
++  };
++};
++
 +const effortLabelKey = (effort: GuidReasoningEffort): string =>
 +  `conversation.modelSelector.effort${effort === 'xhigh' ? 'Xhigh' : effort.charAt(0).toUpperCase() + effort.slice(1)}`;
 +
@@ -3513,7 +3877,7 @@ index d2bfc8f43..b9794a15a 100644
  /**
   * Map a model's blended USD-per-million-token cost to a $ / $$ / $$$ tier.
   *
-@@ -92,6 +171,33 @@ export const firstSafeCuratedModel = (list: CuratedModel[]): CuratedModel | unde
+@@ -92,6 +198,33 @@ export const firstSafeCuratedModel = (list: CuratedModel[]): CuratedModel | unde
    list.find((m) => m.enabled && !isExperimentalCurated(m)) ??
    list.find((m) => !isExperimentalCurated(m));
 
@@ -3547,7 +3911,7 @@ index d2bfc8f43..b9794a15a 100644
  const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
    isGeminiMode,
    modelList,
-@@ -101,6 +207,12 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -101,6 +234,12 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
    currentAcpCachedModelInfo,
    selectedAcpModel,
    setSelectedAcpModel,
@@ -3560,7 +3924,15 @@ index d2bfc8f43..b9794a15a 100644
  }) => {
    const { t } = useTranslation();
    const navigate = useNavigate();
-@@ -409,33 +521,114 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -111,6 +250,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+   // Open state - exposed so the frequently-used hook can defer its IPC until
+   // the panel is actually visible.
+   const [panelOpen, setPanelOpen] = React.useState(false);
++  const [advancedPowerOpen, setAdvancedPowerOpen] = React.useState(false);
+
+   // Plain-language scope sentence for the selected agent. Reuses the same
+   // copy as the Agents settings page so the explanation lives at the point
+@@ -409,33 +549,165 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
      return fluxConnected && (compat === 'env' || compat === 'setup');
    }, [agentKey, fluxConnected]);
 
@@ -3582,7 +3954,9 @@ index d2bfc8f43..b9794a15a 100644
 -  }, [currentAcpCachedModelInfo?.availableModels, curated]);
 +    return [];
 +  }, [currentAcpCachedModelInfo?.availableModels]);
-+
+
+-  const acpSelectedLabel = React.useMemo(() => {
+-    if (isFluxModelId(selectedAcpModel)) return FLUX_MODEL_DISPLAY[selectedAcpModel as FluxModelId];
 +  const acpModels = React.useMemo(() => normalizeAcpModelOptions(rawAcpModels), [rawAcpModels]);
 +
 +  const selectedBaseModelId = React.useMemo(
@@ -3596,6 +3970,7 @@ index d2bfc8f43..b9794a15a 100644
 +  );
 +
 +  const serviceTierOption = React.useMemo(() => getServiceTierOption(cachedConfigOptions), [cachedConfigOptions]);
++  const powerOption = React.useMemo(() => getPowerOption(cachedConfigOptions), [cachedConfigOptions]);
 +
 +  const configEffort = React.useMemo(
 +    () => normalizeEffort(reasoningEffortOption?.currentValue || reasoningEffortOption?.selectedValue),
@@ -3624,15 +3999,57 @@ index d2bfc8f43..b9794a15a 100644
 +      .filter((value): value is GuidReasoningEffort => Boolean(value));
 +    if (bySelectedModel.length > 0) return Array.from(new Set(bySelectedModel));
 +
-+    if (agentKey === 'codex' || agentKey === 'hermes') return GUID_REASONING_EFFORTS;
 +    return [];
 +  }, [agentKey, rawAcpModels, reasoningEffortOption, selectedBaseModelId]);
 +
 +  const currentEffort =
-+    selectedAcpEffort ||
++    (selectedAcpEffort && effortOptions.includes(selectedAcpEffort) ? selectedAcpEffort : null) ||
 +    configEffort ||
 +    modelEffort ||
-+    (effortOptions.includes('xhigh') ? 'xhigh' : (effortOptions[0] ?? null));
++    null;
++
++  const powerSelections = React.useMemo<GuidPowerSelection[]>(() => {
++    const availableModelIds = new Set(acpModels.map((model) => model.id));
+     return (
+-      currentAcpCachedModelInfo?.availableModels?.find((m) => m.id === selectedAcpModel)?.label ||
+-      currentAcpCachedModelInfo?.currentModelLabel ||
+-      currentAcpCachedModelInfo?.currentModelId ||
+-      ''
++      powerOption?.options
++        ?.map((option) =>
++          parsePowerSelection(
++            option.value,
++            option.label || option.name,
++            'description' in option && typeof option.description === 'string' ? option.description : undefined
++          )
++        )
++        .filter((selection): selection is GuidPowerSelection =>
++          Boolean(selection && availableModelIds.has(selection.modelId))
++        ) ?? []
+     );
+-  }, [
+-    currentAcpCachedModelInfo?.availableModels,
+-    currentAcpCachedModelInfo?.currentModelId,
+-    currentAcpCachedModelInfo?.currentModelLabel,
+-    selectedAcpModel,
+-  ]);
++  }, [acpModels, powerOption]);
++
++  const currentPowerSelection = React.useMemo(() => {
++    const explicitId =
++      selectedBaseModelId && currentEffort ? `${selectedBaseModelId}:${currentEffort}` : undefined;
++    const configuredId =
++      typeof powerOption?.currentValue === 'string'
++        ? powerOption.currentValue
++        : typeof powerOption?.selectedValue === 'string'
++          ? powerOption.selectedValue
++          : undefined;
++    return (
++      powerSelections.find((selection) => selection.id === explicitId) ??
++      powerSelections.find((selection) => selection.id === configuredId) ??
++      null
++    );
++  }, [currentEffort, powerOption, powerSelections, selectedBaseModelId]);
 +
 +  const serviceTierOptions = React.useMemo<GuidServiceTier[]>(() => {
 +    const fromConfig = serviceTierOption?.options
@@ -3673,21 +4090,26 @@ index d2bfc8f43..b9794a15a 100644
 +    },
 +    [agentKey, onConfigOptionSelect, recordTelemetry, setSelectedAcpServiceTier]
 +  );
-
-   const acpSelectedLabel = React.useMemo(() => {
--    if (isFluxModelId(selectedAcpModel)) return FLUX_MODEL_DISPLAY[selectedAcpModel as FluxModelId];
--    return (
--      currentAcpCachedModelInfo?.availableModels?.find((m) => m.id === selectedAcpModel)?.label ||
--      currentAcpCachedModelInfo?.currentModelLabel ||
--      currentAcpCachedModelInfo?.currentModelId ||
--      ''
--    );
--  }, [
--    currentAcpCachedModelInfo?.availableModels,
--    currentAcpCachedModelInfo?.currentModelId,
--    currentAcpCachedModelInfo?.currentModelLabel,
--    selectedAcpModel,
--  ]);
++
++  const handleSelectPower = React.useCallback(
++    (selection: GuidPowerSelection) => {
++      setSelectedAcpModel(selection.modelId);
++      setSelectedAcpEffort?.(selection.effort);
++      onConfigOptionSelect?.(POWER_CONFIG_ID, selection.id);
++      recordTelemetry({
++        eventType: 'guid.model_selected',
++        cliBackend: agentKey,
++        metadata: {
++          modelId: selection.modelId,
++          effort: selection.effort,
++          source: 'acp-power',
++        },
++      });
++    },
++    [agentKey, onConfigOptionSelect, recordTelemetry, setSelectedAcpEffort, setSelectedAcpModel]
++  );
++
++  const acpSelectedLabel = React.useMemo(() => {
 +    return resolveAcpSelectedLabel({
 +      selectedAcpModel,
 +      acpModels,
@@ -3697,7 +4119,7 @@ index d2bfc8f43..b9794a15a 100644
 
    const acpButtonLabel = React.useMemo(() => {
      return getModelDisplayLabel({
-@@ -454,6 +647,95 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -454,6 +726,19 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
      [acpButtonLabel, acpSourceLabel]
    );
 
@@ -3714,86 +4136,10 @@ index d2bfc8f43..b9794a15a 100644
 +      })
 +    : '';
 +
-+  const effortSelectorNode =
-+    effortOptions.length > 0 && currentEffort ? (
-+      <Dropdown
-+        trigger='click'
-+        droplist={
-+          <Menu selectedKeys={[currentEffort]}>
-+            <Menu.ItemGroup title={t('conversation.modelSelector.effort')}>
-+              {effortOptions.map((effort) => {
-+                const label = t(effortLabelKey(effort), {
-+                  defaultValue: effort === 'xhigh' ? 'XHigh' : effort.charAt(0).toUpperCase() + effort.slice(1),
-+                });
-+                return (
-+                  <Menu.Item key={effort} onClick={() => handleSelectEffort(effort)}>
-+                    <div className='flex items-center gap-8px w-full'>
-+                      {effort === currentEffort && <span className='text-primary shrink-0'>✓</span>}
-+                      <span className={`flex-1 min-w-0 truncate ${effort !== currentEffort ? 'ml-16px' : ''}`}>
-+                        {label}
-+                      </span>
-+                    </div>
-+                  </Menu.Item>
-+                );
-+              })}
-+            </Menu.ItemGroup>
-+          </Menu>
-+        }
-+      >
-+        <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
-+          <span className='flex items-center gap-6px min-w-0'>
-+            <Zap size={14} color={iconColors.secondary} className='shrink-0' />
-+            <span className='truncate'>{currentEffortLabel}</span>
-+            <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
-+          </span>
-+        </Button>
-+      </Dropdown>
-+    ) : null;
-+
-+  const speedSelectorNode =
-+    serviceTierOptions.length > 0 && currentServiceTier ? (
-+      <Dropdown
-+        trigger='click'
-+        droplist={
-+          <Menu selectedKeys={[currentServiceTier]}>
-+            <Menu.ItemGroup title={t('conversation.modelSelector.speed')}>
-+              {serviceTierOptions.map((tier) => {
-+                const label = t(serviceTierLabelKey(tier), {
-+                  defaultValue: tier === 'priority' ? 'Fast' : 'Default',
-+                });
-+                const description = t(serviceTierDescriptionKey(tier), {
-+                  defaultValue: tier === 'priority' ? '1.5x speed, increased usage' : 'Default speed',
-+                });
-+                return (
-+                  <Menu.Item key={tier} onClick={() => handleSelectServiceTier(tier)}>
-+                    <div className='flex items-start gap-8px w-full'>
-+                      {tier === currentServiceTier && <span className='text-primary shrink-0 mt-2px'>✓</span>}
-+                      <span className={`flex flex-col min-w-0 ${tier !== currentServiceTier ? 'ml-16px' : ''}`}>
-+                        <span className='truncate'>{label}</span>
-+                        <span className='text-12px text-t-tertiary truncate'>{description}</span>
-+                      </span>
-+                    </div>
-+                  </Menu.Item>
-+                );
-+              })}
-+            </Menu.ItemGroup>
-+          </Menu>
-+        }
-+      >
-+        <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
-+          <span className='flex items-center gap-6px min-w-0'>
-+            <Gauge size={14} color={iconColors.secondary} className='shrink-0' />
-+            <span className='truncate'>{currentServiceTierLabel}</span>
-+            <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
-+          </span>
-+        </Button>
-+      </Dropdown>
-+    ) : null;
-+
    // ── Provider-based agents (Gemini / Wayland Core) - three-tier picker ────
    if (isGeminiMode) {
      return (
-@@ -479,7 +761,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -479,7 +764,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
          <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
            <span className='flex items-center gap-6px min-w-0'>
              <Brain size={14} color={iconColors.secondary} className='shrink-0' />
@@ -3802,7 +4148,7 @@ index d2bfc8f43..b9794a15a 100644
              <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
            </span>
          </Button>
-@@ -488,10 +770,9 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -488,80 +773,236 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
    }
 
    // ── CLI agents - ACP model selector ──────────────────────────────────────
@@ -3814,24 +4160,56 @@ index d2bfc8f43..b9794a15a 100644
 +  // model to show. The cold-start path is handled by getStaticModelInfo so this
 +  // never needs to substitute a generic provider catalog.
    if (showAcpFlux || acpModels.length > 0) {
-     // Inline scope caption - keeps the Arco Menu legal (no raw <div> kids).
-     const scopeCaptionItem = (
-@@ -500,72 +781,76 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
-       </Menu.Item>
+-    // Inline scope caption - keeps the Arco Menu legal (no raw <div> kids).
+-    const scopeCaptionItem = (
+-      <Menu.Item key='scope-caption' disabled className='px-12px pt-8px pb-6px text-11px text-t-tertiary leading-snug'>
+-        {scopeCaption}
+-      </Menu.Item>
++    const compactModelLabel = acpButtonDisplayLabel.replace(/^gpt[-\s]?/i, '').replace(/-/g, ' ');
++    const compactSummary = [compactModelLabel, currentEffortLabel].filter(Boolean).join(' ');
++    const selectedPowerIndex = Math.max(
++      0,
++      powerSelections.findIndex((selection) => selection.id === currentPowerSelection?.id)
++    );
++    const resetModel = splitAcpModelEffort(currentAcpCachedModelInfo?.currentModelId).modelId;
++    const resetEffort =
++      normalizeEffort(reasoningEffortOption?.currentValue || reasoningEffortOption?.selectedValue) || null;
++
++    const resetConfiguration = () => {
++      if (resetModel) setSelectedAcpModel(resetModel);
++      if (resetEffort) handleSelectEffort(resetEffort);
++      if (serviceTierOptions.includes('normal')) handleSelectServiceTier('normal');
++      setAdvancedPowerOpen(false);
++    };
++
++    const menuRowTitle = (label: string, value: string) => (
++      <span className='guid-intelligence-row'>
++        <span className='guid-intelligence-row-label'>{label}</span>
++        <span className='guid-intelligence-row-value'>{value}</span>
++        <ChevronRight size={15} className='guid-intelligence-row-chevron' aria-hidden />
++      </span>
      );
++
      return (
--      <Dropdown
--        trigger='click'
--        droplist={
+       <Dropdown
+         trigger='click'
++        position='bl'
++        popupVisible={panelOpen}
++        onVisibleChange={setPanelOpen}
+         droplist={
 -          <Menu selectedKeys={selectedAcpModel ? [selectedAcpModel] : []}>
 -            {showAcpFlux && (
 -              <Menu.ItemGroup title={t('conversation.welcome.fluxGroupLabel')}>
 -                {FLUX_MODEL_IDS.map((fluxId) => (
-+      <>
-+        <Dropdown
-+          trigger='click'
-+          droplist={
-+            <Menu selectedKeys={selectedBaseModelId ? [selectedBaseModelId] : []}>
++          <div className='guid-intelligence-menu' data-advanced-open={advancedPowerOpen}>
++            <Menu className='guid-intelligence-menu-list'>
++              <Menu.SubMenu
++                key='model-submenu'
++                title={menuRowTitle(
++                  t('conversation.modelSelector.title', { defaultValue: 'Model' }),
++                  compactModelLabel
++                )}
++              >
 +              {showAcpFlux && (
 +                <Menu.ItemGroup title={t('conversation.welcome.fluxGroupLabel')}>
 +                  {FLUX_MODEL_IDS.map((fluxId) => (
@@ -3849,12 +4227,12 @@ index d2bfc8f43..b9794a15a 100644
 +                      <div className='flex items-center gap-8px w-full'>
 +                        <FluxRouterMark size={14} className='shrink-0' />
 +                        <span className='flex-1 min-w-0 truncate'>{FLUX_MODEL_DISPLAY[fluxId]}</span>
++                        {selectedBaseModelId === fluxId && <Check size={15} className='shrink-0' />}
 +                      </div>
 +                    </Menu.Item>
 +                  ))}
 +                </Menu.ItemGroup>
 +              )}
-+              {scopeCaptionItem}
 +              {acpModels.map((model) => {
 +                const tier = acpTierFor(model.id, model.label);
 +                return (
@@ -3884,6 +4262,7 @@ index d2bfc8f43..b9794a15a 100644
 +                          {tier}
 +                        </span>
 +                      )}
++                      {selectedBaseModelId === model.id && <Check size={15} className='shrink-0' />}
                      </div>
                    </Menu.Item>
 -                ))}
@@ -3901,9 +4280,89 @@ index d2bfc8f43..b9794a15a 100644
 -                      eventType: 'guid.model_selected',
 -                      cliBackend: agentKey,
 -                      metadata: { modelId: model.id, source: 'acp' },
--                    });
--                  }}
--                >
++                );
++              })}
++              </Menu.SubMenu>
++
++              {effortOptions.length > 0 && (
++                <Menu.SubMenu
++                  key='effort-submenu'
++                  title={menuRowTitle(
++                    t('conversation.modelSelector.effort', { defaultValue: 'Reasoning' }),
++                    currentEffortLabel ||
++                      t('conversation.modelSelector.speedDefault', { defaultValue: 'Default' })
++                  )}
++                >
++                  {effortOptions.map((effort) => {
++                    const label = t(effortLabelKey(effort), {
++                      defaultValue:
++                        effort === 'xhigh' ? 'Extra High' : effort.charAt(0).toUpperCase() + effort.slice(1),
++                    });
++                    const description = t(`${effortLabelKey(effort)}Desc`, { defaultValue: '' });
++                    return (
++                      <Menu.Item key={`effort-${effort}`} onClick={() => handleSelectEffort(effort)}>
++                        <span className='guid-intelligence-option'>
++                          <span className='min-w-0'>
++                            <span className='block truncate'>{label}</span>
++                            {description && <span className='block text-12px text-t-tertiary'>{description}</span>}
++                          </span>
++                          {currentEffort === effort && <Check size={15} className='shrink-0' />}
++                        </span>
++                      </Menu.Item>
++                    );
++                  })}
++                </Menu.SubMenu>
++              )}
++
++              {serviceTierOptions.length > 0 && currentServiceTier && (
++                <Menu.SubMenu
++                  key='speed-submenu'
++                  title={menuRowTitle(
++                    t('conversation.modelSelector.speed', { defaultValue: 'Speed' }),
++                    currentServiceTierLabel
++                  )}
++                >
++                  {serviceTierOptions.map((tier) => {
++                    const label = t(serviceTierLabelKey(tier), {
++                      defaultValue: tier === 'priority' ? 'Fast' : 'Default',
+                     });
++                    const description = t(serviceTierDescriptionKey(tier), {
++                      defaultValue: tier === 'priority' ? '1.5x speed, increased usage' : 'Default speed',
++                    });
++                    return (
++                      <Menu.Item key={`speed-${tier}`} onClick={() => handleSelectServiceTier(tier)}>
++                        <span className='guid-intelligence-option'>
++                          <span className='min-w-0'>
++                            <span className='block truncate'>{label}</span>
++                            <span className='block text-12px text-t-tertiary'>{description}</span>
++                          </span>
++                          {currentServiceTier === tier && <Check size={15} className='shrink-0' />}
++                        </span>
++                      </Menu.Item>
++                    );
++                  })}
++                </Menu.SubMenu>
++              )}
++
++              <Menu.Item key='reset' onClick={resetConfiguration}>
++                <span className='guid-intelligence-reset'>
++                  <span>{t('conversation.modelSelector.resetDefault', { defaultValue: 'Reset to default' })}</span>
++                  <RotateCcw size={15} aria-hidden />
++                </span>
++              </Menu.Item>
++            </Menu>
++
++            {powerSelections.length > 1 && (
++              <div className='guid-intelligence-advanced'>
++                <button
++                  type='button'
++                  className='guid-intelligence-advanced-toggle'
++                  aria-expanded={advancedPowerOpen}
++                  onClick={(event) => {
++                    event.stopPropagation();
++                    setAdvancedPowerOpen((open) => !open);
+                   }}
+                 >
 -                  <div className='flex items-center gap-8px w-full'>
 -                    <span className='flex-1 min-w-0 truncate'>{model.label}</span>
 -                    {tier && (
@@ -3914,40 +4373,66 @@ index d2bfc8f43..b9794a15a 100644
 -                        {tier}
 -                      </span>
 -                    )}
--                  </div>
++                  <span>{t('conversation.modelSelector.advanced', { defaultValue: 'Advanced' })}</span>
++                  <ChevronDown
++                    size={15}
++                    className={advancedPowerOpen ? 'rotate-180 transition-transform' : 'transition-transform'}
++                    aria-hidden
++                  />
++                </button>
++                {advancedPowerOpen && (
++                  <div className='guid-intelligence-power'>
++                    <div className='guid-intelligence-power-summary'>
++                      <span>{currentPowerSelection?.label || compactSummary}</span>
++                      {currentPowerSelection?.effort === 'ultra' && (
++                        <span className='guid-intelligence-ultra-warning'>
++                          <Zap size={13} aria-hidden />
++                          {t('conversation.modelSelector.ultraUsageWarning', {
++                            defaultValue: 'Consumes usage limits faster',
++                          })}
++                        </span>
++                      )}
++                    </div>
++                    <Slider
++                      min={0}
++                      max={powerSelections.length - 1}
++                      step={1}
++                      showTicks
++                      value={selectedPowerIndex}
++                      marks={Object.fromEntries(powerSelections.map((_, index) => [index, '']))}
++                      formatTooltip={(value) => powerSelections[Number(value)]?.label || ''}
++                      onChange={(value) => {
++                        const index = Array.isArray(value) ? value[0] : value;
++                        const selection = powerSelections[Number(index)];
++                        if (selection) handleSelectPower(selection);
++                      }}
++                      aria-label={t('conversation.modelSelector.powerAria', {
++                        defaultValue: 'Model and reasoning power',
++                      })}
++                    />
++                    <div className='guid-intelligence-power-ends' aria-hidden>
++                      <span>{t('conversation.modelSelector.powerFaster', { defaultValue: 'Faster' })}</span>
++                      <span>{t('conversation.modelSelector.powerSmarter', { defaultValue: 'Smarter' })}</span>
++                    </div>
+                   </div>
 -                </Menu.Item>
 -              );
 -            })}
 -          </Menu>
--        }
--      >
--        <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
--          <span className='flex items-center gap-6px min-w-0'>
--            <Brain size={14} color={iconColors.secondary} className='shrink-0' />
++                )}
++              </div>
++            )}
++          </div>
+         }
+       >
+         <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
+           <span className='flex items-center gap-6px min-w-0'>
+             <Brain size={14} color={iconColors.secondary} className='shrink-0' />
 -            <span>{acpButtonDisplayLabel}</span>
--            <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
--          </span>
--        </Button>
--      </Dropdown>
-+                );
-+              })}
-+            </Menu>
-+          }
-+        >
-+          <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
-+            <span className='flex items-center gap-6px min-w-0'>
-+              <Brain size={14} color={iconColors.secondary} className='shrink-0' />
-+              <span className='truncate min-w-0'>{acpButtonDisplayLabel}</span>
-+              <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
-+            </span>
-+          </Button>
-+        </Dropdown>
-+        {effortSelectorNode}
-+        {speedSelectorNode}
-+      </>
-     );
-   }
-
++            <span className='truncate min-w-0'>{compactSummary || acpButtonDisplayLabel}</span>
+             <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
+           </span>
+         </Button>
 diff --git a/src/renderer/pages/guid/components/newChatStarter/IntentPillBar.module.css b/src/renderer/pages/guid/components/newChatStarter/IntentPillBar.module.css
 index 5f8854113..5246d3351 100644
 --- a/src/renderer/pages/guid/components/newChatStarter/IntentPillBar.module.css
@@ -4001,7 +4486,7 @@ index 5f8854113..5246d3351 100644
    }
  }
 diff --git a/src/renderer/pages/guid/hooks/useGuidAgentSelection.ts b/src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
-index 2628b8146..90d8cf201 100644
+index 2628b8146..04e728d22 100644
 --- a/src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
 +++ b/src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
 @@ -9,6 +9,7 @@ import type { IProvider } from '@/common/config/storage';
@@ -4023,12 +4508,12 @@ index 2628b8146..90d8cf201 100644
    currentAcpCachedModelInfo: AcpModelInfo | null;
    currentEffectiveAgentInfo: EffectiveAgentInfo;
    cachedConfigOptions: AcpSessionConfigOption[];
-@@ -65,6 +70,42 @@ export type GuidAgentSelectionResult = {
+@@ -65,6 +70,39 @@ export type GuidAgentSelectionResult = {
    customAgentAvatarMap: Map<string, string | undefined>;
  };
 
-+const GUID_REASONING_EFFORTS: GuidReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
-+const MODEL_EFFORT_SUFFIX = /\/(low|medium|high|xhigh)$/i;
++const GUID_REASONING_EFFORTS: GuidReasoningEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
++const MODEL_EFFORT_SUFFIX = /\/(minimal|low|medium|high|xhigh|max|ultra)$/i;
 +
 +const normalizeEffort = (value: unknown): GuidReasoningEffort | null => {
 +  if (typeof value !== 'string') return null;
@@ -4060,13 +4545,10 @@ index 2628b8146..90d8cf201 100644
 +  return normalizeEffort(option?.currentValue || option?.selectedValue);
 +};
 +
-+const defaultEffortForBackend = (backend: string): GuidReasoningEffort | null =>
-+  backend === 'codex' || backend === 'hermes' ? 'xhigh' : null;
-+
  type UseGuidAgentSelectionOptions = {
    modelList: IProvider[];
    isGoogleAuth: boolean;
-@@ -93,6 +134,8 @@ export const useGuidAgentSelection = ({
+@@ -93,6 +131,8 @@ export const useGuidAgentSelection = ({
    const initialRestoreDoneRef = useRef(false);
    const [acpCachedModels, setAcpCachedModels] = useState<Record<string, AcpModelInfo>>({});
    const [selectedAcpModel, _setSelectedAcpModel] = useState<string | null>(null);
@@ -4075,7 +4557,7 @@ index 2628b8146..90d8cf201 100644
    const [cachedConfigOptions, setCachedConfigOptions] = useState<AcpSessionConfigOption[]>([]);
    const [pendingConfigOptions, setPendingConfigOptions] = useState<Record<string, string>>({});
 
-@@ -122,10 +165,22 @@ export const useGuidAgentSelection = ({
+@@ -122,10 +162,31 @@ export const useGuidAgentSelection = ({
      setPendingConfigOptions((prev) => ({ ...prev, [configId]: value }));
    }, []);
 
@@ -4095,11 +4577,20 @@ index 2628b8146..90d8cf201 100644
 -      const newModelId = typeof modelId === 'function' ? modelId(prev) : modelId;
 +      const rawModelId = typeof modelId === 'function' ? modelId(prev) : modelId;
 +      const { modelId: newModelId, effort } = splitModelEffort(rawModelId);
-+      if (effort) _setSelectedAcpEffort(effort);
++      const previousModelId = splitModelEffort(prev).modelId;
++      if (effort) {
++        _setSelectedAcpEffort(effort);
++      } else if (newModelId !== previousModelId) {
++        _setSelectedAcpEffort(null);
++        setPendingConfigOptions((pending) => {
++          const { reasoning_effort: _reasoningEffort, power: _power, ...rest } = pending;
++          return rest;
++        });
++      }
        const agentKey = selectedAgentRef.current;
        if (agentKey && agentKey !== 'gemini' && agentKey !== 'custom' && newModelId) {
          void savePreferredModelId(agentKey, newModelId);
-@@ -379,18 +434,20 @@ export const useGuidAgentSelection = ({
+@@ -379,18 +440,20 @@ export const useGuidAgentSelection = ({
        .then((cached) => {
          if (!isActive) return;
          const options = cached?.[backend];
@@ -4115,19 +4606,19 @@ index 2628b8146..90d8cf201 100644
 +        // Keep reasoning_effort and service_tier here so the GUID can render them as dedicated selectors.
 +        const filtered = typedOptions.filter((opt) => opt.category !== 'model' && opt.category !== 'mode');
 +        setCachedConfigOptions(filtered);
-+        _setSelectedAcpEffort(effortFromConfigOptions(typedOptions) ?? defaultEffortForBackend(backend));
++        _setSelectedAcpEffort(effortFromConfigOptions(typedOptions));
 +        _setSelectedAcpServiceTier(null);
          setPendingConfigOptions({});
        })
        .catch(() => {
          if (!isActive) return;
          setCachedConfigOptions([]);
-+        _setSelectedAcpEffort(defaultEffortForBackend(backend));
++        _setSelectedAcpEffort(null);
 +        _setSelectedAcpServiceTier(null);
          setPendingConfigOptions({});
        });
      return () => {
-@@ -422,11 +479,15 @@ export const useGuidAgentSelection = ({
+@@ -422,11 +485,15 @@ export const useGuidAgentSelection = ({
          const config = await ConfigStorage.get('acp.config');
          if (cancelled) return;
          const preferred = (config?.[backend as AcpBackendAll] as Record<string, unknown>)?.preferredModelId as
@@ -4147,7 +4638,7 @@ index 2628b8146..90d8cf201 100644
          }
        } catch {
          /* fall through to cached / native default */
-@@ -435,8 +496,13 @@ export const useGuidAgentSelection = ({
+@@ -435,8 +502,13 @@ export const useGuidAgentSelection = ({
 
        // 2. Last model the ACP bridge cached for this backend.
        const cachedModelId = acpCachedModels[backend]?.currentModelId;
@@ -4163,20 +4654,20 @@ index 2628b8146..90d8cf201 100644
          return;
        }
 
-@@ -457,7 +523,11 @@ export const useGuidAgentSelection = ({
+@@ -457,7 +529,11 @@ export const useGuidAgentSelection = ({
        }
 
        // 4. No signal (non-claude backend, or claude without a native login).
 -      if (!cancelled) _setSelectedAcpModel(null);
 +      if (!cancelled) {
 +        _setSelectedAcpModel(null);
-+        _setSelectedAcpEffort(defaultEffortForBackend(backend));
++        _setSelectedAcpEffort(null);
 +        _setSelectedAcpServiceTier(null);
 +      }
      };
 
      void resolveAcpModel();
-@@ -540,14 +610,29 @@ export const useGuidAgentSelection = ({
+@@ -540,14 +616,29 @@ export const useGuidAgentSelection = ({
        : selectedAgentKey.startsWith('custom:')
          ? 'custom'
          : selectedAgentKey;
@@ -4208,7 +4699,7 @@ index 2628b8146..90d8cf201 100644
        })
        .catch(() => {
          // Offline resolve is best-effort; the picker keeps its default until connect.
-@@ -617,6 +702,10 @@ export const useGuidAgentSelection = ({
+@@ -617,6 +708,10 @@ export const useGuidAgentSelection = ({
      acpCachedModels,
      selectedAcpModel,
      setSelectedAcpModel,
@@ -4220,14 +4711,14 @@ index 2628b8146..90d8cf201 100644
      currentEffectiveAgentInfo,
      cachedConfigOptions,
 diff --git a/src/renderer/pages/guid/hooks/useGuidSend.ts b/src/renderer/pages/guid/hooks/useGuidSend.ts
-index e5c063be6..dd7eb7dd3 100644
+index e5c063be6..c6c69ac76 100644
 --- a/src/renderer/pages/guid/hooks/useGuidSend.ts
 +++ b/src/renderer/pages/guid/hooks/useGuidSend.ts
 @@ -17,6 +17,9 @@ import { type TFunction } from 'i18next';
  import type { NavigateFunction } from 'react-router-dom';
  import type { AcpBackend, AvailableAgent, EffectiveAgentInfo } from '../types';
 
-+type GuidReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
++type GuidReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 +type GuidServiceTier = 'normal' | 'priority';
 +
  export type GuidSendDeps = {
@@ -4251,19 +4742,31 @@ index e5c063be6..dd7eb7dd3 100644
      pendingConfigOptions,
      cachedConfigOptions,
      currentModel,
-@@ -458,6 +465,11 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+@@ -458,6 +465,23 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
          console.warn(`${acpBackend} CLI not found, but proceeding to let conversation panel handle it.`);
        }
        const agentBackend = acpBackend || selectedAgent;
++      const advertisedConfigIds = new Set(cachedConfigOptions.map((option) => option.id));
++      const transportablePendingConfigOptions = Object.fromEntries(
++        Object.entries(pendingConfigOptions).filter(
++          ([configId]) =>
++            (configId !== 'reasoning_effort' && configId !== 'service_tier') ||
++            advertisedConfigIds.has(configId)
++        )
++      );
 +      const effectivePendingConfigOptions: Record<string, string> = {
-+        ...pendingConfigOptions,
-+        ...(selectedAcpEffort ? { reasoning_effort: selectedAcpEffort } : {}),
-+        ...(selectedAcpServiceTier ? { service_tier: selectedAcpServiceTier } : {}),
++        ...transportablePendingConfigOptions,
++        ...(selectedAcpEffort && advertisedConfigIds.has('reasoning_effort')
++          ? { reasoning_effort: selectedAcpEffort }
++          : {}),
++        ...(selectedAcpServiceTier && advertisedConfigIds.has('service_tier')
++          ? { service_tier: selectedAcpServiceTier }
++          : {}),
 +      };
        const agentConversationParams = buildAgentConversationParams({
          backend: agentBackend,
          name: input,
-@@ -484,6 +496,8 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+@@ -484,6 +508,8 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
            ...projectExtra,
            ...sessionSkillsExtra,
            excludeBuiltinSkills,
@@ -4272,7 +4775,7 @@ index e5c063be6..dd7eb7dd3 100644
          },
        });
 
-@@ -491,9 +505,9 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+@@ -491,9 +517,9 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
          // Merge pending selections into cached options so the UI shows the user's choice immediately
          const mergedCachedConfigOptions =
            cachedConfigOptions.length > 0
@@ -4284,7 +4787,7 @@ index e5c063be6..dd7eb7dd3 100644
                    return pending ? { ...opt, currentValue: pending, selectedValue: pending } : opt;
                  })
                : cachedConfigOptions
-@@ -506,8 +520,11 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+@@ -506,8 +532,11 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
              cachedConfigOptions: mergedCachedConfigOptions,
            };
          }
@@ -4298,7 +4801,7 @@ index e5c063be6..dd7eb7dd3 100644
          }
 
          const conversation = await ipcBridge.conversation.create.invoke(agentConversationParams);
-@@ -547,6 +564,8 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+@@ -547,6 +576,8 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
      isPresetAgent,
      selectedMode,
      selectedAcpModel,
@@ -4307,7 +4810,7 @@ index e5c063be6..dd7eb7dd3 100644
      pendingConfigOptions,
      cachedConfigOptions,
      currentModel,
-@@ -565,42 +584,45 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
+@@ -565,42 +596,45 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
      projectWorkspace,
    ]);
 
@@ -4390,7 +4893,7 @@ index e5c063be6..dd7eb7dd3 100644
    // No usable model configured. Mirrors the send-time validation: only the
    // model-backed backends actually reject on a missing model - the Gemini path
 diff --git a/src/renderer/pages/guid/index.module.css b/src/renderer/pages/guid/index.module.css
-index d4f57919e..81affaaea 100644
+index d4f57919e..8d23c8d4e 100644
 --- a/src/renderer/pages/guid/index.module.css
 +++ b/src/renderer/pages/guid/index.module.css
 @@ -345,7 +345,7 @@
@@ -4594,8 +5097,214 @@ index d4f57919e..81affaaea 100644
    }
 
    .actionSubmit {
+@@ -740,3 +807,158 @@
+   width: 100%;
+   margin-top: 16px;
+ }
++
++/* Codex-style unified model, reasoning and speed menu. The dropdown is
++   portalled by Arco, so these selectors must remain global. */
++:global(.guid-intelligence-menu) {
++  width: min(312px, calc(100vw - 24px));
++  padding: 6px;
++  overflow: visible;
++  color: var(--color-text-1);
++  background: var(--bg-3);
++  border: 1px solid var(--color-border-2);
++  border-radius: 10px;
++  box-shadow: 0 14px 36px rgb(0 0 0 / 28%);
++  letter-spacing: 0;
++}
++
++:global(.guid-intelligence-menu-list) {
++  width: 100%;
++  min-width: 0 !important;
++  padding: 0 !important;
++  background: transparent !important;
++  box-shadow: none !important;
++}
++
++:global(.guid-intelligence-menu-list .arco-menu-item),
++:global(.guid-intelligence-menu-list .arco-menu-inline-header) {
++  min-height: 38px;
++  margin: 1px 0 !important;
++  border-radius: 7px;
++}
++
++:global(.guid-intelligence-row) {
++  display: grid;
++  grid-template-columns: minmax(72px, auto) minmax(0, 1fr) 16px;
++  align-items: center;
++  gap: 10px;
++  width: 100%;
++  min-width: 0;
++}
++
++:global(.guid-intelligence-row-label) {
++  color: var(--color-text-1);
++  font-size: 14px;
++}
++
++:global(.guid-intelligence-row-value) {
++  min-width: 0;
++  overflow: hidden;
++  color: var(--color-text-3);
++  font-size: 13px;
++  text-align: right;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++:global(.guid-intelligence-row-chevron) {
++  color: var(--color-text-3);
++}
++
++:global(.guid-intelligence-option),
++:global(.guid-intelligence-reset) {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 14px;
++  width: 100%;
++  min-width: 0;
++}
++
++:global(.guid-intelligence-reset) {
++  color: var(--color-text-3);
++}
++
++:global(.guid-intelligence-advanced) {
++  margin-top: 5px;
++  padding-top: 5px;
++  border-top: 1px solid var(--color-border-2);
++}
++
++:global(.guid-intelligence-advanced-toggle) {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  width: 100%;
++  min-height: 38px;
++  padding: 0 12px;
++  color: var(--color-text-3);
++  font: inherit;
++  font-size: 14px;
++  letter-spacing: 0;
++  background: transparent;
++  border: 0;
++  border-radius: 7px;
++  cursor: pointer;
++}
++
++:global(.guid-intelligence-advanced-toggle:hover),
++:global(.guid-intelligence-advanced-toggle:focus-visible) {
++  color: var(--color-text-1);
++  background: var(--color-fill-2);
++  outline: none;
++}
++
++:global(.guid-intelligence-power) {
++  padding: 7px 12px 10px;
++}
++
++:global(.guid-intelligence-power-summary) {
++  display: flex;
++  flex-direction: column;
++  gap: 4px;
++  min-height: 20px;
++  margin-bottom: 3px;
++  color: var(--color-text-2);
++  font-size: 12px;
++}
++
++:global(.guid-intelligence-ultra-warning) {
++  display: inline-flex;
++  align-items: center;
++  gap: 5px;
++  color: rgb(var(--warning-6));
++}
++
++:global(.guid-intelligence-power .arco-slider) {
++  margin: 8px 3px 2px;
++}
++
++:global(.guid-intelligence-power .arco-slider-track) {
++  height: 6px;
++}
++
++:global(.guid-intelligence-power .arco-slider-button) {
++  width: 18px;
++  height: 18px;
++  border-width: 2px;
++}
++
++:global(.guid-intelligence-power-ends) {
++  display: flex;
++  justify-content: space-between;
++  margin-top: 1px;
++  color: var(--color-text-4);
++  font-size: 11px;
++}
++
++@media (max-width: 520px) {
++  :global(.guid-intelligence-menu) {
++    width: min(292px, calc(100vw - 16px));
++  }
++
++  :global(.guid-intelligence-row) {
++    grid-template-columns: minmax(68px, auto) minmax(0, 1fr) 16px;
++    gap: 8px;
++  }
++}
+diff --git a/src/renderer/pages/settings/AgentSettings/RemoteAgentManagement.tsx b/src/renderer/pages/settings/AgentSettings/RemoteAgentManagement.tsx
+index 250efe1a8..80dd0df40 100644
+--- a/src/renderer/pages/settings/AgentSettings/RemoteAgentManagement.tsx
++++ b/src/renderer/pages/settings/AgentSettings/RemoteAgentManagement.tsx
+@@ -72,7 +72,7 @@ const RemoteAgentFormModal: React.FC<{
+   const [form] = Form.useForm<RemoteAgentInput>();
+   const [testing, setTesting] = useState(false);
+   const [saving, setSaving] = useState(false);
+-  const [activeProtocol, setActiveProtocol] = useState<string>('openclaw');
++  const [activeProtocol, setActiveProtocol] = useState<RemoteAgentInput['protocol']>('acp');
+   const [avatar, setAvatar] = useState<string>('\u{1F916}');
+   const [pairingState, setPairingState] = useState<PairingState>('idle');
+   const [pairingTimeLeft, setPairingTimeLeft] = useState(0);
+@@ -177,8 +177,8 @@ const RemoteAgentFormModal: React.FC<{
+       }
+       savedAgentIdRef.current = agentId;
+
+-      // For openclaw protocol, perform full handshake
+-      if (activeProtocol === 'openclaw') {
++      // OpenClaw is also the authenticated transport for remote ACP sessions.
++      if (activeProtocol === 'openclaw' || activeProtocol === 'acp') {
+         setPairingState('handshaking');
+         const result = await ipcBridge.remoteAgent.handshake.invoke({ id: agentId });
+
+@@ -297,7 +297,7 @@ const RemoteAgentFormModal: React.FC<{
+             allowInsecure: editAgent.allowInsecure,
+           });
+         } else {
+-          setActiveProtocol('openclaw');
++          setActiveProtocol('acp');
+           setAvatar('\u{1F916}');
+           form.setFieldsValue({ authType: 'none' });
+         }
+@@ -346,6 +346,13 @@ const RemoteAgentFormModal: React.FC<{
+
+         {/* Connection fields */}
+         <Form form={form} layout='vertical' autoComplete='off'>
++          <FormItem label={t('settings.remoteAgent.protocol')}>
++            <Select value={activeProtocol} onChange={(value) => setActiveProtocol(value as RemoteAgentInput['protocol'])}>
++              <Select.Option value='acp'>{t('settings.remoteAgent.protocolCodexAcp')}</Select.Option>
++              <Select.Option value='openclaw'>{t('settings.remoteAgent.protocolOpenClaw')}</Select.Option>
++            </Select>
++          </FormItem>
++
+           <FormItem
+             label={t('settings.remoteAgent.url')}
+             field='url'
 diff --git a/src/renderer/services/i18n/i18n-keys.d.ts b/src/renderer/services/i18n/i18n-keys.d.ts
-index d56ab7cfa..172eb3916 100644
+index d56ab7cfa..d590db363 100644
 --- a/src/renderer/services/i18n/i18n-keys.d.ts
 +++ b/src/renderer/services/i18n/i18n-keys.d.ts
 @@ -48,6 +48,7 @@ export type I18nKey =
@@ -4606,16 +5315,40 @@ index d56ab7cfa..172eb3916 100644
    | 'agentMode.default'
    | 'agentMode.dontAsk'
    | 'agentMode.permission'
-@@ -561,6 +562,8 @@ export type I18nKey =
+@@ -552,6 +553,7 @@ export type I18nKey =
+   | 'conversation.minimap.noMatch'
+   | 'conversation.minimap.searchAria'
+   | 'conversation.minimap.searchHint'
++  | 'conversation.modelSelector.advanced'
+   | 'conversation.modelSelector.claudeSubscriptionNotice'
+   | 'conversation.modelSelector.connectProvider'
+   | 'conversation.modelSelector.effort'
+@@ -559,8 +561,16 @@ export type I18nKey =
+   | 'conversation.modelSelector.effortHighDesc'
+   | 'conversation.modelSelector.effortLow'
    | 'conversation.modelSelector.effortLowDesc'
++  | 'conversation.modelSelector.effortMax'
++  | 'conversation.modelSelector.effortMaxDesc'
    | 'conversation.modelSelector.effortMedium'
    | 'conversation.modelSelector.effortMediumDesc'
++  | 'conversation.modelSelector.effortMinimal'
++  | 'conversation.modelSelector.effortMinimalDesc'
++  | 'conversation.modelSelector.effortUltra'
++  | 'conversation.modelSelector.effortUltraDesc'
 +  | 'conversation.modelSelector.effortXhigh'
 +  | 'conversation.modelSelector.effortXhighDesc'
    | 'conversation.modelSelector.emptyBody'
    | 'conversation.modelSelector.emptyFlux'
    | 'conversation.modelSelector.emptySub'
-@@ -575,6 +578,11 @@ export type I18nKey =
+@@ -571,12 +581,22 @@ export type I18nKey =
+   | 'conversation.modelSelector.moreModels'
+   | 'conversation.modelSelector.noMatch'
+   | 'conversation.modelSelector.pinAria'
++  | 'conversation.modelSelector.powerAria'
++  | 'conversation.modelSelector.powerFaster'
++  | 'conversation.modelSelector.powerSmarter'
+   | 'conversation.modelSelector.recommended'
++  | 'conversation.modelSelector.resetDefault'
    | 'conversation.modelSelector.resultsN'
    | 'conversation.modelSelector.resultsOne'
    | 'conversation.modelSelector.searchPlaceholder'
@@ -4626,8 +5359,21 @@ index d56ab7cfa..172eb3916 100644
 +  | 'conversation.modelSelector.speedFastDescription'
    | 'conversation.modelSelector.subtitle'
    | 'conversation.modelSelector.title'
++  | 'conversation.modelSelector.ultraUsageWarning'
    | 'conversation.modelSelector.unavailable'
-@@ -4653,7 +4661,6 @@ export type I18nKey =
+   | 'conversation.modelSelector.unpinAria'
+   | 'conversation.noAgentsAvailable'
+@@ -3840,6 +3860,9 @@ export type I18nKey =
+   | 'settings.remoteAgent.pendingCancel'
+   | 'settings.remoteAgent.pendingTimeRemaining'
+   | 'settings.remoteAgent.pendingTimeout'
++  | 'settings.remoteAgent.protocol'
++  | 'settings.remoteAgent.protocolCodexAcp'
++  | 'settings.remoteAgent.protocolOpenClaw'
+   | 'settings.remoteAgent.save'
+   | 'settings.remoteAgent.testConnection'
+   | 'settings.remoteAgent.testError'
+@@ -4653,7 +4676,6 @@ export type I18nKey =
    | 'skills.import.zip.placeholder'
    | 'skills.scanLibrary.done'
    | 'skills.scanLibrary.failed'
@@ -4709,10 +5455,19 @@ index 630a23ccd..9537a0ea6 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/en-US/conversation.json b/src/renderer/services/i18n/locales/en-US/conversation.json
-index a49f73fb0..d9ecd1c33 100644
+index a49f73fb0..9449d4afc 100644
 --- a/src/renderer/services/i18n/locales/en-US/conversation.json
 +++ b/src/renderer/services/i18n/locales/en-US/conversation.json
-@@ -518,7 +518,14 @@
+@@ -506,6 +506,8 @@
+     "pinAria": "Pin {{name}}",
+     "unpinAria": "Unpin {{name}}",
+     "effort": "Effort",
++    "effortMinimal": "Minimal",
++    "effortMinimalDesc": "Minimal reasoning for direct tasks",
+     "effortLow": "Low",
+     "effortMedium": "Medium",
+     "effortHigh": "High",
+@@ -518,7 +520,24 @@
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
      "manageModels": "Manage models",
@@ -4720,14 +5475,47 @@ index a49f73fb0..d9ecd1c33 100644
 +    "claudeSubscriptionNotice": "Claude Code runs on your Claude subscription (Anthropic), so this chat stays on Claude models. To use a different provider like ChatGPT or Gemini, start a new chat and pick that agent.",
 +    "effortXhigh": "XHigh",
 +    "effortXhighDesc": "Maximum reasoning depth for the hardest work",
++    "effortMax": "Max",
++    "effortMaxDesc": "Maximum reasoning depth for the hardest problems",
++    "effortUltra": "Ultra",
++    "effortUltraDesc": "Maximum reasoning with proactive delegation",
 +    "speed": "Speed",
 +    "speedDefault": "Default",
 +    "speedDefaultDescription": "Default speed",
 +    "speedFast": "Fast",
-+    "speedFastDescription": "1.5x speed, increased usage"
++    "speedFastDescription": "1.5x speed, increased usage",
++    "resetDefault": "Reset to default",
++    "advanced": "Advanced",
++    "powerAria": "Model and reasoning power",
++    "powerFaster": "Faster",
++    "powerSmarter": "Smarter",
++    "ultraUsageWarning": "Consumes usage limits faster"
    },
    "tool": {
      "openGoogleConsent": "Open Google sign-in"
+diff --git a/src/renderer/services/i18n/locales/en-US/settings.json b/src/renderer/services/i18n/locales/en-US/settings.json
+index c286b1948..199a38230 100644
+--- a/src/renderer/services/i18n/locales/en-US/settings.json
++++ b/src/renderer/services/i18n/locales/en-US/settings.json
+@@ -1550,7 +1550,7 @@
+     "remoteAgents": "Remote Agents",
+     "localAgentsDescription": "Gemini CLI is built-in. Other agents are auto-detected after local installation.",
+     "localAgentsSetupLink": "Setup guide",
+-    "remoteAgentsDescription": "Only remote OpenClaw connections are supported for now. Other agents are in development.",
++    "remoteAgentsDescription": "Connect remote OpenClaw or Codex ACP agents over secure WebSocket.",
+     "settings": "Settings",
+     "advancedConfig": "Advanced Config",
+     "settingsDisabledHint": "Configuration coming soon",
+@@ -1587,6 +1587,9 @@
+     "name": "Name",
+     "namePlaceholder": "e.g. My Remote Agent",
+     "nameRequired": "Name is required",
++    "protocol": "Protocol",
++    "protocolCodexAcp": "Codex ACP",
++    "protocolOpenClaw": "OpenClaw",
+     "url": "URL",
+     "urlRequired": "Please enter the URL",
+     "authType": "Authentication",
 diff --git a/src/renderer/services/i18n/locales/es-ES/agentMode.json b/src/renderer/services/i18n/locales/es-ES/agentMode.json
 index ed394efb5..383fc30ae 100644
 --- a/src/renderer/services/i18n/locales/es-ES/agentMode.json
@@ -4865,24 +5653,89 @@ index dc4d40471..c23cb0a42 100644
 +  "configToml": "Personalizado(config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/pt-BR/conversation.json b/src/renderer/services/i18n/locales/pt-BR/conversation.json
-index fe91def75..61366d0b1 100644
+index fe91def75..db5b54e37 100644
 --- a/src/renderer/services/i18n/locales/pt-BR/conversation.json
 +++ b/src/renderer/services/i18n/locales/pt-BR/conversation.json
-@@ -438,6 +438,13 @@
+@@ -413,8 +413,8 @@
+     "manageConnectors": "Manage connectors"
+   },
+   "modelSelector": {
+-    "title": "Model",
+-    "subtitle": "Pick a model for this chat. Only what you have connected shows.",
++    "title": "Modelo",
++    "subtitle": "Escolha um modelo para esta conversa. Apenas os modelos habilitados são exibidos.",
+     "enabledCount": "{{count}} enabled",
+     "recommended": "Recommended",
+     "searchPlaceholder": "Search models…",
+@@ -426,18 +426,37 @@
+     "unavailable": "Currently unavailable",
+     "pinAria": "Pin {{name}}",
+     "unpinAria": "Unpin {{name}}",
+-    "effort": "Effort",
+-    "effortLow": "Low",
+-    "effortMedium": "Medium",
+-    "effortHigh": "High",
+-    "effortLowDesc": "Fast responses with lighter reasoning",
+-    "effortMediumDesc": "Balances speed and reasoning depth",
+-    "effortHighDesc": "Greater reasoning depth for complex problems",
++    "effort": "Esforço",
++    "effortMinimal": "Mínimo",
++    "effortMinimalDesc": "Raciocínio mínimo para tarefas diretas",
++    "effortLow": "Leve",
++    "effortMedium": "Médio",
++    "effortHigh": "Alto",
++    "effortLowDesc": "Respostas rápidas com raciocínio leve",
++    "effortMediumDesc": "Equilíbrio entre velocidade e profundidade",
++    "effortHighDesc": "Maior profundidade para problemas complexos",
+     "emptyTitle": "No models yet",
+     "emptySub": "Connect a provider to choose a model.",
      "emptyBody": "No models yet. Connect a provider or sign in to a CLI.",
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
 -    "manageModels": "Manage models"
 +    "manageModels": "Manage models",
-+    "effortXhigh": "XHigh",
-+    "effortXhighDesc": "Raciocínio máximo para trabalhos difíceis",
++    "effortXhigh": "Extra alto",
++    "effortXhighDesc": "Raciocínio extra para trabalhos difíceis",
++    "effortMax": "Máximo",
++    "effortMaxDesc": "Profundidade máxima para os problemas mais difíceis",
++    "effortUltra": "Ultra",
++    "effortUltraDesc": "Raciocínio máximo com delegação proativa",
 +    "speed": "Velocidade",
 +    "speedDefault": "Padrão",
 +    "speedDefaultDescription": "Velocidade padrão",
 +    "speedFast": "Rápido",
-+    "speedFastDescription": "1.5x velocidade, maior uso"
++    "speedFastDescription": "Velocidade 1,5x, maior uso",
++    "resetDefault": "Redefinir para o padrão",
++    "advanced": "Avançado",
++    "powerAria": "Potência de modelo e raciocínio",
++    "powerFaster": "Mais rápido",
++    "powerSmarter": "Mais capaz",
++    "ultraUsageWarning": "Consome os limites de uso mais rapidamente"
    }
  }
+diff --git a/src/renderer/services/i18n/locales/pt-BR/settings.json b/src/renderer/services/i18n/locales/pt-BR/settings.json
+index 9eefad9e2..707c942b0 100644
+--- a/src/renderer/services/i18n/locales/pt-BR/settings.json
++++ b/src/renderer/services/i18n/locales/pt-BR/settings.json
+@@ -1538,7 +1538,7 @@
+     "remoteAgents": "Agentes Remotos",
+     "localAgentsDescription": "O Gemini CLI é integrado. Outros agentes são detectados automaticamente após a instalação local.",
+     "localAgentsSetupLink": "Guia de configuração",
+-    "remoteAgentsDescription": "Por enquanto, apenas conexões remotas OpenClaw são suportadas. Outros agentes estão em desenvolvimento.",
++    "remoteAgentsDescription": "Conecte agentes OpenClaw ou Codex ACP remotos por WebSocket seguro.",
+     "settings": "Configurações",
+     "advancedConfig": "Configuração Avançada",
+     "settingsDisabledHint": "Configuração em breve",
+@@ -1575,6 +1575,9 @@
+     "name": "Nome",
+     "namePlaceholder": "ex.: Meu Agente Remoto",
+     "nameRequired": "O nome é obrigatório",
++    "protocol": "Protocolo",
++    "protocolCodexAcp": "Codex ACP",
++    "protocolOpenClaw": "OpenClaw",
+     "url": "URL",
+     "urlRequired": "Insira a URL",
+     "authType": "Autenticação",
 diff --git a/src/renderer/services/i18n/locales/ru-RU/agentMode.json b/src/renderer/services/i18n/locales/ru-RU/agentMode.json
 index 69d8c1e7e..ab6851b1e 100644
 --- a/src/renderer/services/i18n/locales/ru-RU/agentMode.json
@@ -5185,6 +6038,54 @@ index a4b0b5ed7..69288fd2f 100644
    it('marks selected agent with data attribute', () => {
      const agents: AvailableAgent[] = [
        makeAgent({ backend: 'claude', name: 'Claude' }),
+diff --git a/tests/unit/RemoteAgentCore.test.ts b/tests/unit/RemoteAgentCore.test.ts
+index 15c93f562..18ef98e6d 100644
+--- a/tests/unit/RemoteAgentCore.test.ts
++++ b/tests/unit/RemoteAgentCore.test.ts
+@@ -407,6 +407,19 @@ describe('RemoteAgentCore', () => {
+
+       expect(config.onSignalEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'acp_permission' }));
+     });
++
++    it('routes the current exec.approval.requested event to handleApprovalRequest', () => {
++      const { core, config } = createConnectedCore();
++      core['connection'] = mockConnection as never;
++
++      core['handleEvent']({
++        type: 'event',
++        event: 'exec.approval.requested',
++        payload: { requestId: 'req-2' },
++      });
++
++      expect(config.onSignalEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'acp_permission' }));
++    });
+   });
+
+   describe('inferToolKind', () => {
+@@ -540,6 +553,23 @@ describe('RemoteAgentCore', () => {
+       expect(mockConnection.sessionKey).toBe('reset-key');
+     });
+
++    it('uses the canonical agent-scoped ACP session key for a Codex ACP remote', async () => {
++      const base = makeConfig();
++      const cfg = makeConfig({
++        remoteConfig: { ...base.remoteConfig, protocol: 'acp' },
++      });
++      const core = new RemoteAgentCore(cfg);
++      core['connection'] = mockConnection as never;
++      mockConnection.isConnected = true;
++
++      await core['resolveSession']();
++
++      expect(mockConnection.sessionsReset).toHaveBeenCalledWith({
++        key: 'agent:codex:acp:conv-1',
++        reason: 'new',
++      });
++    });
++
+     it('calls onSessionKeyUpdate when session key changes', async () => {
+       const cfg = makeConfig();
+       const core = new RemoteAgentCore(cfg);
 diff --git a/tests/unit/WebSocketManager.test.ts b/tests/unit/WebSocketManager.test.ts
 index a837db695..872d740a8 100644
 --- a/tests/unit/WebSocketManager.test.ts
@@ -5307,11 +6208,71 @@ index 22e16db68..4e8fa31c1 100644
    it("symlinks the scoped auth.json at the user's real auth.json (native login survives)", async () => {
      await writeFile(userConfig, 'model = "gpt-5"\n', 'utf8');
      await writeFile(userAuth, JSON.stringify({ tokens: { access_token: 'acc' } }), 'utf8');
+diff --git a/tests/unit/remoteAgentBridge.test.ts b/tests/unit/remoteAgentBridge.test.ts
+index a8dc0c002..5820e8242 100644
+--- a/tests/unit/remoteAgentBridge.test.ts
++++ b/tests/unit/remoteAgentBridge.test.ts
+@@ -201,7 +201,7 @@ describe('remoteAgentBridge', () => {
+       expect(result).toBeDefined();
+     });
+
+-    it('creates agent without device identity for non-openclaw protocol', async () => {
++    it('creates an ACP agent with the OpenClaw device identity used by its gateway transport', async () => {
+       const handler = providerMap.get('create')!;
+       await handler({
+         name: 'AcpAgent',
+@@ -212,9 +212,9 @@ describe('remoteAgentBridge', () => {
+
+       expect(mockDb.createRemoteAgent).toHaveBeenCalledWith(
+         expect.objectContaining({
+-          deviceId: undefined,
+-          devicePublicKey: undefined,
+-          devicePrivateKey: undefined,
++          deviceId: 'dev-id',
++          devicePublicKey: 'pub-pem',
++          devicePrivateKey: 'priv-pem',
+         })
+       );
+     });
+@@ -342,7 +342,7 @@ describe('remoteAgentBridge', () => {
+       expect(result).toEqual({ status: 'error', error: 'Remote agent not found' });
+     });
+
+-    it('returns ok immediately for non-openclaw protocol', async () => {
++    it('performs the OpenClaw gateway handshake for the ACP transport', async () => {
+       mockDb.getRemoteAgent.mockReturnValueOnce({
+         id: 'a2',
+         name: 'AcpAgent',
+@@ -354,8 +354,14 @@ describe('remoteAgentBridge', () => {
+       });
+
+       const handler = providerMap.get('handshake')!;
+-      const result = await handler({ id: 'a2' });
++      const resultPromise = handler({ id: 'a2' });
++
++      await new Promise((resolve) => setTimeout(resolve, 0));
++      capturedConnCallbacks.onHelloOk!({});
++
++      const result = await resultPromise;
+       expect(result).toEqual({ status: 'ok' });
++      expect(mockDb.updateRemoteAgent).toHaveBeenCalledWith('a2', expect.objectContaining({ status: 'connected' }));
+     });
+
+     it('returns ok on successful hello handshake', async () => {
 diff --git a/tests/unit/renderer/GuidActionRow.dom.test.tsx b/tests/unit/renderer/GuidActionRow.dom.test.tsx
-index 6f2bb3023..c249c30bc 100644
+index 6f2bb3023..1facc4894 100644
 --- a/tests/unit/renderer/GuidActionRow.dom.test.tsx
 +++ b/tests/unit/renderer/GuidActionRow.dom.test.tsx
-@@ -71,6 +71,15 @@ vi.mock('lucide-react', async (importOriginal) => ({
+@@ -2,6 +2,8 @@ import { fireEvent, render, screen } from '@testing-library/react';
+ import React from 'react';
+ import { describe, expect, it, vi } from 'vitest';
+
++const acpConfigSelectorSpy = vi.hoisted(() => vi.fn());
++
+ vi.mock('react-i18next', () => ({
+   useTranslation: () => ({
+     t: (key: string) => key,
+@@ -71,12 +73,24 @@ vi.mock('lucide-react', async (importOriginal) => ({
    Upload: () => <span>UploadOne</span>,
  }));
 
@@ -5327,7 +6288,46 @@ index 6f2bb3023..c249c30bc 100644
  vi.mock('@/renderer/components/agent/AgentModeSelector', () => ({
    default: () => <div>AgentModeSelector</div>,
  }));
-@@ -168,12 +177,30 @@ describe('GuidActionRow', () => {
+
+ vi.mock('@/renderer/components/agent/AcpConfigSelector', () => ({
+-  default: () => null,
++  default: (props: unknown) => {
++    acpConfigSelectorSpy(props);
++    return null;
++  },
+ }));
+
+ vi.mock('@/renderer/hooks/context/LayoutContext', () => ({
+@@ -151,6 +165,28 @@ describe('GuidActionRow', () => {
+     expect(screen.getByText('ArrowUp')).toBeInTheDocument();
+   });
+
++  it('keeps Codex model, effort, speed and power inside the unified selector', () => {
++    acpConfigSelectorSpy.mockClear();
++    render(
++      <GuidActionRow
++        {...defaultProps}
++        cachedConfigOptions={[
++          { id: 'model', category: 'model', type: 'select', currentValue: 'gpt-5.6-sol' },
++          { id: 'reasoning_effort', category: 'thought_level', type: 'select', currentValue: 'high' },
++          { id: 'service_tier', category: 'service_tier', type: 'select', currentValue: 'normal' },
++          { id: 'power', type: 'select', currentValue: 'gpt-5.6-sol:high' },
++          { id: 'vendor_option', type: 'select', currentValue: 'on' },
++        ]}
++      />
++    );
++
++    expect(acpConfigSelectorSpy).toHaveBeenLastCalledWith(
++      expect.objectContaining({
++        initialConfigOptions: [expect.objectContaining({ id: 'vendor_option' })],
++      })
++    );
++  });
++
+   // NOTE: builtin-skill count + toggle moved out of GuidActionRow's inline "+"
+   // menu into the shared ComposerAddMenu. That behaviour is now covered by
+   // ComposerAddMenu.dom.test.tsx (count pill) and useComposerSkills.dom.test.ts
+@@ -168,12 +204,30 @@ describe('GuidActionRow', () => {
 
      await vi.waitFor(() => {
        expect(ipcBridge.dialog.showOpen.invoke).toHaveBeenCalledWith({
@@ -5391,10 +6391,47 @@ index 62e56ae1b..4b3f1f41a 100644
 +  });
 +});
 diff --git a/tests/unit/renderer/guidModelSelector.dom.test.tsx b/tests/unit/renderer/guidModelSelector.dom.test.tsx
-index 1f90ee674..cbfeff3ab 100644
+index 1f90ee674..197239f98 100644
 --- a/tests/unit/renderer/guidModelSelector.dom.test.tsx
 +++ b/tests/unit/renderer/guidModelSelector.dom.test.tsx
-@@ -215,6 +215,12 @@ const baseProps = {
+@@ -89,6 +89,12 @@ vi.mock('@arco-design/web-react', () => {
+         {children}
+       </div>
+     ),
++    SubMenu: ({ children, title }: React.PropsWithChildren & { title?: React.ReactNode }) => (
++      <div>
++        <div>{title}</div>
++        {children}
++      </div>
++    ),
+   });
+   // The picker added an Arco search Input above the model list (Packet 3B).
+   const Input = ({
+@@ -105,6 +111,23 @@ vi.mock('@arco-design/web-react', () => {
+     Dropdown: ({ droplist }: React.PropsWithChildren & { droplist?: React.ReactNode }) => <>{droplist}</>,
+     Input,
+     Menu,
++    Message: { warning: vi.fn() },
++    Slider: ({
++      value,
++      onChange,
++      'aria-label': ariaLabel,
++    }: {
++      value?: number;
++      onChange?: (value: number) => void;
++      'aria-label'?: string;
++    }) => (
++      <input
++        aria-label={ariaLabel}
++        type='range'
++        value={value ?? 0}
++        onChange={(event) => onChange?.(Number(event.target.value))}
++      />
++    ),
+     Tooltip: ({ children }: React.PropsWithChildren) => <>{children}</>,
+   };
+ });
+@@ -215,6 +238,12 @@ const baseProps = {
    currentAcpCachedModelInfo: null,
    selectedAcpModel: null,
    setSelectedAcpModel: vi.fn(),
@@ -5407,7 +6444,7 @@ index 1f90ee674..cbfeff3ab 100644
  };
 
  beforeEach(() => {
-@@ -226,6 +232,10 @@ beforeEach(() => {
+@@ -226,6 +255,10 @@ beforeEach(() => {
    // resolves cleanly and stays silent in tests that don't exercise it.
    mockResolveForChatStart.mockResolvedValue({ ok: false, error: 'not-connected' });
    baseProps.setCurrentModel.mockClear();
@@ -5418,11 +6455,17 @@ index 1f90ee674..cbfeff3ab 100644
  });
 
  afterEach(() => {
-@@ -518,6 +528,134 @@ describe('GuidModelSelector home picker', () => {
+@@ -513,11 +546,151 @@ describe('GuidModelSelector home picker', () => {
+
+     // Sonnet (3/15) blended ≈ 12 → $$. Haiku (0.8/4) blended ≈ 3.2 → $.
+     // Two rows match Sonnet (regular + 1M context); both should render $$.
+-    await screen.findByText('Sonnet');
++    await screen.findAllByText('Sonnet');
+     expect(screen.getAllByText('$$').length).toBeGreaterThanOrEqual(2);
      expect(screen.getByText('$')).toBeInTheDocument();
    });
 
-+  it('collapses Codex ACP model/effort variants into one model row plus a separate effort selector', async () => {
++  it('collapses Codex model, effort, speed and Power into one compact configuration menu', async () => {
 +    mockCuratedForAgent.mockResolvedValue([]);
 +    const fireEventClick = (await import('@testing-library/react')).fireEvent.click;
 +    const setSelectedAcpModel = vi.fn();
@@ -5479,16 +6522,25 @@ index 1f90ee674..cbfeff3ab 100644
 +              { value: 'priority', name: 'Fast' },
 +            ],
 +          },
++          {
++            id: 'power',
++            type: 'select',
++            currentValue: 'gpt-5.5:xhigh',
++            options: [
++              { value: 'gpt-5.4:high', name: '5.4 High' },
++              { value: 'gpt-5.5:xhigh', name: '5.5 Extra High' },
++            ],
++          },
 +        ]}
 +        onConfigOptionSelect={onConfigOptionSelect}
 +      />
 +    );
 +
-+    expect(await screen.findByText('GPT-5.5')).toBeInTheDocument();
-+    expect(screen.getByText('GPT-5.4')).toBeInTheDocument();
++    expect(await screen.findByText('conversation.modelSelector.title')).toBeInTheDocument();
++    expect(screen.getByText('5.5')).toBeInTheDocument();
 +    expect(screen.queryByText('GPT-5.5 (xhigh)')).not.toBeInTheDocument();
 +
-+    fireEventClick(screen.getByText('GPT-5.4'));
++    fireEventClick(await screen.findByText('GPT-5.4'));
 +    expect(setSelectedAcpModel).toHaveBeenCalledWith('gpt-5.4');
 +
 +    fireEventClick(screen.getByText('conversation.modelSelector.effortLow'));
@@ -5499,6 +6551,9 @@ index 1f90ee674..cbfeff3ab 100644
 +    fireEventClick(screen.getByText('conversation.modelSelector.speedFast'));
 +    expect(setSelectedAcpServiceTier).toHaveBeenCalledWith('priority');
 +    expect(onConfigOptionSelect).toHaveBeenCalledWith('service_tier', 'priority');
++
++    fireEventClick(screen.getByText('conversation.modelSelector.advanced'));
++    expect(screen.getByRole('slider', { name: 'conversation.modelSelector.powerAria' })).toBeInTheDocument();
 +  });
 +
 +  it('does not use curated provider rows as cold-start ACP models', async () => {
@@ -5545,7 +6600,7 @@ index 1f90ee674..cbfeff3ab 100644
 +      />
 +    );
 +
-+    expect(await screen.findByText('gpt-5.4')).toBeInTheDocument();
++    expect(await screen.findByText('5.4')).toBeInTheDocument();
 +    expect(screen.queryByText('conversation.modelSelector.speedDefault')).not.toBeInTheDocument();
 +    expect(screen.queryByText('conversation.modelSelector.speedFast')).not.toBeInTheDocument();
 +  });

@@ -72,7 +72,7 @@ const RemoteAgentFormModal: React.FC<{
   const [form] = Form.useForm<RemoteAgentInput>();
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [activeProtocol, setActiveProtocol] = useState<string>('openclaw');
+  const [activeProtocol, setActiveProtocol] = useState<RemoteAgentInput['protocol']>('acp');
   const [avatar, setAvatar] = useState<string>('\u{1F916}');
   const [pairingState, setPairingState] = useState<PairingState>('idle');
   const [pairingTimeLeft, setPairingTimeLeft] = useState(0);
@@ -177,8 +177,8 @@ const RemoteAgentFormModal: React.FC<{
       }
       savedAgentIdRef.current = agentId;
 
-      // For openclaw protocol, perform full handshake
-      if (activeProtocol === 'openclaw') {
+      // OpenClaw is also the authenticated transport for remote ACP sessions.
+      if (activeProtocol === 'openclaw' || activeProtocol === 'acp') {
         setPairingState('handshaking');
         const result = await ipcBridge.remoteAgent.handshake.invoke({ id: agentId });
 
@@ -297,7 +297,7 @@ const RemoteAgentFormModal: React.FC<{
             allowInsecure: editAgent.allowInsecure,
           });
         } else {
-          setActiveProtocol('openclaw');
+          setActiveProtocol('acp');
           setAvatar('\u{1F916}');
           form.setFieldsValue({ authType: 'none' });
         }
@@ -346,6 +346,13 @@ const RemoteAgentFormModal: React.FC<{
 
         {/* Connection fields */}
         <Form form={form} layout='vertical' autoComplete='off'>
+          <FormItem label={t('settings.remoteAgent.protocol')}>
+            <Select value={activeProtocol} onChange={(value) => setActiveProtocol(value as RemoteAgentInput['protocol'])}>
+              <Select.Option value='acp'>{t('settings.remoteAgent.protocolCodexAcp')}</Select.Option>
+              <Select.Option value='openclaw'>{t('settings.remoteAgent.protocolOpenClaw')}</Select.Option>
+            </Select>
+          </FormItem>
+
           <FormItem
             label={t('settings.remoteAgent.url')}
             field='url'

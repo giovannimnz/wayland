@@ -42,6 +42,136 @@ function parseTomlHeader(content, key) {
   return match ? match[1].trim() : null;
 }
 
+function titleCase(value) {
+  return String(value || '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function readCodexCatalog() {
+  const codexBin = process.env.CODEX_BIN?.trim() || path.join(ubuntuHome, '.local', 'bin', 'codex');
+  for (const extraArgs of [[], ['--bundled']]) {
+    try {
+      const output = execFileSync(codexBin, ['debug', 'models', ...extraArgs], {
+        encoding: 'utf8',
+        env: { ...process.env, CODEX_HOME: baseCodexHome },
+        maxBuffer: 64 * 1024 * 1024,
+        timeout: 15_000,
+      });
+      const parsed = JSON.parse(output);
+      const models = Array.isArray(parsed?.models) ? parsed.models : [];
+      const visible = models.filter(
+        (model) => model?.slug && model?.visibility === 'list' && model?.supported_in_api !== false
+      );
+      if (visible.length > 0) return visible;
+    } catch {
+      // Account-aware discovery can be unavailable during boot. The bundled
+      // catalog is the deterministic fallback and uses the same schema.
+    }
+  }
+  return [];
+}
+
+function buildCodexConfigOptions() {
+  const models = readCodexCatalog();
+  if (models.length === 0) return [];
+
+  const configToml = safeRead(path.join(baseCodexHome, 'config.toml')) || '';
+  const requestedModel = parseTomlHeader(configToml, 'model');
+  const currentModel = models.find((model) => model.slug === requestedModel) || models[0];
+  const supportedEfforts = Array.isArray(currentModel.supported_reasoning_levels)
+    ? currentModel.supported_reasoning_levels
+    : [];
+  const requestedEffort = parseTomlHeader(configToml, 'model_reasoning_effort');
+  const currentEffort = supportedEfforts.some((entry) => entry?.effort === requestedEffort)
+    ? requestedEffort
+    : currentModel.default_reasoning_level || supportedEfforts[0]?.effort;
+  const requestedTier = parseTomlHeader(configToml, 'service_tier');
+  const currentTier = ['fast', 'priority'].includes(requestedTier) ? 'priority' : 'normal';
+
+  const selectOption = (value, name, description) => ({ value, name, label: name, description });
+  const configOption = (id, name, currentValue, options, category, description) => ({
+    id,
+    name,
+    label: name,
+    type: 'select',
+    ...(category ? { category } : {}),
+    description,
+    currentValue,
+    selectedValue: currentValue,
+    options,
+  });
+
+  const options = [
+    configOption(
+      'model',
+      'Model',
+      currentModel.slug,
+      models.map((model) => selectOption(model.slug, model.display_name || model.slug, model.description)),
+      'model',
+      'Choose which model Codex should use'
+    ),
+  ];
+
+  if (currentEffort && supportedEfforts.length > 1) {
+    options.push(
+      configOption(
+        'reasoning_effort',
+        'Reasoning Effort',
+        currentEffort,
+        supportedEfforts.map((entry) =>
+          selectOption(entry.effort, titleCase(entry.effort), entry.description)
+        ),
+        'thought_level',
+        'Choose how much reasoning effort the model should use'
+      )
+    );
+  }
+
+  const serviceTiers = [selectOption('normal', 'Default', 'Use standard routing and usage')];
+  for (const tier of Array.isArray(currentModel.service_tiers) ? currentModel.service_tiers : []) {
+    if (!serviceTiers.some((entry) => entry.value === tier?.id)) {
+      serviceTiers.push(selectOption(tier.id, tier.name || titleCase(tier.id), tier.description));
+    }
+  }
+  options.push(
+    configOption(
+      'service_tier',
+      'Speed',
+      currentTier,
+      serviceTiers,
+      'service_tier',
+      'Choose standard or accelerated model routing'
+    )
+  );
+
+  if (currentEffort) {
+    const powerOptions = models.flatMap((model) =>
+      (Array.isArray(model.supported_reasoning_levels) ? model.supported_reasoning_levels : []).map((entry) =>
+        selectOption(
+          `${model.slug}:${entry.effort}`,
+          `${model.display_name || model.slug} ${titleCase(entry.effort)}`,
+          entry.description
+        )
+      )
+    );
+    if (powerOptions.length > 0) {
+      options.push(
+        configOption(
+          'power',
+          'Power',
+          `${currentModel.slug}:${currentEffort}`,
+          powerOptions,
+          undefined,
+          'Choose a model and reasoning effort together'
+        )
+      );
+    }
+  }
+
+  return options;
+}
+
 function slugify(value) {
   return value
     .toLowerCase()
@@ -258,7 +388,15 @@ function mergeConfig(sourceConfig, targetConfig) {
   };
 
   merged['acp.cachedModels'] = undefined;
-  merged['acp.cachedConfigOptions'] = undefined;
+  const cachedConfigOptions =
+    typeof merged['acp.cachedConfigOptions'] === 'object' && merged['acp.cachedConfigOptions']
+      ? merged['acp.cachedConfigOptions']
+      : {};
+  const codexConfigOptions = buildCodexConfigOptions();
+  merged['acp.cachedConfigOptions'] = {
+    ...cachedConfigOptions,
+    ...(codexConfigOptions.length > 0 ? { codex: codexConfigOptions } : {}),
+  };
   merged['acp.cachedInitializeResult'] = undefined;
   merged['acp.cachedModes'] = undefined;
 
@@ -299,6 +437,7 @@ function main() {
         String(command.id || '').startsWith(generatedSlashCommandPrefix)
       ).length,
       codexSkillSync: merged['atius.codexSkillSync'],
+      codexConfigOptions: merged['acp.cachedConfigOptions']?.codex?.map((option) => option.id) || [],
     })
   );
 }

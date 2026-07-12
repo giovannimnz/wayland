@@ -118,8 +118,11 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
     () =>
       cachedConfigOptions?.filter(
         (option) =>
+          option.id !== 'model' &&
+          option.category !== 'model' &&
           option.id !== 'reasoning_effort' &&
           option.category !== 'thought_level' &&
+          option.id !== 'power' &&
           !isServiceTierConfigOption(option)
       ) ?? [],
     [cachedConfigOptions]

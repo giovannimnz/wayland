@@ -119,7 +119,7 @@ type WCoreManagerData = {
   sessionId?: string;
   resume?: string;
   /** Per-conversation reasoning effort (sent to the engine via set_config). Absent => engine default. */
-  effort?: 'low' | 'medium' | 'high' | 'xhigh';
+  effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
   /**
    * Per-conversation MCP scoping (#348): the user-server ids active for this
    * chat. `undefined` => all enabled servers; `[]` => no user servers. Forwarded
