@@ -7,7 +7,8 @@ use acp::schema::{
     McpCapabilities, McpServer, McpServerHttp, McpServerStdio, NewSessionRequest,
     NewSessionResponse, PromptCapabilities, PromptRequest, PromptResponse, ProtocolVersion,
     ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionCloseCapabilities,
-    SessionId, SessionInfo, SessionListCapabilities, SessionResumeCapabilities,
+    SessionConfigId, SessionConfigOptionValue, SessionConfigValueId, SessionId, SessionInfo,
+    SessionListCapabilities, SessionModeId, SessionResumeCapabilities,
     SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
     SetSessionModeResponse,
 };
@@ -16,10 +17,12 @@ use agent_client_protocol as acp;
 use codex_config::{DEFAULT_MCP_SERVER_ENVIRONMENT_ID, McpServerConfig, McpServerTransportConfig};
 use codex_core::{
     NewThread, RolloutRecorder, StateDbHandle, ThreadManager, config::Config,
-    find_thread_path_by_id_str, init_state_db, resolve_installation_id, thread_store_from_config,
+    find_thread_path_by_id_str, init_state_db, local_agent_graph_store_from_state_db,
+    resolve_installation_id, thread_store_from_config,
 };
 use codex_exec_server::{EnvironmentManager, ExecServerRuntimePaths};
 use codex_extension_api::empty_extension_registry;
+use codex_home::CodexHomeUserInstructionsProvider;
 use codex_login::{
     CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR,
     auth::{AuthManager, CodexAuth, read_codex_api_key_from_env, read_openai_api_key_from_env},
@@ -33,13 +36,14 @@ use codex_thread_store::{
     ThreadStore,
 };
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 use tracing::{debug, info};
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::agent_profile::AgentProfileConfig;
 use crate::thread::Thread;
 
 /// The Codex implementation of the ACP Agent.
@@ -63,6 +67,10 @@ pub struct CodexAgent {
     sessions: Arc<Mutex<HashMap<SessionId, Arc<Thread>>>>,
     /// Session working directories for filesystem sandboxing
     session_roots: Arc<Mutex<HashMap<SessionId, PathBuf>>>,
+    /// Optional Codex agent profile applied to every ACP session.
+    agent_profile: Option<AgentProfileConfig>,
+    /// Sessions whose first prompt should receive the profile instructions.
+    profile_prompt_pending_sessions: Arc<Mutex<HashSet<String>>>,
 }
 
 const SESSION_LIST_PAGE_SIZE: usize = 25;
@@ -73,14 +81,10 @@ impl CodexAgent {
     pub async fn new(
         config: Config,
         codex_linux_sandbox_exe: Option<PathBuf>,
+        agent_profile: Option<AgentProfileConfig>,
     ) -> std::io::Result<Self> {
-        let auth_manager = AuthManager::shared(
-            config.codex_home.to_path_buf(),
-            false,
-            config.cli_auth_credentials_store_mode,
-            Some(config.chatgpt_base_url.clone()),
-        )
-        .await;
+        let auth_manager =
+            AuthManager::shared_from_config(&config, /* enable_codex_api_key_env */ false).await;
 
         let client_capabilities: Arc<Mutex<ClientCapabilities>> = Arc::default();
         let session_roots: Arc<Mutex<HashMap<SessionId, PathBuf>>> = Arc::default();
@@ -94,16 +98,21 @@ impl CodexAgent {
         );
         let thread_store = thread_store_from_config(&config, state_db.clone());
         let installation_id = resolve_installation_id(&config.codex_home).await?;
+        let user_instructions_provider = Arc::new(CodexHomeUserInstructionsProvider::new(
+            config.codex_home.clone(),
+        ));
         let thread_manager = ThreadManager::new(
             &config,
             auth_manager.clone(),
             SessionSource::Unknown,
             environment_manager,
             empty_extension_registry(),
+            user_instructions_provider,
             None,
             thread_store.clone(),
-            state_db.clone(),
+            local_agent_graph_store_from_state_db(state_db.as_ref()),
             installation_id,
+            None,
             None,
         );
         Ok(Self {
@@ -115,6 +124,8 @@ impl CodexAgent {
             state_db,
             sessions: Arc::default(),
             session_roots,
+            agent_profile,
+            profile_prompt_pending_sessions: Arc::default(),
         })
     }
 
@@ -368,6 +379,7 @@ impl CodexAgent {
                             },
                             required: false,
                             enabled: true,
+                            auth: Default::default(),
                             startup_timeout_sec: None,
                             tool_timeout_sec: None,
                             disabled_tools: None,
@@ -404,10 +416,13 @@ impl CodexAgent {
                                     Some(env.into_iter().map(|env| (env.name, env.value)).collect())
                                 },
                                 env_vars: vec![],
-                                cwd: Some(cwd.to_path_buf()),
+                                cwd: Some(
+                                    codex_utils_path_uri::LegacyAppPathString::from_abs_path(&cwd),
+                                ),
                             },
                             required: false,
                             enabled: true,
+                            auth: Default::default(),
                             startup_timeout_sec: None,
                             tool_timeout_sec: None,
                             disabled_tools: None,
@@ -502,8 +517,10 @@ impl CodexAgent {
                 let opts = codex_login::ServerOptions::new(
                     self.config.codex_home.to_path_buf(),
                     codex_login::auth::CLIENT_ID.to_string(),
-                    None,
+                    self.config.forced_chatgpt_workspace_id.clone(),
                     self.config.cli_auth_credentials_store_mode,
+                    self.config.auth_keyring_backend_kind(),
+                    self.config.auth_route_config(),
                 );
 
                 let server =
@@ -522,6 +539,7 @@ impl CodexAgent {
                     &self.config.codex_home,
                     &api_key,
                     self.config.cli_auth_credentials_store_mode,
+                    self.config.auth_keyring_backend_kind(),
                 )
                 .map_err(Error::into_internal_error)?;
             }
@@ -533,6 +551,7 @@ impl CodexAgent {
                     &self.config.codex_home,
                     &api_key,
                     self.config.cli_auth_credentials_store_mode,
+                    self.config.auth_keyring_backend_kind(),
                 )
                 .map_err(Error::into_internal_error)?;
             }
@@ -590,6 +609,7 @@ impl CodexAgent {
             config.clone(),
             cx,
         ));
+        self.apply_agent_profile(&session_id, &thread).await?;
         let load = thread.load().await?;
 
         self.sessions
@@ -672,7 +692,7 @@ impl CodexAgent {
                 .map_err(|e| Error::internal_error().data(e.to_string()))?;
 
             match &history {
-                InitialHistory::Resumed(resumed) => resumed.history.clone(),
+                InitialHistory::Resumed(resumed) => resumed.history.as_ref().clone(),
                 InitialHistory::Forked(items) => items.clone(),
                 InitialHistory::Cleared | InitialHistory::New => Vec::new(),
             }
@@ -691,6 +711,7 @@ impl CodexAgent {
             rollout_path,
             self.auth_manager.clone(),
             None,
+            false,
         ))
         .await
         .map_err(|e| Error::internal_error().data(e.to_string()))?;
@@ -704,6 +725,8 @@ impl CodexAgent {
             config.clone(),
             cx,
         ));
+
+        self.apply_agent_profile(&session_id, &thread).await?;
 
         if replay_history {
             thread.replay_history(rollout_items).await?;
@@ -748,6 +771,7 @@ impl CodexAgent {
                 cwd_filters: cwd.map(|cwd| vec![cwd]),
                 archived: false,
                 search_term: None,
+                relation_filter: None,
                 use_state_db_only: false,
             })
             .await
@@ -793,6 +817,10 @@ impl CodexAgent {
             .lock()
             .unwrap()
             .remove(&request.session_id);
+        self.profile_prompt_pending_sessions
+            .lock()
+            .unwrap()
+            .remove(request.session_id.0.as_ref());
 
         Ok(CloseSessionResponse::new())
     }
@@ -801,6 +829,7 @@ impl CodexAgent {
         // Check before sending if authentication was successful or not
         self.check_auth().await?;
 
+        let request = self.inject_profile_prompt(request);
         // Get the session state
         let thread = self.get_thread(&request.session_id)?;
         let stop_reason = thread.prompt(request).await?;
@@ -841,6 +870,98 @@ impl CodexAgent {
         let config_options = thread.config_options().await?;
 
         Ok(SetSessionConfigOptionResponse::new(config_options))
+    }
+
+    async fn apply_agent_profile(
+        &self,
+        session_id: &SessionId,
+        thread: &Arc<Thread>,
+    ) -> Result<(), Error> {
+        let Some(profile) = self.agent_profile.as_ref() else {
+            return Ok(());
+        };
+
+        if let Some(mode_id) = sandbox_mode_to_session_mode(profile.sandbox_mode.as_deref()) {
+            thread.set_mode(SessionModeId::new(mode_id)).await?;
+        }
+
+        if let Some(model) = profile.model.as_ref() {
+            thread
+                .set_config_option(
+                    SessionConfigId::new("model"),
+                    SessionConfigOptionValue::ValueId {
+                        value: SessionConfigValueId::new(model.clone()),
+                    },
+                )
+                .await?;
+        }
+
+        if let Some(reasoning_effort) = profile.reasoning_effort.as_ref() {
+            thread
+                .set_config_option(
+                    SessionConfigId::new("reasoning_effort"),
+                    SessionConfigOptionValue::ValueId {
+                        value: SessionConfigValueId::new(reasoning_effort.clone()),
+                    },
+                )
+                .await?;
+        }
+
+        if let Some(service_tier) = profile.service_tier.as_ref() {
+            thread
+                .set_config_option(
+                    SessionConfigId::new("service_tier"),
+                    SessionConfigOptionValue::ValueId {
+                        value: SessionConfigValueId::new(service_tier.clone()),
+                    },
+                )
+                .await?;
+        }
+
+        if profile
+            .developer_instructions
+            .as_ref()
+            .is_some_and(|instructions| !instructions.trim().is_empty())
+        {
+            self.profile_prompt_pending_sessions
+                .lock()
+                .unwrap()
+                .insert(session_id.0.as_ref().to_owned());
+        }
+
+        Ok(())
+    }
+
+    fn inject_profile_prompt(&self, mut request: PromptRequest) -> PromptRequest {
+        let Some(profile) = self.agent_profile.as_ref() else {
+            return request;
+        };
+        let Some(instructions) = profile.developer_instructions.as_ref() else {
+            return request;
+        };
+        let mut pending = self.profile_prompt_pending_sessions.lock().unwrap();
+        if !pending.remove(request.session_id.0.as_ref()) {
+            return request;
+        }
+        request.prompt.insert(
+            0,
+            format!(
+                "Follow this Codex agent profile for the entire session.\nProfile: {}\nSource: {}\n\n{}",
+                profile.profile_name,
+                profile.agent_file.display(),
+                instructions.trim()
+            ).into(),
+        );
+        request
+    }
+}
+
+fn sandbox_mode_to_session_mode(sandbox_mode: Option<&str>) -> Option<&'static str> {
+    match sandbox_mode {
+        Some("read-only") => Some("read-only"),
+        Some("workspace-write") => Some("auto"),
+        Some("danger-full-access") => Some("full-access"),
+        _ => None,
     }
 }
 

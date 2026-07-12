@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing_subscriber::EnvFilter;
 
+pub mod agent_profile;
 mod codex_agent;
 mod thread;
 
@@ -23,6 +24,7 @@ mod thread;
 pub async fn run_main(
     codex_linux_sandbox_exe: Option<PathBuf>,
     cli_config_overrides: CliConfigOverrides,
+    agent_profile_args: agent_profile::AgentProfileArgs,
 ) -> std::io::Result<()> {
     // Install a simple subscriber so `tracing` output is visible.
     // Users can control the log level with `RUST_LOG`.
@@ -53,13 +55,26 @@ pub async fn run_main(
                     format!("error loading config: {e}"),
                 )
             })?;
+
+    let agent_profile = agent_profile::load_agent_profile(&agent_profile_args, &config.codex_home)
+        .map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "error loading agent profile: {}",
+                    error.context("agent profile initialization failed")
+                ),
+            )
+        })?;
     // Apply residency requirement so the HTTP client sends the
     // x-openai-internal-codex-residency header on all requests.
     codex_login::default_client::set_default_client_residency_requirement(
         config.enforce_residency.value(),
     );
 
-    let agent = Arc::new(codex_agent::CodexAgent::new(config, codex_linux_sandbox_exe).await?);
+    let agent = Arc::new(
+        codex_agent::CodexAgent::new(config, codex_linux_sandbox_exe, agent_profile).await?,
+    );
 
     let stdin = tokio::io::stdin().compat();
     let stdout = tokio::io::stdout().compat_write();
