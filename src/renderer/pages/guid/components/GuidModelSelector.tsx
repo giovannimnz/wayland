@@ -55,6 +55,7 @@ export type GuidReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh
 export type GuidServiceTier = 'normal' | 'priority';
 
 const GUID_REASONING_EFFORTS: GuidReasoningEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+const CODEX_REASONING_EFFORTS: GuidReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
 const GUID_SERVICE_TIERS: GuidServiceTier[] = ['normal', 'priority'];
 const REASONING_EFFORT_CONFIG_ID = 'reasoning_effort';
 const SERVICE_TIER_CONFIG_ID = 'service_tier';
@@ -600,6 +601,11 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
       .map((model) => splitAcpModelEffort(model.id, model.label).effort)
       .filter((value): value is GuidReasoningEffort => Boolean(value));
     if (bySelectedModel.length > 0) return Array.from(new Set(bySelectedModel));
+
+    // Codex can arrive on the GUID with account-aware base models and a current
+    // effort, but without cached ACP config options before the first session.
+    // Keep the pre-chat picker aligned with the in-conversation Codex selector.
+    if (agentKey === 'codex') return CODEX_REASONING_EFFORTS;
 
     return [];
   }, [agentKey, rawAcpModels, reasoningEffortOption, selectedBaseModelId]);

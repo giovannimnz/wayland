@@ -290,7 +290,7 @@ index 000000000..86e0fcbc6
 +- `gsd-*` slash commands present: `70`
 +- required commands present and pinned: `gsd-plan-phase`, `gsd-debug`, `gsd-plan-review-convergence`, `gsd-graphify`
 diff --git a/package.json b/package.json
-index 2f7e4d43b..b895002c1 100644
+index da5b7b729..36f0c4887 100644
 --- a/package.json
 +++ b/package.json
 @@ -83,7 +83,12 @@
@@ -1399,10 +1399,18 @@ index d9ba0071b..6fd211ce2 100755
      print_summary
  }
 diff --git a/src/common/adapter/ipcBridge.ts b/src/common/adapter/ipcBridge.ts
-index 4f4c0a070..88baa7ff0 100644
+index 8208627d1..88baa7ff0 100644
 --- a/src/common/adapter/ipcBridge.ts
 +++ b/src/common/adapter/ipcBridge.ts
-@@ -87,13 +87,6 @@ export type SkillStats = {
+@@ -16,7 +16,6 @@ import type { MicPermissionStatus } from '../../process/services/macPermissions/
+ import type { DoctorReport } from '../../process/doctor/types';
+ import type { AgentBackend, AcpModelInfo } from '../types/acpTypes';
+ import type { SlashCommandItem } from '../chat/slash/types';
+-import type { WorkspaceTrustLevel } from '../security/workspaceTrust';
+ import type { IMcpServer, IProvider, TChatConversation, TProviderWithModel, ICssTheme } from '../config/storage';
+ import type { PreviewHistoryTarget, PreviewSnapshotInfo } from '../types/preview';
+ import type { MigrationPlan, MigrationResult, MigrationToolId } from '../types/migration';
+@@ -88,13 +87,6 @@ export type SkillStats = {
    verified: number;
  };
 
@@ -1416,7 +1424,7 @@ index 4f4c0a070..88baa7ff0 100644
  /**
   * Result of a shell open/reveal operation. The IPC bridge's `invoke` has no
   * rejection channel (a throwing provider leaves the caller's promise pending
-@@ -513,13 +506,6 @@ export const skills = {
+@@ -514,13 +506,6 @@ export const skills = {
     * entries were (re)scanned. Never spends a model call — first-party content.
     */
    scanLibrary: buildProvider<{ rescanned: number }, void>('skills.scan-library'),
@@ -1430,7 +1438,50 @@ index 4f4c0a070..88baa7ff0 100644
    import: {
      /** Import a skill from a local folder path. */
      folder: buildProvider<ImportResult, { srcPath: string }>('skills.import.folder'),
-@@ -1543,7 +1529,12 @@ export interface ICreateConversationParams {
+@@ -652,22 +637,6 @@ export const imports = {
+   singleSkillMd: buildProvider<ImportSummary, { srcPath: string }>('imports.single-skill-md'),
+ };
+
+-/** Result of a portable export (#512). `redacted` warns a masked secret was found. */
+-export interface PortableExportResult {
+-  ok: boolean;
+-  canceled?: boolean;
+-  path?: string;
+-  redacted?: boolean;
+-  error?: string;
+-}
+-
+-// #512: credential-redacted export of an assistant to a portable agent-profile
+-// SKILL.md that round-trips through the importer above. (Workflow export is a
+-// fast-follow — it needs path-confinement of the skill's on-disk location.)
+-export const dataExport = {
+-  assistant: buildProvider<PortableExportResult, { id: string }>('data-export.assistant'),
+-};
+-
+ export const voiceAsset = {
+   download: buildProvider<DownloadResult, VoiceAsset>('voice-asset.download'),
+   cancel: buildProvider<{ cancelled: boolean }, { assetId: string }>('voice-asset.cancel'),
+@@ -1352,9 +1321,7 @@ export const cron = {
+   getJob: buildProvider<ICronJob | null, { jobId: string }>('cron.get-job'),
+   // CRUD
+   addJob: buildProvider<ICronJob, ICreateCronJobParams>('cron.add-job'),
+-  updateJob: buildProvider<ICronJob, { jobId: string; updates: Partial<ICronJob>; allowHighFrequency?: boolean }>(
+-    'cron.update-job'
+-  ),
++  updateJob: buildProvider<ICronJob, { jobId: string; updates: Partial<ICronJob> }>('cron.update-job'),
+   removeJob: buildProvider<void, { jobId: string }>('cron.remove-job'),
+   runNow: buildProvider<{ conversationId: string }, { jobId: string }>('cron.run-now'),
+   saveSkill: buildProvider<void, { jobId: string; content: string }>('cron.save-skill'),
+@@ -1474,8 +1441,6 @@ export interface ICreateCronJobParams {
+   createdBy: 'user' | 'agent';
+   executionMode?: 'existing' | 'new_conversation';
+   agentConfig?: ICronAgentConfig;
+-  /** #163: opt-in past the every-minute + new_conversation footgun guard. */
+-  allowHighFrequency?: boolean;
+ }
+
+ interface ISendMessageParams {
+@@ -1564,7 +1529,12 @@ export interface ICreateConversationParams {
       * (Codex / WCore / Claude-ACP). Persisted on the conversation and read by
       * each backend's config builder on the next turn. Absent => backend default.
       */
@@ -1444,11 +1495,268 @@ index 4f4c0a070..88baa7ff0 100644
      /** Team ownership - conversations with teamId are hidden from the sidebar */
      teamId?: string;
      /** Project ownership - stamps extra.projectId so the conversation lives under a project umbrella. */
+@@ -1610,22 +1580,6 @@ export interface IResponseMessage {
+   msg_id: string;
+   conversation_id: string;
+   hidden?: boolean;
+-  /**
+-   * #787: per-conversation turn id of the turn that PRODUCED this terminal
+-   * (`finish`/`error`) event. TeammateManager keys its finalize-dedup on
+-   * `${conversation_id}#${turnId}` so a late duplicate of a prior turn's finish
+-   * (arriving after the agent was re-woken) can't collapse the re-wake's fresh
+-   * dedup window. Two producers:
+-   *  - the real ACP signal finish carries the engine's per-turn `turn_id` (a
+-   *    string uuid = the turn's `msg_id`, stamped by wayland-core on the
+-   *    `Done`/`Error` terminal frames, wired through here from AcpConnection);
+-   *  - the desktop-synthesized fallback finishes carry the local sequential
+-   *    `beginTrackedTurn()` id (a number).
+-   * Both are stable-per-turn and distinct-across-turns, which is all the dedup
+-   * key needs (it stringifies either). Absent for non-ACP finishes, which fall
+-   * back to conversation-only keying (unchanged behaviour).
+-   */
+-  turnId?: string | number;
+ }
+
+ export interface IConversationTurnCompletedEvent {
+@@ -1701,49 +1655,14 @@ export interface IExtensionInfo {
+   displayName: string;
+   version: string;
+   description?: string;
+-  author?: string;
+-  homepage?: string;
+-  icon?: string;
+-  apiVersion?: string;
+-  engine?: { wayland?: string };
+-  dependencies?: Record<string, string>;
+   source: string;
+   directory: string;
+   /** Whether the extension is currently enabled */
+   enabled: boolean;
+-  /** Last disabled reason, when available */
+-  disabledReason?: string;
+-  /** Install/load error captured by the extension state store, when available */
+-  installError?: string;
+   /** Overall permission risk level */
+   riskLevel: 'safe' | 'moderate' | 'dangerous';
+-  /** User review/approval state for elevated or risky permissions */
+-  permissionReview?: {
+-    approvedAt: string;
+-    approvedRiskLevel: 'safe' | 'moderate' | 'dangerous';
+-    approvedPermissions: string[];
+-  };
+   /** Whether the extension has lifecycle hooks */
+   hasLifecycle: boolean;
+-  /** Contribution counts grouped by extension surface */
+-  contributes: {
+-    acpAdapters: number;
+-    mcpServers: number;
+-    assistants: number;
+-    agents: number;
+-    skills: number;
+-    channelPlugins: number;
+-    webuiApiRoutes: number;
+-    webuiStaticAssets: number;
+-    themes: number;
+-    settingsTabs: number;
+-    modelProviders: number;
+-    acronyms: number;
+-    workspacePanels: number;
+-    filePreviewActions: number;
+-    scheduledTaskTemplates: number;
+-    workflowTemplates: number;
+-  };
+ }
+
+ /** Permission summary for extension management UI (Figma-inspired) */
+@@ -1754,39 +1673,6 @@ export interface IExtensionPermissionSummary {
+   granted: boolean;
+ }
+
+-export interface IExtensionBuilderPlan {
+-  name: string;
+-  slug: string;
+-  summary: string;
+-  riskLevel: 'safe' | 'moderate' | 'dangerous';
+-  permissions: string[];
+-  contributions: string[];
+-  files: string[];
+-  reviewItems: string[];
+-  creationPath?: string;
+-}
+-
+-export interface IExtensionBuilderMessage {
+-  role: 'user' | 'assistant';
+-  content: string;
+-}
+-
+-export interface IExtensionBuilderDraftResult {
+-  plan: IExtensionBuilderPlan;
+-  reply: string;
+-  source: 'ai' | 'fallback';
+-  model?: string;
+-  error?: string;
+-}
+-
+-export interface IExtensionBuilderCreateResult {
+-  name: string;
+-  displayName: string;
+-  directory: string;
+-  files: string[];
+-  restartRequired: boolean;
+-}
+-
+ /** Settings tab contributed by an extension, consumed by settings UI */
+ export interface IExtensionSettingsTab {
+   id: string;
+@@ -1808,57 +1694,6 @@ export interface IExtensionWebuiContribution {
+   staticAssets: Array<{ urlPrefix: string; directory: string }>;
+ }
+
+-export interface IExtensionAcronym {
+-  id: string;
+-  acronym: string;
+-  expansion: string;
+-  description?: string;
+-  enabled: boolean;
+-  _extensionName: string;
+-}
+-
+-export interface IExtensionWorkspacePanel {
+-  id: string;
+-  name: string;
+-  icon?: string;
+-  entryUrl: string;
+-  order: number;
+-  _extensionName: string;
+-}
+-
+-export interface IExtensionFilePreviewAction {
+-  id: string;
+-  name: string;
+-  description?: string;
+-  icon?: string;
+-  matchExtensions?: string[];
+-  promptTemplate?: string;
+-  entryUrl?: string;
+-  order: number;
+-  _extensionName: string;
+-}
+-
+-export interface IExtensionScheduledTaskTemplate {
+-  id: string;
+-  name: string;
+-  description?: string;
+-  promptTemplate: string;
+-  scheduleHint?: string;
+-  order: number;
+-  _extensionName: string;
+-}
+-
+-export interface IExtensionWorkflowTemplate {
+-  id: string;
+-  name: string;
+-  description?: string;
+-  category?: string;
+-  promptTemplate?: string;
+-  steps?: string[];
+-  order: number;
+-  _extensionName: string;
+-}
+-
+ export type AgentActivityState = 'idle' | 'writing' | 'researching' | 'executing' | 'syncing' | 'error';
+
+ export interface IExtensionAgentActivityEvent {
+@@ -1918,23 +1753,10 @@ export const extensions = {
+   getExtI18nForLocale: buildProvider<Record<string, unknown>, { locale: string }>('extensions.get-ext-i18n-for-locale'),
+
+   // --- Extension Management API (NocoBase-inspired) ---
+-  /** Draft a reviewable extension plan from a plain-English builder conversation */
+-  draftBuilderPlan: buildProvider<
+-    IBridgeResponse<IExtensionBuilderDraftResult>,
+-    { messages: IExtensionBuilderMessage[]; fallbackIdea: string }
+-  >('extensions.draft-builder-plan'),
+-  /** Scaffold an update-safe user-data extension package from an approved builder plan */
+-  createFromBuilder: buildProvider<IBridgeResponse<IExtensionBuilderCreateResult>, { plan: IExtensionBuilderPlan }>(
+-    'extensions.create-from-builder'
+-  ),
+   /** Enable a disabled extension */
+   enableExtension: buildProvider<IBridgeResponse, { name: string }>('extensions.enable'),
+   /** Disable an extension */
+   disableExtension: buildProvider<IBridgeResponse, { name: string; reason?: string }>('extensions.disable'),
+-  /** Mark elevated/risky extension permissions as reviewed and approved */
+-  approvePermissions: buildProvider<IBridgeResponse, { name: string }>('extensions.approve-permissions'),
+-  /** Revoke a previous elevated/risky permission approval */
+-  revokePermissionApproval: buildProvider<IBridgeResponse, { name: string }>('extensions.revoke-permission-approval'),
+   /** Get permission summary for an extension (Figma-inspired) */
+   getPermissions: buildProvider<IExtensionPermissionSummary[], { name: string }>('extensions.get-permissions'),
+   /** Get overall risk level for an extension */
+@@ -3132,23 +2954,3 @@ export const terminal = {
+   /** PTY exited → renderer (filter by terminalId). */
+   exit: buildEmitter<TerminalExitPayload>('terminal.exit'),
+ };
+-
+-/**
+- * #671 Per-workspace trust axis — the composer Chat<->Cowork toggle.
+- *
+- * A 'cowork' workspace auto-approves read/edit tools across every local backend
+- * while STILL prompting on exec/network; 'chat' prompts on everything. Persisted
+- * per workspace (keyed by cwd) in the main process.
+- *
+- * SECURITY: both keys are namespaced `workspaceTrust.*` so bridgeAllowlist's
+- * `workspaceTrust.` REMOTE_DENIED_PREFIXES entry blocks a paired WebSocket peer
+- * from ever reading OR arming trust — `set` would let a remote peer switch a
+- * workspace into unattended edit auto-approve, and `get` would disclose the
+- * security posture. This is a LOCAL desktop control only.
+- */
+-export const workspaceTrust = {
+-  /** Read the persisted trust level for a workspace cwd. */
+-  get: buildProvider<WorkspaceTrustLevel, { workspace: string }>('workspaceTrust.get'),
+-  /** Set + persist the trust level for a workspace cwd. */
+-  set: buildProvider<void, { workspace: string; level: WorkspaceTrustLevel }>('workspaceTrust.set'),
+-};
 diff --git a/src/common/config/storage.ts b/src/common/config/storage.ts
-index 3d59005c5..bb6383e2b 100644
+index b219eb6d3..bb6383e2b 100644
 --- a/src/common/config/storage.ts
 +++ b/src/common/config/storage.ts
-@@ -531,7 +531,9 @@ export type TChatConversation =
+@@ -147,23 +147,6 @@ export interface IConfigStorageRefer {
+   'assistant.presetAgentTypeOverrides'?: Record<string, string>;
+   // Cached initialize results per ACP backend (persisted across sessions)
+   'acp.cachedInitializeResult'?: Record<string, import('@/common/types/acpTypes').AcpInitializeResult>;
+-  /**
+-   * #672: durable, per-workspace "allow always" ACP approval decisions. Keyed by
+-   * workspace cwd → serialized approval key → optionId. The live PermissionResolver
+-   * cache is otherwise in-memory/session-scoped, so an "allow always" was lost on
+-   * restart and re-prompted. Rehydrated on session start; main-process only.
+-   */
+-  'acp.workspaceApprovals'?: Record<string, Record<string, string>>;
+-  /**
+-   * #671: per-workspace trust level (desktop half of #657). Keyed by the
+-   * normalized workspace cwd → 'chat' | 'cowork'. A 'cowork' workspace
+-   * auto-approves read/edit tools while still prompting on exec/network across
+-   * every backend; 'chat' (the default, and any absent key) prompts on
+-   * everything. Persisted so the posture survives restart; main-process only —
+-   * written exclusively through the workspaceTrust IPC (never renderer
+-   * ConfigStorage) so the in-memory gate cache stays coherent.
+-   */
+-  'workspace.trustLevel'?: Record<string, import('@/common/security/workspaceTrust').WorkspaceTrustLevel>;
+   // Cached model lists per ACP backend for Guid page pre-selection
+   'acp.cachedModels'?: Record<string, import('@/common/types/acpTypes').AcpModelInfo>;
+   // Cached config options per ACP backend for Guid page pre-selection
+@@ -260,13 +243,6 @@ export interface IConfigStorageRefer {
+   'migration.promptsI18nAdded'?: boolean;
+   /** Migration flag: split 'assistants' into presets-only + 'acp.customAgents' (user-defined customs). */
+   'migration.assistantsSplitCustom'?: boolean;
+-  /**
+-   * Migration flag: stale pre-#275 bundled-extension copies removed from
+-   * <userData>/extensions (#718). Builds before #275 copied the bundled packs
+-   * out on every launch; the leftovers shadowed the asar 'bundled' scan source
+-   * and triggered a duplicate-skip warning per pack per launch.
+-   */
+-  'migration.legacyBundledExtensionCopiesRemoved'?: boolean;
+   /** Migration flag: Electron desktop config has been imported to server config */
+   'migration.electronConfigImported'?: boolean;
+   /**
+@@ -555,7 +531,9 @@ export type TChatConversation =
            /** Project ID this conversation belongs to (umbrella scoping). Mirrors cronJobId - read via json_extract(extra,'$.projectId'). */
            projectId?: string;
            /** Per-conversation reasoning effort (Claude-ACP `effortLevel`). Absent => backend default. */
@@ -1459,7 +1767,7 @@ index 3d59005c5..bb6383e2b 100644
          }
        >,
        'model'
-@@ -568,7 +570,9 @@ export type TChatConversation =
+@@ -592,7 +570,9 @@ export type TChatConversation =
            /** Project ID this conversation belongs to (umbrella scoping). Mirrors cronJobId - read via json_extract(extra,'$.projectId'). */
            projectId?: string;
            /** Per-conversation reasoning effort (Codex `model_reasoning_effort`). Absent => backend default. */
@@ -1470,7 +1778,7 @@ index 3d59005c5..bb6383e2b 100644
          }
        >,
        'model'
-@@ -720,7 +724,7 @@ export type TChatConversation =
+@@ -744,7 +724,7 @@ export type TChatConversation =
          /** Project ID this conversation belongs to (umbrella scoping). Mirrors cronJobId - read via json_extract(extra,'$.projectId'). */
          projectId?: string;
          /** Per-conversation reasoning effort (WCore `set_config.effort`). Absent => backend default. */
@@ -1673,39 +1981,146 @@ index ec0560010..2cbf16781 100644
      }
 
 diff --git a/src/process/extensions/data/bundle-vendored/agentProfileMerge.ts b/src/process/extensions/data/bundle-vendored/agentProfileMerge.ts
-index d0741ae26..c1d294f2c 100644
+index 085d6d80f..c1d294f2c 100644
 --- a/src/process/extensions/data/bundle-vendored/agentProfileMerge.ts
 +++ b/src/process/extensions/data/bundle-vendored/agentProfileMerge.ts
-@@ -239,6 +239,7 @@ function buildOverlay(): VendoredAgentProfile[] {
+@@ -30,9 +30,8 @@
+  */
+
+ import path from 'path';
+-import { closeSync, existsSync, openSync, readFileSync, readSync } from 'fs';
++import { existsSync, readFileSync } from 'fs';
+ import { buildResourceDirCandidates } from '@process/services/skills/SkillLibrary';
+-import { PACK_BLOB_NAME, PACK_OFFSETS_NAME, type PackOffsets } from '@process/services/skills/SkillPack';
+ import agentProfileSkills from './agentProfileSkills.json';
+
+ const TAG = '[AgentProfileMerge]';
+@@ -95,63 +94,6 @@ function resolveSkillsLibraryDir(): string | null {
+   return null;
+ }
+
+-/** Synchronous packed-body reader; `null` body means "not in the pack". */
+-type SyncPackReader = { read(relPath: string): string | null; close(): void };
+-
+-/**
+- * Synchronous counterpart of `SkillPack.openSkillPack` for this overlay's
+- * one-shot sync `buildOverlay()` path (#502). Since #309, packaged builds ship
+- * skill bodies as `skill-bodies.bin` + `skill-bodies.offsets.json` with NO
+- * loose `bodies/<path>/SKILL.md` files, so the raw `readFileSync` here always
+- * hit ENOENT and every vendored agent-profile merged with an empty body.
+- *
+- * Returns `null` when no pack exists (dev tree / legacy loose layout) or when
+- * the pack is malformed, so callers transparently fall back to loose files -
+- * mirroring `SkillLibrary.loadBody`'s pack-then-loose order.
+- */
+-function openSkillPackSync(dir: string): SyncPackReader | null {
+-  const blobPath = path.join(dir, PACK_BLOB_NAME);
+-  const offsetsPath = path.join(dir, PACK_OFFSETS_NAME);
+-  if (!existsSync(blobPath) || !existsSync(offsetsPath)) return null;
+-
+-  let offsets: PackOffsets;
+-  try {
+-    offsets = JSON.parse(readFileSync(offsetsPath, 'utf-8')) as PackOffsets;
+-  } catch {
+-    return null;
+-  }
+-  if (!offsets || typeof offsets !== 'object' || !offsets.entries) return null;
+-
+-  let fd: number;
+-  try {
+-    fd = openSync(blobPath, 'r');
+-  } catch {
+-    return null;
+-  }
+-  return {
+-    read: (relPath: string): string | null => {
+-      const range = offsets.entries[relPath];
+-      if (!range) return null;
+-      const [offset, length] = range;
+-      if (length === 0) return '';
+-      try {
+-        const buf = Buffer.allocUnsafe(length);
+-        readSync(fd, buf, 0, length, offset);
+-        return buf.toString('utf-8');
+-      } catch {
+-        return null;
+-      }
+-    },
+-    close: (): void => {
+-      try {
+-        closeSync(fd);
+-      } catch {
+-        // Already closed - nothing to release.
+-      }
+-    },
+-  };
+-}
+-
+ function toDisplayName(slug: string): string {
+   // Mirror the renderer's displayName.ts logic so the names look the same on
+   // both sides without sharing a renderer dep (renderer/process boundary).
+@@ -297,9 +239,7 @@ function buildOverlay(): VendoredAgentProfile[] {
 
    const out: VendoredAgentProfile[] = [];
    const seen = new Set<string>();
+-  // #502: packaged builds carry bodies in the packed blob (#309), not loose
+-  // files. Open it once for the whole loop; null in the dev tree.
+-  const pack = openSkillPackSync(dir);
 +  const missingBodies: string[] = [];
 
    for (const entry of index) {
      if (!entry || typeof entry !== 'object') continue;
-@@ -263,10 +264,13 @@ function buildOverlay(): VendoredAgentProfile[] {
-         // `bodies/` segment; the actual SKILL.md files live under bodies/.
-         body = readFileSync(tried, 'utf-8');
-       } catch (err) {
--        // Loud one-line warning so the next time someone wonders why a
--        // vendored agent-profile shows empty rules, the log says exactly
--        // which file failed to resolve and why.
--        console.warn(`${TAG} body read failed for ${name} at ${tried}: ${String(err).slice(0, 200)}`);
+@@ -318,33 +258,18 @@ function buildOverlay(): VendoredAgentProfile[] {
+
+     let body = '';
+     if (relPath) {
+-      // Mirror SkillLibrary.loadBody's resolution order: packed blob first
+-      // (packaged builds, #309), then the literal path, then `bodies/`
+-      // (dev tree - index.json records paths relative to the library root
+-      // WITHOUT the `bodies/` segment; the loose SKILL.md files live under
+-      // bodies/).
+-      const packed = pack?.read(relPath) ?? null;
+-      if (packed !== null) {
+-        body = packed;
+-      } else {
+-        const candidates = [path.join(dir, relPath), path.join(dir, 'bodies', relPath)];
+-        let lastErr: unknown = null;
+-        for (const tried of candidates) {
+-          try {
+-            body = readFileSync(tried, 'utf-8');
+-            lastErr = null;
+-            break;
+-          } catch (err) {
+-            lastErr = err;
+-          }
+-        }
+-        if (lastErr !== null) {
+-          // Loud one-line warning so the next time someone wonders why a
+-          // vendored agent-profile shows empty rules, the log says exactly
+-          // which file failed to resolve and why.
+-          console.warn(
+-            `${TAG} body read failed for ${name} at ${candidates[candidates.length - 1]}: ${String(lastErr).slice(0, 200)}`
+-          );
++      const tried = path.join(dir, 'bodies', relPath);
++      try {
++        // index.json records paths relative to the library root WITHOUT the
++        // `bodies/` segment; the actual SKILL.md files live under bodies/.
++        body = readFileSync(tried, 'utf-8');
++      } catch (err) {
 +        // Some vendored agent-profile entries ship metadata only; when the body
 +        // is absent we still expose the assistant, just without inline rules.
 +        if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
 +          console.warn(`${TAG} body read failed for ${name} at ${tried}: ${String(err).slice(0, 200)}`);
 +        } else {
 +          missingBodies.push(name);
-+        }
+         }
        }
      }
-
-@@ -292,6 +296,12 @@ function buildOverlay(): VendoredAgentProfile[] {
+@@ -371,7 +296,12 @@ function buildOverlay(): VendoredAgentProfile[] {
      });
    }
 
+-  pack?.close();
 +  if (missingBodies.length > 0) {
 +    console.info(
 +      `${TAG} ${missingBodies.length} vendored agent-profile bodies missing; assistants loaded without inline rules.`
@@ -1745,10 +2160,10 @@ index d6e86a67a..3c2e6674a 100644
 
          let PluginClass = mod.default || mod.Plugin;
 diff --git a/src/process/task/AcpAgentManager.ts b/src/process/task/AcpAgentManager.ts
-index 09d5fa5d3..ca063cf05 100644
+index a95a8ea51..ca063cf05 100644
 --- a/src/process/task/AcpAgentManager.ts
 +++ b/src/process/task/AcpAgentManager.ts
-@@ -4,7 +4,7 @@ import { channelEventBus } from '@process/channels/agent/ChannelEventBus';
+@@ -4,11 +4,9 @@ import { channelEventBus } from '@process/channels/agent/ChannelEventBus';
  import { teamEventBus } from '@process/team/teamEventBus';
  import { ipcBridge } from '@/common';
  import type { CronMessageMeta, TMessage } from '@/common/chat/chatLib';
@@ -1756,8 +2171,12 @@ index 09d5fa5d3..ca063cf05 100644
 +import { isCodexAutoApproveMode, isCodexConfigTomlMode } from '@/common/types/codex/codexModes';
  import { isAutoGuardedMode, shouldAutoApproveAcpEdit } from '@/common/types/agentModes';
  import { classifyDestructiveToolCall } from '@/common/security/destructiveCommand';
+-import { trustedWorkspaceAutoApprovesAcpKind } from '@/common/security/workspaceTrust';
+-import { isWorkspaceTrusted } from '@process/permissions/workspaceTrust';
  import type { SlashCommandItem } from '@/common/chat/slash/types';
-@@ -48,7 +48,9 @@ import {
+ import { transformMessage } from '@/common/chat/chatLib';
+ import type { IConfigStorageRefer } from '@/common/config/storage';
+@@ -50,7 +48,9 @@ import {
    materializeFluxCodexHome,
    materializeNativeCodexHome,
    normalizeCodexSandboxMode,
@@ -1767,7 +2186,7 @@ index 09d5fa5d3..ca063cf05 100644
  } from '@process/task/codexConfig';
  import { materializeFluxClaudeConfigDir } from '@process/task/claudeConfig';
  import { materializeFluxHermesHome } from '@process/task/hermesConfig';
-@@ -77,7 +79,12 @@ import { shouldInjectTeamGuideMcp } from '@process/team/prompts/teamGuideCapabil
+@@ -79,7 +79,12 @@ import { shouldInjectTeamGuideMcp } from '@process/team/prompts/teamGuideCapabil
  import { extractTextFromMessage, processCronInMessage } from './MessageMiddleware';
  import { ConversationTurnCompletionService } from './ConversationTurnCompletionService';
  import { resolveFluxRouting, type FluxRoutingResult, type RoutingDecision } from '@process/task/fluxRouting';
@@ -1780,7 +2199,7 @@ index 09d5fa5d3..ca063cf05 100644
 
  interface AcpAgentManagerData {
    workspace?: string;
-@@ -111,11 +118,83 @@ interface AcpAgentManagerData {
+@@ -113,22 +118,83 @@ interface AcpAgentManagerData {
    /** Pending config option selections from Guid page (applied after session creation) */
    pendingConfigOptions?: Record<string, string>;
    /** Per-conversation reasoning effort (codex/claude). Absent => backend default. */
@@ -1790,8 +2209,18 @@ index 09d5fa5d3..ca063cf05 100644
 +  serviceTier?: CodexServiceTier;
    /** Per-conversation active MCP server ids (#348): undefined = all enabled, [] = none. */
    activeMcpServers?: string[];
- }
-
+-  /**
+-   * Team MCP stdio bridge config, present only when this agent belongs to a
+-   * team (injected by TeamSessionService). `.name` is `wayland-team-<teamId>` -
+-   * used to auto-approve the team's own coordination tool calls.
+-   */
+-  teamMcpStdioConfig?: {
+-    name: string;
+-    command: string;
+-    args: string[];
+-    env: Array<{ name: string; value: string }>;
++}
++
 +type StaticModelOption = { id: string; label: string };
 +
 +function labelForModel(models: StaticModelOption[], modelId: string | null): string | null {
@@ -1836,9 +2265,9 @@ index 09d5fa5d3..ca063cf05 100644
 +  return {
 +    provider: typeof record.provider === 'string' && record.provider.trim() ? record.provider.trim() : null,
 +    modelId: typeof record.default === 'string' && record.default.trim() ? record.default.trim() : null,
-+  };
-+}
-+
+   };
+ }
+
 +async function readHermesModelInfoFromConfig(): Promise<AcpModelInfo | null> {
 +  const hermesHome = resolveHermesHome();
 +  const configRaw = await readFile(join(hermesHome, 'config.yaml'), 'utf8');
@@ -1865,7 +2294,56 @@ index 09d5fa5d3..ca063cf05 100644
  type BufferedStreamTextMessage = {
    conversationId: string;
    backend: AcpBackend;
-@@ -635,6 +714,7 @@ ${collectedResponses.join('\n')}`;
+@@ -361,14 +427,14 @@ class AcpAgentManager extends BaseAgentManager<AcpAgentManagerData, AcpPermissio
+         data: null,
+       },
+       this.options.backend,
+-      { trackActiveTurn: false, turnId }
++      { trackActiveTurn: false }
+     );
+   }
+
+   private async handleFinishSignal(
+     message: IResponseMessage,
+     backend: AcpBackend,
+-    options: { trackActiveTurn?: boolean; turnId?: number } = {}
++    options: { trackActiveTurn?: boolean } = {}
+   ): Promise<void> {
+     if (options.trackActiveTurn !== false) {
+       this.markActiveTurnFinished();
+@@ -426,13 +492,6 @@ ${collectedResponses.join('\n')}`;
+     const finishMessage: IResponseMessage = {
+       ...(message as IResponseMessage),
+       conversation_id: this.conversation_id,
+-      // #787: carry the producing turn so TeammateManager keys its dedup by
+-      // (conversation, turn). The real signal finish already carries the
+-      // engine's per-turn `turn_id` on `message` (spread above, wired from
+-      // AcpConnection via handleEndTurn — this now covers the signal path that
+-      // core PR #219 unblocked); the synthesized-finish fallbacks have no id on
+-      // `message` and pass it explicitly via `options.turnId`.
+-      ...(options.turnId !== undefined ? { turnId: options.turnId } : {}),
+     };
+     ipcBridge.acpConversation.responseStream.emit(finishMessage);
+     teamEventBus.emit('responseStream', finishMessage);
+@@ -496,7 +555,7 @@ ${collectedResponses.join('\n')}`;
+               data: null,
+             },
+             this.options.backend,
+-            { trackActiveTurn: false, turnId }
++            { trackActiveTurn: false }
+           );
+         }
+         return result;
+@@ -527,7 +586,7 @@ ${collectedResponses.join('\n')}`;
+           data: null,
+         },
+         this.options.backend,
+-        { trackActiveTurn: false, turnId }
++        { trackActiveTurn: false }
+       );
+       return result;
+     } catch (error) {
+@@ -655,6 +714,7 @@ ${collectedResponses.join('\n')}`;
      // surface; codex/codebuddy route separately).
      const decision = await this.computeFluxRouting(data.backend, data.currentModelId ?? undefined);
      this.lastRouting = decision.routing;
@@ -1873,7 +2351,7 @@ index 09d5fa5d3..ca063cf05 100644
      if (decision.routing === 'flux') {
        for (const k of decision.stripKeys) delete mergedEnv[k];
        Object.assign(mergedEnv, decision.env);
-@@ -651,7 +731,8 @@ ${collectedResponses.join('\n')}`;
+@@ -671,7 +731,8 @@ ${collectedResponses.join('\n')}`;
              sandboxMode,
              undefined,
              undefined,
@@ -1883,7 +2361,21 @@ index 09d5fa5d3..ca063cf05 100644
            );
            mergedEnv.CODEX_HOME = codexHome;
          } catch (err) {
-@@ -689,7 +770,9 @@ ${collectedResponses.join('\n')}`;
+@@ -703,20 +764,15 @@ ${collectedResponses.join('\n')}`;
+       // config pins model.provider=custom at the Flux openai surface + flux-auto
+       // (reading FLUX_API_KEY at request time), so the user's real ~/.hermes
+       // config (and active profile) stays native for non-flux model picks.
+-      //
+-      // Opt profile presets out: a HERMES_PROFILE-bearing spawn resolves its
+-      // persona from <HERMES_HOME>/profiles/<name>, which the flux-scoped home
+-      // does NOT contain - repointing HERMES_HOME would lose the profile. Keep
+-      // the native home so the profile still resolves (its model picks stay
+-      // native rather than flux-routed, which is the correct trade for a
+-      // profile the user explicitly selected).
+-      if (data.backend === 'hermes' && !mergedEnv.HERMES_PROFILE) {
++      if (data.backend === 'hermes') {
+         try {
+           // hermes ignores FLUX_API_KEY for a custom provider, so the connector
            // writes the connected flux key inline into the scoped config.
            mergedEnv.HERMES_HOME = await materializeFluxHermesHome(
              app.getPath('userData'),
@@ -1894,7 +2386,7 @@ index 09d5fa5d3..ca063cf05 100644
            );
          } catch (err) {
            mainWarn('[AcpAgentManager]', 'materializeFluxHermesHome failed', err);
-@@ -698,14 +781,22 @@ ${collectedResponses.join('\n')}`;
+@@ -725,14 +781,22 @@ ${collectedResponses.join('\n')}`;
      }
 
      // Native (non-Flux) codex spawns: point CODEX_HOME at a Wayland-scoped clone
@@ -1923,7 +2415,26 @@ index 09d5fa5d3..ca063cf05 100644
        } catch (err) {
          mainWarn('[AcpAgentManager]', 'materializeNativeCodexHome failed', err);
        }
-@@ -949,14 +1040,21 @@ ${collectedResponses.join('\n')}`;
+@@ -909,17 +973,7 @@ ${collectedResponses.join('\n')}`;
+     }
+
+     if (!customAgentConfig?.defaultCliPath) {
+-      // The matched row has no launch override: it's a "thin" specialist that
+-      // just delegates to its backend's CLI (e.g. the builtin claude specialists,
+-      // which carry a presetAgentType but no defaultCliPath). Resolve it exactly
+-      // like a non-custom spawn so it still gets a real cliPath, the backend's
+-      // acpArgs, and mode/yolo handling - instead of the bare, cliPath-less early
+-      // return that would throw "No CLI path configured". This matters because a
+-      // 1:1/Team preset now reaches here via the customAgentId||presetAssistantId
+-      // fallback; only rows that DO carry defaultCliPath (a Hermes profile) take
+-      // the custom path below that forwards their env. resolveBuiltinBackendConfig
+-      // already prefers an explicit data.cliPath, so custom agents keep theirs.
+-      return this.resolveBuiltinBackendConfig(data);
++      return { cliPath: data.cliPath };
+     }
+
+     return {
+@@ -986,14 +1040,21 @@ ${collectedResponses.join('\n')}`;
      }
 
      if (data.backend === 'codex') {
@@ -1953,7 +2464,101 @@ index 09d5fa5d3..ca063cf05 100644
      }
 
      return { cliPath, customArgs, yoloMode };
-@@ -1386,6 +1484,7 @@ ${collectedResponses.join('\n')}`;
+@@ -1221,49 +1282,6 @@ ${collectedResponses.join('\n')}`;
+     }
+   }
+
+-  /**
+-   * True when a permission request targets THIS session's own team coordination
+-   * MCP server (wayland-team-<teamId>, injected by TeamSessionService). Those
+-   * are internal Wayland tools with their own server-side capability gates
+-   * (TeamMcpServer), so blocking them behind a human dialog only deadlocks a
+-   * teammate nobody is watching.
+-   *
+-   * Matching is strict so a prompt-injected agent cannot smuggle the marker into
+-   * an unrelated approval (tool titles and rawInput can carry model-controlled
+-   * text on some backends - e.g. an exec approval's title is the command):
+-   * - The title must BE the fully-qualified tool name ("[mcp__]<server>__<tool>"),
+-   *   not merely contain it (the claude-style shape).
+-   * - codex-acp uses a generic "Approve MCP tool call" title and puts the target
+-   *   in rawInput. That rawInput is codex-CLI-constructed (not echoed model tool
+-   *   input) and tagged with an `mcp_tool_call_approval` id, so server_name is
+-   *   trustworthy only alongside that id prefix.
+-   */
+-  private isTeamMcpPermission(toolCall: AcpPermissionRequest['toolCall']): boolean {
+-    const teamServerName = this.options.teamMcpStdioConfig?.name;
+-    if (!teamServerName) return false;
+-
+-    const title = toolCall.title || '';
+-    const escaped = teamServerName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+-    if (new RegExp(`^(mcp__)?${escaped}__[A-Za-z0-9_-]+$`).test(title)) {
+-      return true;
+-    }
+-
+-    // codex-only: on other ACP backends rawInput is the model's own tool-call
+-    // arguments (see ApprovalStore's {command,path,...} handling), so server_name
+-    // and the non-secret mcp_tool_call_approval id prefix would both be
+-    // model-forgeable - a prompt-injected member could smuggle them onto an
+-    // unrelated tool call and get it silently approved. Only codex-acp builds
+-    // this rawInput itself, so the trust is valid solely on that backend.
+-    if (this.options.backend !== 'codex') return false;
+-    const rawInput = toolCall.rawInput as { server_name?: unknown; id?: unknown } | undefined;
+-    const approvalId = rawInput?.id;
+-    return (
+-      rawInput?.server_name === teamServerName &&
+-      typeof approvalId === 'string' &&
+-      approvalId.startsWith('mcp_tool_call_approval')
+-    );
+-  }
+-
+   /**
+    * Handle signal events (permission requests, finish, errors) from the ACP agent.
+    * Auto-approves permissions in yolo mode and for team MCP tools,
+@@ -1285,14 +1303,9 @@ ${collectedResponses.join('\n')}`;
+         return;
+       }
+
+-      // Auto-approve this team's own coordination tools - internal MCP tools
+-      // injected by Wayland (TeamSessionService), never a human decision. A
+-      // teammate cannot make progress while a dialog nobody watches blocks a
+-      // team_* call. #781: codex-acp raises a per-call approval whose title is
+-      // the generic "Approve MCP tool call" (the target server lives in
+-      // rawInput.server_name, not the title), so the old title-substring check
+-      // missed it and the codex leader stalled forever on "add a member".
+-      if (this.isTeamMcpPermission(toolCall) && options.length > 0) {
++      // Auto-approve team MCP tools - internal tools provided by Wayland.
++      const toolTitle = toolCall.title || '';
++      if (toolTitle.includes('wayland-team') && options.length > 0) {
+         const autoOption = options[0];
+         setTimeout(() => {
+           void this.confirm(v.msg_id, toolCall.toolCallId || v.msg_id, autoOption);
+@@ -1312,25 +1325,6 @@ ${collectedResponses.join('\n')}`;
+         return;
+       }
+
+-      // #671: trusted ("cowork") workspace auto-approves read/edit tools while
+-      // STILL prompting on exec/network. Independent of the per-agent mode above
+-      // and persisted per-workspace. Only the non-destructive, non-network raw
+-      // kinds read/search/edit are auto-approved (see workspaceTrust.ts); execute,
+-      // fetch (network), delete, move, and MCP kinds are NOT in that set and fall
+-      // through to a confirmation - so exec/network/destructive always prompt
+-      // without needing a separate command classifier here.
+-      if (
+-        isWorkspaceTrusted(this.workspace) &&
+-        trustedWorkspaceAutoApprovesAcpKind(toolCall.kind) &&
+-        options.length > 0
+-      ) {
+-        const allowOption = options.find((option) => !option.kind.startsWith('reject')) ?? options[0];
+-        setTimeout(() => {
+-          void this.confirm(v.msg_id, toolCall.toolCallId || v.msg_id, allowOption);
+-        }, 50);
+-        return;
+-      }
+-
+       // Autopilot guardrail. In guarded-auto mode (workflows / Autopilot run the
+       // bridge in 'default' so it escalates risky tool calls) the run proceeds
+       // unattended, so auto-approve every escalated request EXCEPT a catastrophic
+@@ -1490,6 +1484,7 @@ ${collectedResponses.join('\n')}`;
 
    initAgent(data: AcpAgentManagerData = this.options) {
      if (this.bootstrap) return this.bootstrap;
@@ -1961,7 +2566,7 @@ index 09d5fa5d3..ca063cf05 100644
 
      this.bootstrapping = true;
      const bootstrapPromise = (async () => {
-@@ -1427,6 +1526,8 @@ ${collectedResponses.join('\n')}`;
+@@ -1531,6 +1526,8 @@ ${collectedResponses.join('\n')}`;
            currentModelId: this.persistedModelId ?? undefined,
            sessionMode: this.currentMode,
            pendingConfigOptions: data.pendingConfigOptions,
@@ -1970,7 +2575,7 @@ index 09d5fa5d3..ca063cf05 100644
            // Per-conversation MCP scoping (#348): forward to loadBuiltinSessionMcpServers.
            activeMcpServers: data.activeMcpServers,
            // The read-only concierge diagnostics MCP server is Concierge-only.
-@@ -1436,8 +1537,7 @@ ${collectedResponses.join('\n')}`;
+@@ -1540,8 +1537,7 @@ ${collectedResponses.join('\n')}`;
            allowConciergeDiag: isConciergeAssistant(data.presetAssistantId) || isConciergeAssistant(data.customAgentId),
            // Forward team MCP stdio config so AcpAgent.loadBuiltinSessionMcpServers() can inject it
            teamMcpStdioConfig: (data as unknown as Record<string, unknown>).teamMcpStdioConfig as
@@ -1980,7 +2585,7 @@ index 09d5fa5d3..ca063cf05 100644
          },
          onSessionIdUpdate: (sessionId: string) => {
            // Save ACP session ID to database for resume support
-@@ -1925,44 +2025,61 @@ ${collectedResponses.join('\n')}`;
+@@ -2029,44 +2025,61 @@ ${collectedResponses.join('\n')}`;
 
    /**
     * Model info for a backend BEFORE any task/agent exists (cold start on a new
@@ -2066,7 +2671,7 @@ index 09d5fa5d3..ca063cf05 100644
    }
 
    /**
-@@ -2135,7 +2252,9 @@ ${collectedResponses.join('\n')}`;
+@@ -2239,7 +2252,9 @@ ${collectedResponses.join('\n')}`;
        // spawn's scoped CODEX_HOME (materializeNativeCodexHome) carries it. We no
        // longer write the user's ~/.codex/config.toml. codex-acp has no live
        // set_mode, so the change applies on the next spawn regardless.
@@ -2077,11 +2682,78 @@ index 09d5fa5d3..ca063cf05 100644
        this.saveSessionMode(mode);
 
        if (this.isYoloMode(prev) && !this.isYoloMode(mode)) {
+@@ -2345,49 +2360,6 @@ ${collectedResponses.join('\n')}`;
+     } catch (error) {
+       mainWarn('[AcpAgentManager]', 'Failed to save model ID', error);
+     }
+-
+-    // The DB row is the AUTHORITATIVE model id and the renderer seeds the context
+-    // meter from it on load (#733) - but only on load. A mid-chat switch wrote the
+-    // row and told nobody, so the meter kept sizing itself from the PREVIOUS model:
+-    // switching opus (1M) -> haiku (200K) left a 1M denominator on a 200K window,
+-    // i.e. the meter reported ~5x the headroom that actually existed and the user
+-    // hit the ceiling with no warning. Push the new id to the live renderer. (#801)
+-    this.emitModelInfoUpdate(modelId);
+-  }
+-
+-  /**
+-   * Tell the renderer the active model changed, so anything sized from the model's
+-   * context window (the ACP context meter) re-sizes immediately instead of at the
+-   * next conversation load.
+-   *
+-   * MERGES onto the agent's current info rather than emitting a fresh payload: an
+-   * `acp_model_info` whose `availableModels` is EMPTY reverts the in-chat picker to
+-   * "Select Model" (#184 - AcpAgentV2.onModelUpdate guards the same hazard for the
+-   * bridge's own empty snapshots). Spreading `info` means this emit can only ever
+-   * change `currentModelId`/`currentModelLabel`; it can never shrink the model list.
+-   */
+-  private emitModelInfoUpdate(modelId: string): void {
+-    const info = this.getModelInfo();
+-    // Nothing authoritative to merge onto -> stay silent. An EMPTY availableModels
+-    // is not merely useless, it is destructive: the renderer's selector adopts an
+-    // incoming acp_model_info unconditionally, so an empty list reverts the in-chat
+-    // picker to "Select Model" (#184). Two reachable states produce a non-null but
+-    // EMPTY info - the no-agent/persisted-id branch of getModelInfo(), and a
+-    // non-claude bridge whose first snapshot (or 10s timeout fallback) was empty -
+-    // so guarding on `!info` alone is not enough. The renderer still seeds the
+-    // model id from the conversation row on its next load (#733).
+-    if (!info || info.availableModels.length === 0) return;
+-
+-    ipcBridge.acpConversation.responseStream.emit({
+-      type: 'acp_model_info',
+-      conversation_id: this.conversation_id,
+-      msg_id: uuid(),
+-      data: {
+-        ...info,
+-        currentModelId: modelId,
+-        currentModelLabel: info.availableModels.find((m) => m.id === modelId)?.label ?? modelId,
+-      },
+-    });
+   }
+
+   /**
 diff --git a/src/process/task/WCoreManager.ts b/src/process/task/WCoreManager.ts
-index 61a9c7519..537ebca51 100644
+index d0e42e963..537ebca51 100644
 --- a/src/process/task/WCoreManager.ts
 +++ b/src/process/task/WCoreManager.ts
-@@ -119,7 +119,7 @@ type WCoreManagerData = {
+@@ -17,8 +17,6 @@ import { readWCoreConfigMcpServerNames } from '@process/agent/wcore/configMcpSer
+ import { type OutputBudget, resolveFixedBudget } from '@/common/config/outputBudget';
+ import { ProcessConfig } from '@process/utils/initStorage';
+ import { BaseApprovalStore, type IApprovalKey } from '@/common/chat/approval';
+-import { trustedWorkspaceAutoApprovesConfirmationType } from '@/common/security/workspaceTrust';
+-import { isWorkspaceTrusted } from '@process/permissions/workspaceTrust';
+ import { ToolConfirmationOutcome } from '../agent/gemini/cli/tools/tools';
+ import { WCoreAgent, type StdioMcpOption } from '@process/agent/wcore';
+ import type { WCoreCapabilities } from '@process/agent/wcore/protocol';
+@@ -37,7 +35,6 @@ import { uuid } from '@/common/utils';
+ import BaseAgentManager from './BaseAgentManager';
+ import { IpcAgentEventEmitter } from './IpcAgentEventEmitter';
+ import { mainError, mainLog, mainWarn } from '@process/utils/mainLogger';
+-import { redactCommandSecrets } from '@/common/utils/redactCommandSecrets';
+ import { hasCronCommands } from './CronCommandDetector';
+ import { hasConciergeProposals } from './ConciergeProposeDetector';
+ import { processCronInMessage } from './MessageMiddleware';
+@@ -122,7 +119,7 @@ type WCoreManagerData = {
    sessionId?: string;
    resume?: string;
    /** Per-conversation reasoning effort (sent to the engine via set_config). Absent => engine default. */
@@ -2090,7 +2762,85 @@ index 61a9c7519..537ebca51 100644
    /**
     * Per-conversation MCP scoping (#348): the user-server ids active for this
     * chat. `undefined` => all enabled servers; `[]` => no user servers. Forwarded
-@@ -1134,17 +1134,17 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
+@@ -171,46 +168,6 @@ export function dedupeThinkingDelta(prev: string, incoming: string): string {
+   return incoming;
+ }
+
+-/**
+- * Cap for wcore `info` event text in the persistent log (#714). These events
+- * include full tool results ("[Grep success] <matched content>") — observed
+- * single entries up to ~600 KB — so the daily electron-log file was a plaintext
+- * copy of everything the agent read, API keys included. A short head is all a
+- * debugging session needs; the full output still reaches the renderer via the
+- * normal message stream.
+- */
+-export const INFO_LOG_PREVIEW_MAX_CHARS = 400;
+-
+-/**
+- * Reduce a wcore `info` payload to something safe to persist to the on-disk
+- * log (#714): truncate to a short preview, then mask recognizable secret
+- * shapes with the same redactor the activity timeline uses (#610). Truncation
+- * runs FIRST so the redaction regexes never scan a multi-hundred-KB string; a
+- * secret cut by the boundary either still matches (the prefixed-key regex
+- * needs only 6 chars past the prefix) or has too little of it left to matter.
+- * Non-string payloads (e.g. the `approval_required` diagnostic's structured
+- * data, whose engine-supplied `context` is free-form) are JSON-stringified so
+- * they stay readable AND pass through the same redaction. This is the desktop
+- * log-file surface; engine-side transports are #584.
+- */
+-export function toSafeInfoLogPreview(info: unknown): string {
+-  let text: string;
+-  if (typeof info === 'string') {
+-    text = info;
+-  } else {
+-    try {
+-      text = JSON.stringify(info) ?? String(info);
+-    } catch {
+-      text = String(info); // circular/unserializable - type tag beats nothing
+-    }
+-  }
+-  const truncated =
+-    text.length > INFO_LOG_PREVIEW_MAX_CHARS
+-      ? `${text.slice(0, INFO_LOG_PREVIEW_MAX_CHARS)}… [+${text.length - INFO_LOG_PREVIEW_MAX_CHARS} chars truncated]`
+-      : text;
+-  return redactCommandSecrets(truncated);
+-}
+-
+ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
+   workspace: string;
+   model: TProviderWithModel;
+@@ -615,15 +572,6 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
+         return true;
+       }
+     }
+-    // #671: trusted ("cowork") workspace auto-approves edits, still prompts on
+-    // exec/network. Only 'edit' - NOT the 'info' catch-all (which the engine also
+-    // uses for unclassified/network confirmations) - so a persisted always-on
+-    // posture stays stricter than the user-chosen auto_edit mode. Persisted
+-    // per-workspace; question/exec/mcp fall through to the confirmation dialog.
+-    if (isWorkspaceTrusted(this.workspace) && trustedWorkspaceAutoApprovesConfirmationType(type)) {
+-      this.agent?.approveTool(content.callId, 'once');
+-      return true;
+-    }
+     return false;
+   }
+
+@@ -1128,12 +1076,10 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
+         return;
+       }
+
+-      // Log info events from wcore (includes set_config/set_mode acknowledgments).
+-      // These also carry full tool results, so persist only a truncated,
+-      // secret-redacted preview — never the verbatim output (#714).
++      // Log info events from wcore (includes set_config/set_mode acknowledgments)
+       if (data.type === 'info') {
+         const elapsed = this._configSentAt ? ` (${Date.now() - this._configSentAt}ms since command)` : '';
+-        mainLog('[WCoreManager]', `info: ${toSafeInfoLogPreview(data.data)}${elapsed}`);
++        mainLog('[WCoreManager]', `info: ${data.data}${elapsed}`);
+       }
+
+       // v0.9.4 - sub-agent activity events are system-level (empty msg_id) but
+@@ -1188,17 +1134,17 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
          // confirm() (keyed via pendingApprovalTokens).
          if (autoMode && !isInfo && appr.resumeToken) {
            const callId = appr.callId ?? '';
@@ -2117,7 +2867,7 @@ index 61a9c7519..537ebca51 100644
              );
              return;
            }
-@@ -1153,7 +1153,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
+@@ -1207,7 +1153,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
            this.addConfirmation({
              title: 'messages.permissionRequest',
              id: callId,
@@ -2126,6 +2876,20 @@ index 61a9c7519..537ebca51 100644
              callId,
              options: [
                { label: 'messages.confirmation.yesAllowOnce', value: ToolConfirmationOutcome.ProceedOnce },
+@@ -1228,12 +1174,10 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
+         // token: we can neither resume nor escalate, so surface a diagnostic.
+         if (appr.reason && !isInfo) {
+           if (autoMode && !appr.resumeToken) {
+-            // Preview, not the raw payload: `context` is engine-supplied
+-            // free-form text and this persists to the on-disk log (#714).
+             mainError(
+               '[WCoreManager]',
+               `approval_required reason='${appr.reason}' in auto mode has no resume token and no HITL UI; turn may wedge`,
+-              toSafeInfoLogPreview(data.data)
++              data.data
+             );
+           } else {
+             mainLog(
 diff --git a/src/process/task/claudeConfig.ts b/src/process/task/claudeConfig.ts
 index 17ce3ae28..fe555ef4a 100644
 --- a/src/process/task/claudeConfig.ts
@@ -2367,10 +3131,28 @@ index 4a8616bdc..5383f7a87 100644
      '',
    ].join('\n');
 diff --git a/src/process/utils/initStorage.ts b/src/process/utils/initStorage.ts
-index c007ba803..d40c7798d 100644
+index 3786b2dd0..d40c7798d 100644
 --- a/src/process/utils/initStorage.ts
 +++ b/src/process/utils/initStorage.ts
-@@ -278,11 +278,10 @@ const dirConfig = envFile.getSync('wayland.dir');
+@@ -35,7 +35,6 @@ import {
+   verifyDirectoryFiles,
+ } from './utils';
+ import { writeFileAtomic } from './atomicWrite';
+-import { planPresetLocaleFileCopies } from './presetLocaleFiles';
+ import { getOsUserName } from './osUserName';
+ import { resolveFluxImageDefault } from './fluxImageDefault';
+ import { readConnectedFluxKey } from '../connectors/fluxKey';
+@@ -59,9 +58,7 @@ import {
+ import { resolveNpxPath } from './shellEnv';
+ import { getPlaywrightBrowsersDir } from '../services/mcpServices/playwrightBrowsers';
+ import { getMcpScriptPath, inspectMcpScripts } from './mcpScriptDir';
+-import { cleanupLegacyBundledExtensionCopies } from '../extensions/lifecycle/legacyBundledCopyCleanup';
+ import { getBuiltinCatalogAssistants } from './builtinCatalog';
+-import { seedHermesProfileAssistants } from '../services/skills/hermesProfileSeeder';
+ // Platform and architecture types (moved from deleted updateConfig)
+ type PlatformType = 'win32' | 'darwin' | 'linux';
+ type ArchitectureType = 'x64' | 'arm64' | 'ia32' | 'arm';
+@@ -281,11 +278,10 @@ const dirConfig = envFile.getSync('wayland.dir');
 
  const cacheDir = dirConfig?.cacheDir || getHomePage();
 
@@ -2384,7 +3166,7 @@ index c007ba803..d40c7798d 100644
   */
  export function resolveConciergeDiagDeps(): ConciergeDiagDeps {
    const dbPath = path.join(getDataPath(), 'wayland.db');
-@@ -290,7 +289,6 @@ export function resolveConciergeDiagDeps(): ConciergeDiagDeps {
+@@ -293,7 +289,6 @@ export function resolveConciergeDiagDeps(): ConciergeDiagDeps {
      configPath: path.join(cacheDir, STORAGE_PATH.config),
      cronDbPath: dbPath,
      providerDbPath: dbPath,
@@ -2392,7 +3174,7 @@ index c007ba803..d40c7798d 100644
      workspaceDbPath: dbPath,
      logDir: getPlatformServices().paths.getLogsDir(),
      appConfigDir: cacheDir,
-@@ -298,6 +296,7 @@ export function resolveConciergeDiagDeps(): ConciergeDiagDeps {
+@@ -301,6 +296,7 @@ export function resolveConciergeDiagDeps(): ConciergeDiagDeps {
    };
  }
 
@@ -2400,7 +3182,7 @@ index c007ba803..d40c7798d 100644
  const configFile = JsonFileBuilder<IConfigStorageRefer & IChannelAssistantConfigRefer>(
    path.join(cacheDir, STORAGE_PATH.config)
  );
-@@ -509,6 +508,8 @@ const initBuiltinAssistantRules = async (): Promise<void> => {
+@@ -512,6 +508,8 @@ const initBuiltinAssistantRules = async (): Promise<void> => {
      mkdirSync(assistantsDir);
    }
 
@@ -2409,29 +3191,89 @@ index c007ba803..d40c7798d 100644
    for (const preset of ASSISTANT_PRESETS) {
      const assistantId = `builtin-${preset.id}`;
 
-@@ -528,7 +529,9 @@ const initBuiltinAssistantRules = async (): Promise<void> => {
+@@ -522,21 +520,21 @@ const initBuiltinAssistantRules = async (): Promise<void> => {
+     // Copy rule files
+     const hasRuleFiles = Object.keys(preset.ruleFiles).length > 0;
+     if (hasRuleFiles) {
+-      // Absent non-default locale variants are skipped silently: the read path
+-      // falls back to the default locale, so per-file warnings are noise (#719).
+-      const rulePlan = planPresetLocaleFileCopies(preset.ruleFiles, (file) =>
+-        existsSync(path.join(presetRulesDir, file))
+-      );
+-      for (const { file } of rulePlan.missing) {
+-        console.warn(`[Wayland] Source rule file not found: ${path.join(presetRulesDir, file)}`);
+-      }
+-      for (const { locale, file } of rulePlan.copies) {
++      for (const [locale, ruleFile] of Object.entries(preset.ruleFiles)) {
+         try {
+-          const sourceRulesPath = path.join(presetRulesDir, file);
++          const sourceRulesPath = path.join(presetRulesDir, ruleFile);
+           // Target file name format: {assistantId}.{locale}.md
+           const targetFileName = `${assistantId}.${locale}.md`;
+           const targetPath = path.join(assistantsDir, targetFileName);
 
-           // Check if source file exists
-           if (!existsSync(sourceRulesPath)) {
--            console.warn(`[Wayland] Source rule file not found: ${sourceRulesPath}`);
++          // Check if source file exists
++          if (!existsSync(sourceRulesPath)) {
 +            if (isRequiredAssistantLocale(locale)) {
 +              console.warn(`[Wayland] Source rule file not found: ${sourceRulesPath}`);
 +            }
-             continue;
-           }
++            continue;
++          }
++
+           // Always overwrite builtin assistant rule files to ensure users get the latest version
+           let content = await fs.readFile(sourceRulesPath, 'utf-8');
+           // Replace relative paths with absolute paths so AI can find scripts correctly
+@@ -544,7 +542,7 @@ const initBuiltinAssistantRules = async (): Promise<void> => {
+           await fs.writeFile(targetPath, content, 'utf-8');
+         } catch (error) {
+           // Ignore missing locale files
+-          console.warn(`[Wayland] Failed to copy rule file ${file}:`, error);
++          console.warn(`[Wayland] Failed to copy rule file ${ruleFile}:`, error);
+         }
+       }
+     } else {
+@@ -565,21 +563,21 @@ const initBuiltinAssistantRules = async (): Promise<void> => {
 
-@@ -569,7 +572,9 @@ const initBuiltinAssistantRules = async (): Promise<void> => {
+     // Copy skill files (if preset has skills)
+     if (preset.skillFiles) {
+-      // Absent non-default locale variants are skipped silently: the read path
+-      // falls back to the default locale, so per-file warnings are noise (#719).
+-      const skillPlan = planPresetLocaleFileCopies(preset.skillFiles, (file) =>
+-        existsSync(path.join(presetSkillsDir, file))
+-      );
+-      for (const { file } of skillPlan.missing) {
+-        console.warn(`[Wayland] Source skill file not found: ${path.join(presetSkillsDir, file)}`);
+-      }
+-      for (const { locale, file } of skillPlan.copies) {
++      for (const [locale, skillFile] of Object.entries(preset.skillFiles)) {
+         try {
+-          const sourceSkillsPath = path.join(presetSkillsDir, file);
++          const sourceSkillsPath = path.join(presetSkillsDir, skillFile);
+           // Target file name format: {assistantId}-skills.{locale}.md
+           const targetFileName = `${assistantId}-skills.${locale}.md`;
+           const targetPath = path.join(assistantsDir, targetFileName);
 
-           // Check if source file exists
-           if (!existsSync(sourceSkillsPath)) {
--            console.warn(`[Wayland] Source skill file not found: ${sourceSkillsPath}`);
++          // Check if source file exists
++          if (!existsSync(sourceSkillsPath)) {
 +            if (isRequiredAssistantLocale(locale)) {
 +              console.warn(`[Wayland] Source skill file not found: ${sourceSkillsPath}`);
 +            }
-             continue;
-           }
-
-@@ -613,7 +618,6 @@ const getBuiltinAssistants = (): AcpBackendConfig[] => {
++            continue;
++          }
++
+           // Always overwrite builtin assistant skill files to ensure users get the latest version
+           let content = await fs.readFile(sourceSkillsPath, 'utf-8');
+           // Replace relative paths with absolute paths so AI can find scripts correctly
+@@ -587,7 +585,7 @@ const initBuiltinAssistantRules = async (): Promise<void> => {
+           await fs.writeFile(targetPath, content, 'utf-8');
+         } catch (error) {
+           // Ignore missing skill files
+-          console.warn(`[Wayland] Failed to copy skill file ${file}:`, error);
++          console.warn(`[Wayland] Failed to copy skill file ${skillFile}:`, error);
+         }
+       }
+     } else {
+@@ -620,7 +618,6 @@ const getBuiltinAssistants = (): AcpBackendConfig[] => {
      const defaultEnabledSkills = preset.defaultEnabledSkills;
      const enabledByDefault =
        preset.id === 'concierge' ||
@@ -2439,7 +3281,7 @@ index c007ba803..d40c7798d 100644
        preset.id === 'word-creator' ||
        preset.id === 'ppt-creator' ||
        preset.id === 'excel-creator' ||
-@@ -923,19 +927,18 @@ const ensureBuiltinMcpServers = async (): Promise<void> => {
+@@ -930,19 +927,18 @@ const ensureBuiltinMcpServers = async (): Promise<void> => {
      //     config locations, for the configPaths report.
      // Enabled by default — the tool is silent unless invoked and never mutates.
      const conciergeDiagScriptPath = getBuiltinMcpScriptPath('builtin-mcp-concierge-diag');
@@ -2468,6 +3310,46 @@ index c007ba803..d40c7798d 100644
      };
      const conciergeDiagExistingIdx = mcpServers.findIndex(
        (s) => s.builtin === true && s.id === BUILTIN_CONCIERGE_DIAG_ID
+@@ -1233,17 +1229,6 @@ const initStorage = async () => {
+   // <userData>/extensions. ExtensionLoader reads them in place from inside the
+   // app (asar) via the 'bundled' scan source — loose .md skill bodies tripped
+   // AV content heuristics (#275). See getBundledExtensionsDir().
+-  //
+-  // #718: builds before #275 left their copied-out packs behind. Remove those
+-  // stale copies once so they stop shadowing the asar set and re-triggering
+-  // the "Skipping duplicate extension" warning per pack on every launch.
+-  const BUNDLED_COPY_CLEANUP_KEY = 'migration.legacyBundledExtensionCopiesRemoved';
+-  const bundledCleanupDone = await configFile.get(BUNDLED_COPY_CLEANUP_KEY).catch(() => false);
+-  if (!bundledCleanupDone) {
+-    if (await cleanupLegacyBundledExtensionCopies()) {
+-      await configFile.set(BUNDLED_COPY_CLEANUP_KEY, true);
+-    }
+-  }
+   mark('4.3 bundledExtensions');
+
+   // 5. Initialize builtin assistants
+@@ -1438,21 +1423,6 @@ const initStorage = async () => {
+     console.error('[Wayland] Failed to initialize builtin assistants:', error);
+   }
+
+-  // 5.4 Seed one preset Assistant per Hermes profile (~/.hermes/profiles/<name>/).
+-  // Isolated from the builtin block so a profile-scan failure can't blank builtin
+-  // init; runs after it so it reads the freshly-persisted assistants list.
+-  try {
+-    await seedHermesProfileAssistants({
+-      getAssistants: async () => (await configFile.get('assistants').catch((): undefined => undefined)) ?? [],
+-      setAssistants: async (next) => {
+-        await configFile.set('assistants', next);
+-      },
+-    });
+-  } catch (error) {
+-    console.error('[Wayland] Failed to seed Hermes profile assistants:', error);
+-  }
+-  mark('5.4 hermes profile assistants');
+-
+   // 6. Initialize the database (better-sqlite3)
+   try {
+     await getDatabase();
 diff --git a/src/process/utils/shellEnv.ts b/src/process/utils/shellEnv.ts
 index 08940a733..c14dc87f6 100644
 --- a/src/process/utils/shellEnv.ts
@@ -2880,7 +3762,7 @@ index a5880605d..41ce06751 100644
        <span
          ref={marqueeRef}
 diff --git a/src/renderer/components/layout/Layout.tsx b/src/renderer/components/layout/Layout.tsx
-index d54741a50..60c2df9b5 100644
+index a782d4877..60c2df9b5 100644
 --- a/src/renderer/components/layout/Layout.tsx
 +++ b/src/renderer/components/layout/Layout.tsx
 @@ -26,6 +26,7 @@ import { cleanupSiderTooltips } from '@renderer/utils/ui/siderTooltip';
@@ -2891,7 +3773,20 @@ index d54741a50..60c2df9b5 100644
  import { useGlobalKeybind } from '@renderer/hooks/settings/useGlobalKeybind';
  import { CommandPalette } from '@renderer/components/cmdk';
  import BudgetGateModal from '@renderer/components/cost/BudgetGateModal';
-@@ -217,10 +218,11 @@ const Layout: React.FC<{
+@@ -35,11 +36,7 @@ import { getAgentKey } from '@renderer/pages/guid/hooks/agentSelectionUtils';
+ import type { AcpBackend } from '@/common/types/acpTypes';
+ import { isElectronDesktop } from '@renderer/utils/platform';
+ import { useIsPopoutMode } from '@renderer/hooks/system/useIsPopoutMode';
+-import {
+-  computeCssSyncDecision,
+-  resolveCssByActiveTheme,
+-  setExtensionThemesCache,
+-} from '@renderer/utils/theme/themeCssSync';
++import { computeCssSyncDecision, resolveCssByActiveTheme } from '@renderer/utils/theme/themeCssSync';
+ import '@renderer/styles/layout.css';
+
+ // DevTools escape hatch: the only way to open Chrome DevTools in a packaged
+@@ -221,26 +218,21 @@ const Layout: React.FC<{
    const collapsedRef = useRef(collapsed);
    const lastCssRef = useRef('');
    const lastUiCssUpdateAtRef = useRef(0);
@@ -2904,7 +3799,39 @@ index d54741a50..60c2df9b5 100644
    });
 
    const loadAndHealCustomCss = useCallback(async () => {
-@@ -485,10 +487,12 @@ const Layout: React.FC<{
+     try {
+-      const [savedCssRaw, activeThemeId, savedThemes, extensionThemes] = await Promise.all([
++      const [savedCssRaw, activeThemeId, savedThemes] = await Promise.all([
+         ConfigStorage.get('customCss'),
+         ConfigStorage.get('css.activeThemeId'),
+         ConfigStorage.get('css.themes'),
+-        ipcBridge.extensions.getThemes.invoke().catch((error) => {
+-          console.warn('Failed to load extension themes:', error);
+-          return [] as ICssTheme[];
+-        }),
+       ]);
+
+-      setExtensionThemesCache(Array.isArray(extensionThemes) ? extensionThemes : []);
+-
+       const decision = computeCssSyncDecision({
+         savedCss: savedCssRaw || '',
+         activeThemeId: activeThemeId || '',
+@@ -303,14 +295,10 @@ const Layout: React.FC<{
+
+     window.addEventListener('custom-css-updated', handleCssUpdate as EventListener);
+     window.addEventListener('storage', handleStorageChange);
+-    const unsubscribeExtensions = ipcBridge.extensions.stateChanged.on(() => {
+-      void loadAndHealCustomCss();
+-    });
+
+     return () => {
+       window.removeEventListener('custom-css-updated', handleCssUpdate as EventListener);
+       window.removeEventListener('storage', handleStorageChange);
+-      unsubscribeExtensions();
+     };
+   }, [loadAndHealCustomCss]);
+
+@@ -499,10 +487,12 @@ const Layout: React.FC<{
      (event: React.MouseEvent<HTMLDivElement>) => {
        if (isMobile) return;
        event.preventDefault();
@@ -2918,7 +3845,7 @@ index d54741a50..60c2df9b5 100644
        };
        document.body.style.cursor = 'col-resize';
        document.body.style.userSelect = 'none';
-@@ -506,9 +510,15 @@ const Layout: React.FC<{
+@@ -520,9 +510,15 @@ const Layout: React.FC<{
        const shouldCollapse = collapsedRef.current
          ? draggedWidth < SIDER_DRAG_SNAP_THRESHOLD + SIDER_DRAG_HYSTERESIS
          : draggedWidth <= SIDER_DRAG_SNAP_THRESHOLD - SIDER_DRAG_HYSTERESIS;
@@ -2934,7 +3861,28 @@ index d54741a50..60c2df9b5 100644
      };
 
      const endDrag = () => {
-@@ -669,10 +679,14 @@ const Layout: React.FC<{
+@@ -672,24 +668,25 @@ const Layout: React.FC<{
+               </ArcoLayout.Header>
+               <ArcoLayout.Content className='pt-8px px-8px pb-0 layout-sider-content'>
+                 {React.isValidElement(sider)
+-                  ? React.cloneElement(
+-                      sider as React.ReactElement<{ onSessionClick?: () => void; collapsed?: boolean }>,
+-                      {
+-                        onSessionClick: () => {
+-                          cleanupSiderTooltips();
+-                          if (isMobile) setCollapsed(true);
+-                        },
+-                        collapsed,
+-                      }
+-                    )
++                  ? React.cloneElement(sider as React.ReactElement<{ onSessionClick?: () => void; collapsed?: boolean }>, {
++                      onSessionClick: () => {
++                        cleanupSiderTooltips();
++                        if (isMobile) setCollapsed(true);
++                      },
++                      collapsed,
++                    })
+                   : sider}
                </ArcoLayout.Content>
                {!isMobile && (
                  <div
@@ -3323,7 +4271,7 @@ index 267fd8679..fe547ec02 100644
        onCancel={handleCancel}
      />
 diff --git a/src/renderer/pages/guid/GuidPage.tsx b/src/renderer/pages/guid/GuidPage.tsx
-index 516b8989c..5975c48de 100644
+index 45d17e02f..5975c48de 100644
 --- a/src/renderer/pages/guid/GuidPage.tsx
 +++ b/src/renderer/pages/guid/GuidPage.tsx
 @@ -37,8 +37,12 @@ import GuidModelSelector from './components/GuidModelSelector';
@@ -3446,7 +4394,28 @@ index 516b8989c..5975c48de 100644
      />
    );
 
-@@ -1160,6 +1234,8 @@ const GuidPage: React.FC = () => {
+@@ -885,7 +959,6 @@ const GuidPage: React.FC = () => {
+       files={guidInput.files}
+       onFilesUploaded={guidInput.handleFilesUploaded}
+       onSelectWorkspace={(dir) => guidInput.setDir(dir)}
+-      workspace={guidInput.dir}
+       modelSelectorNode={modelSelectorNode}
+       selectedAgent={agentSelection.selectedAgent}
+       effectiveModeAgent={agentSelection.currentEffectiveAgentInfo.agentType}
+@@ -1142,11 +1215,7 @@ const GuidPage: React.FC = () => {
+             onFocus={guidInput.handleTextareaFocus}
+             onBlur={guidInput.handleTextareaBlur}
+             textareaRef={guidInput.textareaRef}
+-            placeholder={
+-              mention.selectedAgentLabel
+-                ? `${mention.selectedAgentLabel}, ${typewriterPlaceholder || t('conversation.welcome.placeholder')}`
+-                : typewriterPlaceholder || t('conversation.welcome.placeholder')
+-            }
++            placeholder={`${mention.selectedAgentLabel}, ${typewriterPlaceholder || t('conversation.welcome.placeholder')}`}
+             isInputActive={guidInput.isInputFocused}
+             isFileDragging={guidInput.isFileDragging}
+             activeBorderColor={activeBorderColor}
+@@ -1165,6 +1234,8 @@ const GuidPage: React.FC = () => {
                />
              }
              mentionDropdown={mentionDropdownNode}
@@ -3562,25 +4531,20 @@ index d89c8d316..d5d9c49bb 100644
            <div
              className='flex items-center justify-center cursor-pointer p-4px opacity-60 hover:opacity-100 self-center'
 diff --git a/src/renderer/pages/guid/components/GuidActionRow.tsx b/src/renderer/pages/guid/components/GuidActionRow.tsx
-index 9224d36b5..b287c3fef 100644
+index dc2c7f074..b287c3fef 100644
 --- a/src/renderer/pages/guid/components/GuidActionRow.tsx
 +++ b/src/renderer/pages/guid/components/GuidActionRow.tsx
-@@ -6,10 +6,13 @@
-
- import { ArrowUp, Brain, FolderOpen, Shield } from 'lucide-react';
- import { ipcBridge } from '@/common';
--import ComposerAddMenu, { type ComposerUploadItem } from '@/renderer/pages/conversation/components/composerMenu/ComposerAddMenu';
-+import ComposerAddMenu, {
-+  type ComposerUploadItem,
-+} from '@/renderer/pages/conversation/components/composerMenu/ComposerAddMenu';
+@@ -11,8 +11,8 @@ import ComposerAddMenu, {
+ } from '@/renderer/pages/conversation/components/composerMenu/ComposerAddMenu';
  import AgentModeSelector from '@/renderer/components/agent/AgentModeSelector';
  import AcpConfigSelector from '@/renderer/components/agent/AcpConfigSelector';
+-import CoworkToggle from '@/renderer/components/agent/CoworkToggle';
  import { supportsModeSwitch, type AgentModeOption } from '@/renderer/utils/model/agentModes';
 +import DirectorySelectionModal from '@/renderer/components/settings/DirectorySelectionModal';
  import type { AcpSessionConfigOption } from '@/common/types/acpTypes';
  import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
  import { getCleanFileNames, FileService } from '@/renderer/services/FileService';
-@@ -17,6 +20,7 @@ import { iconColors } from '@/renderer/styles/colors';
+@@ -20,6 +20,7 @@ import { iconColors } from '@/renderer/styles/colors';
  import { isElectronDesktop } from '@/renderer/utils/platform';
  import type { AcpBackend, AcpBackendConfig, AvailableAgent } from '../types';
  import PresetAgentTag, { type AgentSwitcherItem } from './PresetAgentTag';
@@ -3588,7 +4552,24 @@ index 9224d36b5..b287c3fef 100644
  import { Button, Message, Tooltip } from '@arco-design/web-react';
  import React, { useCallback, useMemo, useRef, useState } from 'react';
  import { useTranslation } from 'react-i18next';
-@@ -110,11 +114,26 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -30,8 +31,6 @@ type GuidActionRowProps = {
+   files: string[];
+   onFilesUploaded: (paths: string[]) => void;
+   onSelectWorkspace: (dir: string) => void;
+-  /** Currently selected workspace cwd (drives the Chat<->Cowork trust toggle, #671). */
+-  workspace?: string;
+
+   // Model selector node (rendered by parent)
+   modelSelectorNode: React.ReactNode;
+@@ -83,7 +82,6 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+   files,
+   onFilesUploaded,
+   onSelectWorkspace,
+-  workspace,
+   modelSelectorNode,
+   selectedAgent,
+   effectiveModeAgent,
+@@ -116,11 +114,26 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
    const layout = useLayoutContext();
    const modeBackend = effectiveModeAgent || selectedAgent;
    const showModeSwitch = supportsModeSwitch(modeBackend);
@@ -3616,7 +4597,7 @@ index 9224d36b5..b287c3fef 100644
 
    const handleLocalFileChange = useCallback(
      async (e: React.ChangeEvent<HTMLInputElement>) => {
-@@ -165,6 +184,20 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -171,6 +184,20 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
      return [{ key: 'file', label: t('conversation.welcome.uploadFile'), onClick: openHostFilePicker }];
    }, [isWebUI, openHostFilePicker, t]);
 
@@ -3637,7 +4618,7 @@ index 9224d36b5..b287c3fef 100644
    return (
      <div className={styles.actionRow}>
        <div className={styles.actionTools}>
-@@ -200,30 +233,14 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -206,30 +233,14 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
            )}
          </div>
 
@@ -3671,7 +4652,11 @@ index 9224d36b5..b287c3fef 100644
 
          <div
            className={`${styles.actionConfigGroup} ${configOptionCount > 1 ? styles.actionConfigGroupWithDivider : ''}`}
-@@ -245,7 +262,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -248,11 +259,10 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+               hideCompactLabelPrefixOnMobile
+             />
+           )}
+-          <CoworkToggle workspace={workspace} size='mini' />
            <AcpConfigSelector
              backend={configOptionsBackend}
              buttonClassName='guid-config-btn'
@@ -3680,7 +4665,7 @@ index 9224d36b5..b287c3fef 100644
              leadingIcon={<Brain size={14} color={iconColors.secondary} />}
              onOptionSelect={onConfigOptionSelect}
            />
-@@ -291,6 +308,17 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
+@@ -298,6 +308,17 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
            </span>
          </Tooltip>
        </div>
@@ -3742,7 +4727,7 @@ index 8feeb4cc8..06908a37b 100644
          <div className='flex flex-wrap items-center gap-8px mt-12px mb-12px'>
            {files.map((path) => (
 diff --git a/src/renderer/pages/guid/components/GuidModelSelector.tsx b/src/renderer/pages/guid/components/GuidModelSelector.tsx
-index d2bfc8f43..3e2c0bccb 100644
+index d2bfc8f43..cd0f6cf9f 100644
 --- a/src/renderer/pages/guid/components/GuidModelSelector.tsx
 +++ b/src/renderer/pages/guid/components/GuidModelSelector.tsx
 @@ -4,13 +4,13 @@
@@ -3762,7 +4747,7 @@ index d2bfc8f43..3e2c0bccb 100644
  import { useFluxConnected } from '@/renderer/hooks/useFluxConnected';
  import { peekCuratedForAgent, useModelRegistry } from '@/renderer/hooks/useModelRegistry';
  import { useUsageTelemetry } from '@/renderer/hooks/usage/useUsageTelemetry';
-@@ -43,8 +43,114 @@ type GuidModelSelectorProps = {
+@@ -43,8 +43,115 @@ type GuidModelSelectorProps = {
    currentAcpCachedModelInfo: AcpModelInfo | null;
    selectedAcpModel: string | null;
    setSelectedAcpModel: React.Dispatch<React.SetStateAction<string | null>>;
@@ -3778,6 +4763,7 @@ index d2bfc8f43..3e2c0bccb 100644
 +export type GuidServiceTier = 'normal' | 'priority';
 +
 +const GUID_REASONING_EFFORTS: GuidReasoningEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
++const CODEX_REASONING_EFFORTS: GuidReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
 +const GUID_SERVICE_TIERS: GuidServiceTier[] = ['normal', 'priority'];
 +const REASONING_EFFORT_CONFIG_ID = 'reasoning_effort';
 +const SERVICE_TIER_CONFIG_ID = 'service_tier';
@@ -3877,7 +4863,7 @@ index d2bfc8f43..3e2c0bccb 100644
  /**
   * Map a model's blended USD-per-million-token cost to a $ / $$ / $$$ tier.
   *
-@@ -92,6 +198,33 @@ export const firstSafeCuratedModel = (list: CuratedModel[]): CuratedModel | unde
+@@ -92,6 +199,33 @@ export const firstSafeCuratedModel = (list: CuratedModel[]): CuratedModel | unde
    list.find((m) => m.enabled && !isExperimentalCurated(m)) ??
    list.find((m) => !isExperimentalCurated(m));
 
@@ -3911,7 +4897,7 @@ index d2bfc8f43..3e2c0bccb 100644
  const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
    isGeminiMode,
    modelList,
-@@ -101,6 +234,12 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -101,6 +235,12 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
    currentAcpCachedModelInfo,
    selectedAcpModel,
    setSelectedAcpModel,
@@ -3924,7 +4910,7 @@ index d2bfc8f43..3e2c0bccb 100644
  }) => {
    const { t } = useTranslation();
    const navigate = useNavigate();
-@@ -111,6 +250,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -111,6 +251,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
    // Open state - exposed so the frequently-used hook can defer its IPC until
    // the panel is actually visible.
    const [panelOpen, setPanelOpen] = React.useState(false);
@@ -3932,7 +4918,7 @@ index d2bfc8f43..3e2c0bccb 100644
 
    // Plain-language scope sentence for the selected agent. Reuses the same
    // copy as the Agents settings page so the explanation lives at the point
-@@ -409,33 +549,165 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -409,33 +550,170 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
      return fluxConnected && (compat === 'env' || compat === 'setup');
    }, [agentKey, fluxConnected]);
 
@@ -3998,6 +4984,11 @@ index d2bfc8f43..3e2c0bccb 100644
 +      .map((model) => splitAcpModelEffort(model.id, model.label).effort)
 +      .filter((value): value is GuidReasoningEffort => Boolean(value));
 +    if (bySelectedModel.length > 0) return Array.from(new Set(bySelectedModel));
++
++    // Codex can arrive on the GUID with account-aware base models and a current
++    // effort, but without cached ACP config options before the first session.
++    // Keep the pre-chat picker aligned with the in-conversation Codex selector.
++    if (agentKey === 'codex') return CODEX_REASONING_EFFORTS;
 +
 +    return [];
 +  }, [agentKey, rawAcpModels, reasoningEffortOption, selectedBaseModelId]);
@@ -4119,7 +5110,7 @@ index d2bfc8f43..3e2c0bccb 100644
 
    const acpButtonLabel = React.useMemo(() => {
      return getModelDisplayLabel({
-@@ -454,6 +726,19 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -454,6 +732,19 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
      [acpButtonLabel, acpSourceLabel]
    );
 
@@ -4139,7 +5130,7 @@ index d2bfc8f43..3e2c0bccb 100644
    // ── Provider-based agents (Gemini / Wayland Core) - three-tier picker ────
    if (isGeminiMode) {
      return (
-@@ -479,7 +764,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -479,7 +770,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
          <Button className={'sendbox-model-btn guid-config-btn'} shape='round' size='small'>
            <span className='flex items-center gap-6px min-w-0'>
              <Brain size={14} color={iconColors.secondary} className='shrink-0' />
@@ -4148,7 +5139,7 @@ index d2bfc8f43..3e2c0bccb 100644
              <ChevronDown size={12} color={iconColors.secondary} className='shrink-0' />
            </span>
          </Button>
-@@ -488,80 +773,236 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
+@@ -488,80 +779,236 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
    }
 
    // ── CLI agents - ACP model selector ──────────────────────────────────────
@@ -5304,18 +6295,22 @@ index 250efe1a8..80dd0df40 100644
              label={t('settings.remoteAgent.url')}
              field='url'
 diff --git a/src/renderer/services/i18n/i18n-keys.d.ts b/src/renderer/services/i18n/i18n-keys.d.ts
-index d56ab7cfa..d590db363 100644
+index da9c75438..d590db363 100644
 --- a/src/renderer/services/i18n/i18n-keys.d.ts
 +++ b/src/renderer/services/i18n/i18n-keys.d.ts
-@@ -48,6 +48,7 @@ export type I18nKey =
+@@ -48,10 +48,7 @@ export type I18nKey =
    | 'agentMode.build'
    | 'agentMode.bypass'
    | 'agentMode.bypassPermissions'
+-  | 'agentMode.chat'
+-  | 'agentMode.chatTooltip'
+-  | 'agentMode.cowork'
+-  | 'agentMode.coworkTooltip'
 +  | 'agentMode.configToml'
    | 'agentMode.default'
    | 'agentMode.dontAsk'
    | 'agentMode.permission'
-@@ -552,6 +553,7 @@ export type I18nKey =
+@@ -556,6 +553,7 @@ export type I18nKey =
    | 'conversation.minimap.noMatch'
    | 'conversation.minimap.searchAria'
    | 'conversation.minimap.searchHint'
@@ -5323,7 +6318,7 @@ index d56ab7cfa..d590db363 100644
    | 'conversation.modelSelector.claudeSubscriptionNotice'
    | 'conversation.modelSelector.connectProvider'
    | 'conversation.modelSelector.effort'
-@@ -559,8 +561,16 @@ export type I18nKey =
+@@ -563,8 +561,16 @@ export type I18nKey =
    | 'conversation.modelSelector.effortHighDesc'
    | 'conversation.modelSelector.effortLow'
    | 'conversation.modelSelector.effortLowDesc'
@@ -5340,7 +6335,7 @@ index d56ab7cfa..d590db363 100644
    | 'conversation.modelSelector.emptyBody'
    | 'conversation.modelSelector.emptyFlux'
    | 'conversation.modelSelector.emptySub'
-@@ -571,12 +581,22 @@ export type I18nKey =
+@@ -575,12 +581,22 @@ export type I18nKey =
    | 'conversation.modelSelector.moreModels'
    | 'conversation.modelSelector.noMatch'
    | 'conversation.modelSelector.pinAria'
@@ -5363,7 +6358,123 @@ index d56ab7cfa..d590db363 100644
    | 'conversation.modelSelector.unavailable'
    | 'conversation.modelSelector.unpinAria'
    | 'conversation.noAgentsAvailable'
-@@ -3840,6 +3860,9 @@ export type I18nKey =
+@@ -590,11 +606,6 @@ export type I18nKey =
+   | 'conversation.noModelCta.button'
+   | 'conversation.noModelCta.sendTooltip'
+   | 'conversation.noModelCta.title'
+-  | 'conversation.notification.agentError.body'
+-  | 'conversation.notification.agentError.title'
+-  | 'conversation.notification.agentFinished.body'
+-  | 'conversation.notification.agentFinished.title'
+-  | 'conversation.notification.untitled'
+   | 'conversation.observability.close'
+   | 'conversation.observability.empty'
+   | 'conversation.observability.expandRow'
+@@ -782,7 +793,6 @@ export type I18nKey =
+   | 'conversation.workspace.terminal.exited'
+   | 'conversation.workspace.terminal.missingCli'
+   | 'conversation.workspace.terminal.notFound'
+-  | 'conversation.workspace.terminal.profileUnresolved'
+   | 'conversation.workspace.terminal.tab'
+   | 'conversation.workspace.terminal.unsupported'
+   | 'conversation.workspace.title'
+@@ -808,16 +818,10 @@ export type I18nKey =
+   | 'cron.error.alreadyExists'
+   | 'cron.error.conversationBusy'
+   | 'cron.error.conversationNotFound'
+-  | 'cron.error.highFreqNewConversation'
+   | 'cron.error.jobNotFound'
+   | 'cron.error.missedJob'
+-  | 'cron.error.overlapSkipped'
+   | 'cron.error.scheduledTimePassed'
+   | 'cron.goToConversation'
+-  | 'cron.highFreqWarn.body'
+-  | 'cron.highFreqWarn.createAnyway'
+-  | 'cron.highFreqWarn.title'
+-  | 'cron.highFreqWarn.useReuse'
+   | 'cron.lastError'
+   | 'cron.lastRun'
+   | 'cron.message'
+@@ -2191,24 +2195,50 @@ export type I18nKey =
+   | 'projects.timeline.event.chat.open'
+   | 'projects.timeline.event.chat.summary'
+   | 'projects.timeline.event.chat.untitled'
++  | 'projects.timeline.event.email.noSubject'
++  | 'projects.timeline.event.email.summary'
++  | 'projects.timeline.event.email.summaryFrom'
+   | 'projects.timeline.event.inventory.summary'
+   | 'projects.timeline.event.inventory.title'
+   | 'projects.timeline.event.projectCreated.summary'
+   | 'projects.timeline.event.projectCreated.title'
+   | 'projects.timeline.event.projectUpdated.summary'
+   | 'projects.timeline.event.projectUpdated.title'
++  | 'projects.timeline.event.reference.summary'
++  | 'projects.timeline.event.reference.title'
++  | 'projects.timeline.event.remoteFailed.summary'
++  | 'projects.timeline.event.remoteFailed.title'
++  | 'projects.timeline.event.remoteIgnore.summary'
++  | 'projects.timeline.event.remoteIgnore.title'
++  | 'projects.timeline.event.remoteImport.summary'
++  | 'projects.timeline.event.remoteImport.title'
++  | 'projects.timeline.event.remotePending.summary'
++  | 'projects.timeline.event.remotePending.title'
+   | 'projects.timeline.eyebrow.chat'
++  | 'projects.timeline.eyebrow.email'
+   | 'projects.timeline.eyebrow.project'
+   | 'projects.timeline.eyebrow.reference'
++  | 'projects.timeline.eyebrow.remote'
++  | 'projects.timeline.field.attachment'
++  | 'projects.timeline.field.attachments'
+   | 'projects.timeline.field.backend'
+   | 'projects.timeline.field.file'
++  | 'projects.timeline.field.from'
++  | 'projects.timeline.field.lastError'
+   | 'projects.timeline.field.project'
++  | 'projects.timeline.field.reason'
++  | 'projects.timeline.field.referencesSaved'
++  | 'projects.timeline.field.remoteLinks'
+   | 'projects.timeline.field.size'
++  | 'projects.timeline.field.sourceEmail'
++  | 'projects.timeline.field.status'
+   | 'projects.timeline.field.type'
+   | 'projects.timeline.field.workspace'
+   | 'projects.timeline.filter.all'
+   | 'projects.timeline.filter.chat'
++  | 'projects.timeline.filter.email'
+   | 'projects.timeline.filter.reference'
++  | 'projects.timeline.filter.remote'
+   | 'projects.timeline.noMatch'
+   | 'projects.timeline.noTimestamp'
+   | 'projects.timeline.noWorkspaceHint'
+@@ -2241,8 +2271,6 @@ export type I18nKey =
+   | 'projects.wizard.constraints.placeholder'
+   | 'projects.wizard.constraints.q'
+   | 'projects.wizard.continue'
+-  | 'projects.wizard.draft.authFailed'
+-  | 'projects.wizard.draft.bridgeUnreachable'
+   | 'projects.wizard.draft.failed'
+   | 'projects.wizard.draft.failedReason'
+   | 'projects.wizard.draft.generating'
+@@ -2250,7 +2278,6 @@ export type I18nKey =
+   | 'projects.wizard.draft.noModel'
+   | 'projects.wizard.draft.q'
+   | 'projects.wizard.draft.retry'
+-  | 'projects.wizard.draft.timedOut'
+   | 'projects.wizard.generate'
+   | 'projects.wizard.regenerate'
+   | 'projects.wizard.source.hint'
+@@ -3275,10 +3302,6 @@ export type I18nKey =
+   | 'settings.envKeyPlaceholder'
+   | 'settings.envLabel'
+   | 'settings.envValuePlaceholder'
+-  | 'settings.exportButton'
+-  | 'settings.exportFailed'
+-  | 'settings.exportOk'
+-  | 'settings.exportRedacted'
+   | 'settings.extensionAssistantReadonly'
+   | 'settings.feedback'
+   | 'settings.fontSize'
+@@ -3837,6 +3860,9 @@ export type I18nKey =
    | 'settings.remoteAgent.pendingCancel'
    | 'settings.remoteAgent.pendingTimeRemaining'
    | 'settings.remoteAgent.pendingTimeout'
@@ -5373,7 +6484,36 @@ index d56ab7cfa..d590db363 100644
    | 'settings.remoteAgent.save'
    | 'settings.remoteAgent.testConnection'
    | 'settings.remoteAgent.testError'
-@@ -4653,7 +4676,6 @@ export type I18nKey =
+@@ -3885,7 +3911,6 @@ export type I18nKey =
+   | 'settings.sider.constitution'
+   | 'settings.sider.doctor'
+   | 'settings.sider.editor'
+-  | 'settings.sider.extensions'
+   | 'settings.sider.general'
+   | 'settings.sider.groupAbout'
+   | 'settings.sider.groupAiModels'
+@@ -4379,11 +4404,6 @@ export type I18nKey =
+   | 'settings.webui.activityLog.title'
+   | 'settings.webui.activityLog.viewAll'
+   | 'settings.webui.allowRemote'
+-  | 'settings.webui.allowRemoteActive'
+-  | 'settings.webui.allowRemoteArmed'
+-  | 'settings.webui.allowRemoteConfirmBody'
+-  | 'settings.webui.allowRemoteConfirmOk'
+-  | 'settings.webui.allowRemoteConfirmTitle'
+   | 'settings.webui.allowRemoteDesc'
+   | 'settings.webui.browserNotSupported'
+   | 'settings.webui.browserNotSupportedDesc'
+@@ -4413,8 +4433,6 @@ export type I18nKey =
+   | 'settings.webui.goToChannels'
+   | 'settings.webui.initialPassword'
+   | 'settings.webui.initialPasswordDesc'
+-  | 'settings.webui.lanExposureNoticeBody'
+-  | 'settings.webui.lanExposureNoticeTitle'
+   | 'settings.webui.localUrl'
+   | 'settings.webui.loginInfo'
+   | 'settings.webui.networkUrl'
+@@ -4658,7 +4676,6 @@ export type I18nKey =
    | 'skills.import.zip.placeholder'
    | 'skills.scanLibrary.done'
    | 'skills.scanLibrary.failed'
@@ -5412,11 +6552,17 @@ index dfed662be..11974739a 100644
      // Sync to localStorage so next page load can use it as a fast hint
      if (typeof localStorage !== 'undefined') {
 diff --git a/src/renderer/services/i18n/locales/de-DE/agentMode.json b/src/renderer/services/i18n/locales/de-DE/agentMode.json
-index 0a50e4e0f..fcc11caf6 100644
+index 0bbb8291a..fcc11caf6 100644
 --- a/src/renderer/services/i18n/locales/de-DE/agentMode.json
 +++ b/src/renderer/services/i18n/locales/de-DE/agentMode.json
-@@ -15,5 +15,6 @@
+@@ -13,11 +13,8 @@
+   "smart": "Smart",
+   "build": "Build-Modus",
    "permission": "Berechtigung",
+-  "chat": "Chat",
+-  "cowork": "Cowork",
+-  "chatTooltip": "Chat: Vor jedem Tool nachfragen. Zu Cowork wechseln, um Lese- & Schreibzugriffe hier automatisch zu erlauben.",
+-  "coworkTooltip": "Cowork: Lese- & Schreibzugriffe in diesem Workspace automatisch erlauben; fragt weiterhin vor dem Ausführen von Befehlen.",
    "switchMode": "Modus wechseln",
    "switchSuccess": "Modus erfolgreich gewechselt",
 -  "switchFailed": "Moduswechsel fehlgeschlagen"
@@ -5443,11 +6589,17 @@ index 3c332357c..cedbef2ba 100644
    }
  }
 diff --git a/src/renderer/services/i18n/locales/en-US/agentMode.json b/src/renderer/services/i18n/locales/en-US/agentMode.json
-index 630a23ccd..9537a0ea6 100644
+index 4be2833fd..9537a0ea6 100644
 --- a/src/renderer/services/i18n/locales/en-US/agentMode.json
 +++ b/src/renderer/services/i18n/locales/en-US/agentMode.json
-@@ -15,5 +15,6 @@
+@@ -13,11 +13,8 @@
+   "smart": "Smart",
+   "build": "Build Mode",
    "permission": "Permission",
+-  "chat": "Chat",
+-  "cowork": "Cowork",
+-  "chatTooltip": "Chat: ask before every tool. Switch to Cowork to auto-approve reads & edits here.",
+-  "coworkTooltip": "Cowork: auto-approve reads & edits in this workspace; still asks before running commands.",
    "switchMode": "Switch Mode",
    "switchSuccess": "Mode switched successfully",
 -  "switchFailed": "Failed to switch mode"
@@ -5455,10 +6607,20 @@ index 630a23ccd..9537a0ea6 100644
 +  "configToml": "Custom (config.toml)"
  }
 diff --git a/src/renderer/services/i18n/locales/en-US/conversation.json b/src/renderer/services/i18n/locales/en-US/conversation.json
-index a49f73fb0..9449d4afc 100644
+index 36ace9739..9449d4afc 100644
 --- a/src/renderer/services/i18n/locales/en-US/conversation.json
 +++ b/src/renderer/services/i18n/locales/en-US/conversation.json
-@@ -506,6 +506,8 @@
+@@ -218,8 +218,7 @@
+       "unsupported": "This agent has no terminal view yet.",
+       "missingCli": "The agent's command-line tool is not installed or not on PATH. Install it, then reopen this tab.",
+       "atCapacity": "Too many terminals are open. Close one and try again.",
+-      "notFound": "This chat could not be found.",
+-      "profileUnresolved": "The active profile's folder could not be opened, so the terminal was not started — it would have used the default profile's data instead."
++      "notFound": "This chat could not be found."
+     }
+   },
+   "minimap": {
+@@ -507,6 +506,8 @@
      "pinAria": "Pin {{name}}",
      "unpinAria": "Unpin {{name}}",
      "effort": "Effort",
@@ -5467,7 +6629,7 @@ index a49f73fb0..9449d4afc 100644
      "effortLow": "Low",
      "effortMedium": "Medium",
      "effortHigh": "High",
-@@ -518,7 +520,24 @@
+@@ -519,20 +520,26 @@
      "emptyFlux": "Tip: connect Flux Router for one-tap auto-routing across every model you add.",
      "connectProvider": "Connect a provider",
      "manageModels": "Manage models",
@@ -5493,11 +6655,51 @@ index a49f73fb0..9449d4afc 100644
    },
    "tool": {
      "openGoogleConsent": "Open Google sign-in"
+-  },
+-  "notification": {
+-    "untitled": "Untitled chat",
+-    "agentFinished": {
+-      "title": "Task complete",
+-      "body": "{{title}} finished and is waiting for you."
+-    },
+-    "agentError": {
+-      "title": "Task failed",
+-      "body": "{{title}} stopped with an error. {{detail}}"
+-    }
+   }
+ }
 diff --git a/src/renderer/services/i18n/locales/en-US/settings.json b/src/renderer/services/i18n/locales/en-US/settings.json
-index c286b1948..199a38230 100644
+index 6842c9ace..199a38230 100644
 --- a/src/renderer/services/i18n/locales/en-US/settings.json
 +++ b/src/renderer/services/i18n/locales/en-US/settings.json
-@@ -1550,7 +1550,7 @@
+@@ -118,10 +118,6 @@
+   "deleteAssistantConfirm": "Are you sure you want to delete this assistant? This action cannot be undone.",
+   "cannotDeleteBuiltin": "Cannot delete builtin assistants",
+   "duplicateAssistant": "Duplicate",
+-  "exportButton": "Export",
+-  "exportOk": "Exported",
+-  "exportFailed": "Export failed",
+-  "exportRedacted": "Exported. A possible secret was masked — review before sharing.",
+   "assistantMainAgent": "Main Agent",
+   "addSkills": "Add Skills",
+   "addSkillsTitle": "Add Skills",
+@@ -917,14 +913,7 @@
+   "webui.port": "Port",
+   "webui.portDesc": "WebUI service listening port",
+   "webui.allowRemote": "Allow Remote Access",
+-  "webui.allowRemoteDesc": "Exposes the WebUI to every device on your local network. Login travels over unencrypted HTTP — enable only on networks you trust.",
+-  "webui.allowRemoteConfirmTitle": "Expose the WebUI to your local network?",
+-  "webui.allowRemoteConfirmBody": "Anyone on this network will be able to reach the WebUI and attempt to log in. Your password is sent over unencrypted HTTP, so it can be read on the wire. It stays on until you turn it off — including after a restart.",
+-  "webui.allowRemoteConfirmOk": "Expose on local network",
+-  "webui.allowRemoteActive": "Reachable by every device on your local network, over unencrypted HTTP.",
+-  "webui.allowRemoteArmed": "Armed: the WebUI will be exposed to your local network the next time it starts.",
+-  "webui.lanExposureNoticeTitle": "WebUI is exposed on your local network",
+-  "webui.lanExposureNoticeBody": "Reachable at {{url}} by any device on this network, over unencrypted HTTP. Turn off \"Allow Remote Access\" in Settings to stop this.",
++  "webui.allowRemoteDesc": "Use remote software/server for secure remote access",
+   "webui.viewGuide": "View Guide",
+   "webui.accessInfo": "Access URLs",
+   "webui.localUrl": "Local URL",
+@@ -1561,7 +1550,7 @@
      "remoteAgents": "Remote Agents",
      "localAgentsDescription": "Gemini CLI is built-in. Other agents are auto-detected after local installation.",
      "localAgentsSetupLink": "Setup guide",
@@ -5506,7 +6708,7 @@ index c286b1948..199a38230 100644
      "settings": "Settings",
      "advancedConfig": "Advanced Config",
      "settingsDisabledHint": "Configuration coming soon",
-@@ -1587,6 +1587,9 @@
+@@ -1598,6 +1587,9 @@
      "name": "Name",
      "namePlaceholder": "e.g. My Remote Agent",
      "nameRequired": "Name is required",
@@ -5516,12 +6718,26 @@ index c286b1948..199a38230 100644
      "url": "URL",
      "urlRequired": "Please enter the URL",
      "authType": "Authentication",
+@@ -1663,7 +1655,6 @@
+     "voice": "Voice",
+     "channels": "Channels",
+     "mcp": "MCP Servers",
+-    "extensions": "Extensions",
+     "migrate": "Migrate",
+     "theme": "Theme & Display",
+     "editor": "Editor",
 diff --git a/src/renderer/services/i18n/locales/es-ES/agentMode.json b/src/renderer/services/i18n/locales/es-ES/agentMode.json
-index ed394efb5..383fc30ae 100644
+index 7e1851b36..383fc30ae 100644
 --- a/src/renderer/services/i18n/locales/es-ES/agentMode.json
 +++ b/src/renderer/services/i18n/locales/es-ES/agentMode.json
-@@ -15,5 +15,6 @@
+@@ -13,11 +13,8 @@
+   "smart": "Inteligente",
+   "build": "Modo de construcción",
    "permission": "Permiso",
+-  "chat": "Chat",
+-  "cowork": "Cowork",
+-  "chatTooltip": "Chat: preguntar antes de cada herramienta. Cambia a Cowork para aprobar automáticamente lecturas y ediciones aquí.",
+-  "coworkTooltip": "Cowork: aprueba automáticamente lecturas y ediciones en este espacio de trabajo; sigue preguntando antes de ejecutar comandos.",
    "switchMode": "Cambiar de modo",
    "switchSuccess": "Modo cambiado correctamente",
 -  "switchFailed": "No se pudo cambiar de modo"
@@ -5548,11 +6764,17 @@ index 56776d2a8..1dd782048 100644
    }
  }
 diff --git a/src/renderer/services/i18n/locales/fr-FR/agentMode.json b/src/renderer/services/i18n/locales/fr-FR/agentMode.json
-index c7e51e1a7..4a4683862 100644
+index ffdb3e008..4a4683862 100644
 --- a/src/renderer/services/i18n/locales/fr-FR/agentMode.json
 +++ b/src/renderer/services/i18n/locales/fr-FR/agentMode.json
-@@ -15,5 +15,6 @@
+@@ -13,11 +13,8 @@
+   "smart": "Intelligent",
+   "build": "Mode Construction",
    "permission": "Autorisation",
+-  "chat": "Chat",
+-  "cowork": "Cowork",
+-  "chatTooltip": "Chat : demander avant chaque outil. Passez à Cowork pour approuver automatiquement les lectures et modifications ici.",
+-  "coworkTooltip": "Cowork : approuve automatiquement les lectures et modifications dans cet espace de travail ; demande toujours avant d'exécuter des commandes.",
    "switchMode": "Changer de mode",
    "switchSuccess": "Mode changé avec succès",
 -  "switchFailed": "Échec du changement de mode"
@@ -5579,11 +6801,17 @@ index a8f429a3e..f8fc36198 100644
    }
  }
 diff --git a/src/renderer/services/i18n/locales/ja-JP/agentMode.json b/src/renderer/services/i18n/locales/ja-JP/agentMode.json
-index e329de963..a3cfc59ec 100644
+index 45c8df55c..a3cfc59ec 100644
 --- a/src/renderer/services/i18n/locales/ja-JP/agentMode.json
 +++ b/src/renderer/services/i18n/locales/ja-JP/agentMode.json
-@@ -15,5 +15,6 @@
+@@ -13,11 +13,8 @@
+   "smart": "スマート",
+   "build": "ビルドモード",
    "permission": "権限",
+-  "chat": "チャット",
+-  "cowork": "コワーク",
+-  "chatTooltip": "チャット：すべてのツールで確認します。Cowork に切り替えると、このワークスペースの読み取りと編集を自動承認します。",
+-  "coworkTooltip": "Cowork：このワークスペースの読み取りと編集を自動承認します。コマンドの実行前には確認します。",
    "switchMode": "モード切替",
    "switchSuccess": "モードを切り替えました",
 -  "switchFailed": "モードの切り替えに失敗しました"
@@ -5610,11 +6838,17 @@ index edac437f5..3a2b9e2e2 100644
    }
  }
 diff --git a/src/renderer/services/i18n/locales/ko-KR/agentMode.json b/src/renderer/services/i18n/locales/ko-KR/agentMode.json
-index bcb972f24..8b6cee311 100644
+index d3438c1b9..8b6cee311 100644
 --- a/src/renderer/services/i18n/locales/ko-KR/agentMode.json
 +++ b/src/renderer/services/i18n/locales/ko-KR/agentMode.json
-@@ -15,5 +15,6 @@
+@@ -13,11 +13,8 @@
+   "smart": "스마트",
+   "build": "빌드 모드",
    "permission": "권한",
+-  "chat": "채팅",
+-  "cowork": "코워크",
+-  "chatTooltip": "채팅: 모든 도구에 대해 확인합니다. Cowork로 전환하면 이 작업 공간의 읽기 및 편집을 자동 승인합니다.",
+-  "coworkTooltip": "Cowork: 이 작업 공간의 읽기 및 편집을 자동 승인합니다. 명령 실행 전에는 계속 확인합니다.",
    "switchMode": "모드 전환",
    "switchSuccess": "모드가 성공적으로 전환되었습니다",
 -  "switchFailed": "모드 전환에 실패했습니다"
@@ -5641,11 +6875,17 @@ index 9cdb43fac..d8be5ca9b 100644
    }
  }
 diff --git a/src/renderer/services/i18n/locales/pt-BR/agentMode.json b/src/renderer/services/i18n/locales/pt-BR/agentMode.json
-index dc4d40471..c23cb0a42 100644
+index 6b1be7899..c23cb0a42 100644
 --- a/src/renderer/services/i18n/locales/pt-BR/agentMode.json
 +++ b/src/renderer/services/i18n/locales/pt-BR/agentMode.json
-@@ -15,5 +15,6 @@
+@@ -13,11 +13,8 @@
+   "smart": "Inteligente",
+   "build": "Modo de Construção",
    "permission": "Permissão",
+-  "chat": "Chat",
+-  "cowork": "Cowork",
+-  "chatTooltip": "Chat: perguntar antes de cada ferramenta. Mude para Cowork para aprovar automaticamente leituras e edições aqui.",
+-  "coworkTooltip": "Cowork: aprova automaticamente leituras e edições neste espaço de trabalho; ainda pergunta antes de executar comandos.",
    "switchMode": "Trocar Modo",
    "switchSuccess": "Modo trocado com sucesso",
 -  "switchFailed": "Falha ao trocar o modo"
@@ -5714,10 +6954,26 @@ index fe91def75..db5b54e37 100644
    }
  }
 diff --git a/src/renderer/services/i18n/locales/pt-BR/settings.json b/src/renderer/services/i18n/locales/pt-BR/settings.json
-index 9eefad9e2..707c942b0 100644
+index 1484e7d53..707c942b0 100644
 --- a/src/renderer/services/i18n/locales/pt-BR/settings.json
 +++ b/src/renderer/services/i18n/locales/pt-BR/settings.json
-@@ -1538,7 +1538,7 @@
+@@ -907,14 +907,7 @@
+   "webui.port": "Porta",
+   "webui.portDesc": "Porta de escuta do serviço WebUI",
+   "webui.allowRemote": "Permitir Acesso Remoto",
+-  "webui.allowRemoteDesc": "Expõe a WebUI a todos os dispositivos da sua rede local. O login trafega por HTTP não criptografado — ative apenas em redes confiáveis.",
+-  "webui.allowRemoteConfirmTitle": "Expor a WebUI à sua rede local?",
+-  "webui.allowRemoteConfirmBody": "Qualquer pessoa nesta rede poderá acessar a WebUI e tentar fazer login. Sua senha é enviada por HTTP não criptografado, podendo ser lida na rede. Permanece ativo até você desativar — inclusive após reiniciar.",
+-  "webui.allowRemoteConfirmOk": "Expor na rede local",
+-  "webui.allowRemoteActive": "Acessível a todos os dispositivos da sua rede local, por HTTP não criptografado.",
+-  "webui.allowRemoteArmed": "Ativado: a WebUI será exposta à sua rede local na próxima inicialização.",
+-  "webui.lanExposureNoticeTitle": "A WebUI está exposta na sua rede local",
+-  "webui.lanExposureNoticeBody": "Acessível em {{url}} por qualquer dispositivo desta rede, por HTTP não criptografado. Desative \"Permitir acesso remoto\" nas Configurações para parar.",
++  "webui.allowRemoteDesc": "Use software/servidor remoto para acesso remoto seguro",
+   "webui.viewGuide": "Ver Guia",
+   "webui.accessInfo": "URLs de Acesso",
+   "webui.localUrl": "URL Local",
+@@ -1545,7 +1538,7 @@
      "remoteAgents": "Agentes Remotos",
      "localAgentsDescription": "O Gemini CLI é integrado. Outros agentes são detectados automaticamente após a instalação local.",
      "localAgentsSetupLink": "Guia de configuração",
@@ -5726,7 +6982,7 @@ index 9eefad9e2..707c942b0 100644
      "settings": "Configurações",
      "advancedConfig": "Configuração Avançada",
      "settingsDisabledHint": "Configuração em breve",
-@@ -1575,6 +1575,9 @@
+@@ -1582,6 +1575,9 @@
      "name": "Nome",
      "namePlaceholder": "ex.: Meu Agente Remoto",
      "nameRequired": "O nome é obrigatório",
@@ -5737,11 +6993,17 @@ index 9eefad9e2..707c942b0 100644
      "urlRequired": "Insira a URL",
      "authType": "Autenticação",
 diff --git a/src/renderer/services/i18n/locales/ru-RU/agentMode.json b/src/renderer/services/i18n/locales/ru-RU/agentMode.json
-index 69d8c1e7e..ab6851b1e 100644
+index fcd045b53..ab6851b1e 100644
 --- a/src/renderer/services/i18n/locales/ru-RU/agentMode.json
 +++ b/src/renderer/services/i18n/locales/ru-RU/agentMode.json
-@@ -15,5 +15,6 @@
+@@ -13,11 +13,8 @@
+   "smart": "Умный",
+   "build": "Режим сборки",
    "permission": "Разрешение",
+-  "chat": "Чат",
+-  "cowork": "Cowork",
+-  "chatTooltip": "Чат: спрашивать перед каждым инструментом. Переключитесь на Cowork, чтобы автоматически одобрять чтение и правки здесь.",
+-  "coworkTooltip": "Cowork: автоматически одобряет чтение и правки в этом рабочем пространстве; по-прежнему спрашивает перед выполнением команд.",
    "switchMode": "Сменить режим",
    "switchSuccess": "Режим успешно сменён",
 -  "switchFailed": "Не удалось сменить режим"
@@ -5768,11 +7030,17 @@ index e183cc063..5703ce7f1 100644
    }
  }
 diff --git a/src/renderer/services/i18n/locales/tr-TR/agentMode.json b/src/renderer/services/i18n/locales/tr-TR/agentMode.json
-index 49a50bf27..49a863104 100644
+index 02d643181..49a863104 100644
 --- a/src/renderer/services/i18n/locales/tr-TR/agentMode.json
 +++ b/src/renderer/services/i18n/locales/tr-TR/agentMode.json
-@@ -15,5 +15,6 @@
+@@ -13,11 +13,8 @@
+   "smart": "Akıllı",
+   "build": "Build Mode",
    "permission": "İzin",
+-  "chat": "Sohbet",
+-  "cowork": "Cowork",
+-  "chatTooltip": "Sohbet: her araçtan önce sor. Buradaki okuma ve düzenlemeleri otomatik onaylamak için Cowork'e geç.",
+-  "coworkTooltip": "Cowork: bu çalışma alanındaki okuma ve düzenlemeleri otomatik onaylar; komutları çalıştırmadan önce yine de sorar.",
    "switchMode": "Switch Mode",
    "switchSuccess": "Mode switched successfully",
 -  "switchFailed": "Failed to switch mode"
@@ -5799,11 +7067,17 @@ index 9ef78e4a1..974e66e19 100644
    }
  }
 diff --git a/src/renderer/services/i18n/locales/uk-UA/agentMode.json b/src/renderer/services/i18n/locales/uk-UA/agentMode.json
-index 791226d9b..ff7507c19 100644
+index 7e6d2b50d..ff7507c19 100644
 --- a/src/renderer/services/i18n/locales/uk-UA/agentMode.json
 +++ b/src/renderer/services/i18n/locales/uk-UA/agentMode.json
-@@ -15,5 +15,6 @@
+@@ -13,11 +13,8 @@
+   "smart": "Розумний",
+   "build": "Режим збірки",
    "permission": "Дозвіл",
+-  "chat": "Чат",
+-  "cowork": "Cowork",
+-  "chatTooltip": "Чат: запитувати перед кожним інструментом. Перемкніться на Cowork, щоб автоматично схвалювати читання та редагування тут.",
+-  "coworkTooltip": "Cowork: автоматично схвалює читання та редагування в цьому робочому просторі; усе одно запитує перед виконанням команд.",
    "switchMode": "Змінити режим",
    "switchSuccess": "Режим успішно змінено",
 -  "switchFailed": "Не вдалося змінити режим"
@@ -5830,11 +7104,17 @@ index ac75f08af..7f6a6e1e1 100644
    }
  }
 diff --git a/src/renderer/services/i18n/locales/zh-CN/agentMode.json b/src/renderer/services/i18n/locales/zh-CN/agentMode.json
-index c5a74cbc0..4d4235325 100644
+index 04115f2a6..4d4235325 100644
 --- a/src/renderer/services/i18n/locales/zh-CN/agentMode.json
 +++ b/src/renderer/services/i18n/locales/zh-CN/agentMode.json
-@@ -15,5 +15,6 @@
+@@ -13,11 +13,8 @@
+   "smart": "智能",
+   "build": "构建模式",
    "permission": "权限",
+-  "chat": "对话",
+-  "cowork": "协作",
+-  "chatTooltip": "对话：每个工具都会先询问。切换到协作可自动批准此工作区的读取和编辑。",
+-  "coworkTooltip": "协作：自动批准此工作区的读取和编辑；执行命令前仍会询问。",
    "switchMode": "切换模式",
    "switchSuccess": "模式切换成功",
 -  "switchFailed": "模式切换失败"
@@ -5861,11 +7141,17 @@ index 75a7a2626..073d29c6e 100644
    }
  }
 diff --git a/src/renderer/services/i18n/locales/zh-TW/agentMode.json b/src/renderer/services/i18n/locales/zh-TW/agentMode.json
-index 9801fe1e1..17ee6c11c 100644
+index e2fe578a2..17ee6c11c 100644
 --- a/src/renderer/services/i18n/locales/zh-TW/agentMode.json
 +++ b/src/renderer/services/i18n/locales/zh-TW/agentMode.json
-@@ -15,5 +15,6 @@
+@@ -13,11 +13,8 @@
+   "smart": "智能",
+   "build": "構建模式",
    "permission": "權限",
+-  "chat": "對話",
+-  "cowork": "協作",
+-  "chatTooltip": "對話：每個工具都會先詢問。切換到協作可自動核准此工作區的讀取和編輯。",
+-  "coworkTooltip": "協作：自動核准此工作區的讀取和編輯；執行命令前仍會詢問。",
    "switchMode": "切換模式",
    "switchSuccess": "模式切換成功",
 -  "switchFailed": "模式切換失敗"
@@ -6391,9 +7677,18 @@ index 62e56ae1b..4b3f1f41a 100644
 +  });
 +});
 diff --git a/tests/unit/renderer/guidModelSelector.dom.test.tsx b/tests/unit/renderer/guidModelSelector.dom.test.tsx
-index 1f90ee674..197239f98 100644
+index f882e5c9e..6ba3330ee 100644
 --- a/tests/unit/renderer/guidModelSelector.dom.test.tsx
 +++ b/tests/unit/renderer/guidModelSelector.dom.test.tsx
+@@ -25,7 +25,7 @@
+  * The `.dom.test.tsx` suffix runs the file in the jsdom Vitest project.
+  */
+
+-import { render, screen, waitFor } from '@testing-library/react';
++import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+ import React from 'react';
+ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 @@ -89,6 +89,12 @@ vi.mock('@arco-design/web-react', () => {
          {children}
        </div>
@@ -6455,7 +7750,7 @@ index 1f90ee674..197239f98 100644
  });
 
  afterEach(() => {
-@@ -513,11 +546,151 @@ describe('GuidModelSelector home picker', () => {
+@@ -513,11 +546,180 @@ describe('GuidModelSelector home picker', () => {
 
      // Sonnet (3/15) blended ≈ 12 → $$. Haiku (0.8/4) blended ≈ 3.2 → $.
      // Two rows match Sonnet (regular + 1M context); both should render $$.
@@ -6576,6 +7871,35 @@ index 1f90ee674..197239f98 100644
 +    expect(screen.getByText('common.defaultModel')).toBeInTheDocument();
 +  });
 +
++  it('keeps Codex effort selectable before the first session when ACP config options are not cached', async () => {
++    mockCuratedForAgent.mockResolvedValue([]);
++    const setSelectedAcpEffort = vi.fn();
++
++    render(
++      <GuidModelSelector
++        {...baseProps}
++        isGeminiMode={false}
++        agentKey='codex'
++        currentAcpCachedModelInfo={{
++          currentModelId: 'gpt-5.4',
++          currentModelLabel: 'GPT-5.4',
++          availableModels: [{ id: 'gpt-5.4', label: 'GPT-5.4' }],
++          canSwitch: true,
++          source: 'models' as const,
++          sourceDetail: 'codex-stream' as const,
++        }}
++        selectedAcpModel='gpt-5.4'
++        selectedAcpEffort='medium'
++        setSelectedAcpEffort={setSelectedAcpEffort}
++        cachedConfigOptions={[]}
++      />
++    );
++
++    expect(await screen.findByText('conversation.modelSelector.effort')).toBeInTheDocument();
++    fireEvent.click(screen.getByText('conversation.modelSelector.effortXhigh'));
++    expect(setSelectedAcpEffort).toHaveBeenCalledWith('xhigh');
++  });
++
 +  it('does not show a Hermes speed selector unless the ACP backend advertises service_tier', async () => {
 +    mockCuratedForAgent.mockResolvedValue([]);
 +    const acpInfo = {
@@ -6608,6 +7932,14 @@ index 1f90ee674..197239f98 100644
    it('passes the non-secret chat-start handle through to setCurrentModel (audit C4)', async () => {
      // The resolver hands back the NON-SECRET handle (platform + baseUrl +
      // account binding) - no decrypted key. The picker writes the binding into
+@@ -546,7 +748,6 @@ describe('GuidModelSelector home picker', () => {
+     // The cold-start auto-pick fires resolveForChatStart→setCurrentModel once on
+     // mount (no prior selection). Clear it so this assertion counts only the
+     // explicit click being tested here.
+-    await waitFor(() => expect(setCurrentModel).toHaveBeenCalledTimes(1));
+     setCurrentModel.mockClear();
+     fireEventClick(row);
+
 diff --git a/tests/unit/useGuidSend.dom.test.ts b/tests/unit/useGuidSend.dom.test.ts
 index 0ce473483..b32962ce8 100644
 --- a/tests/unit/useGuidSend.dom.test.ts
@@ -6704,22 +8036,47 @@ index 1d0ebb96c..745609345 100644
      const req = buildRequest({ secure: true });
 
 diff --git a/tests/unit/webserver/detectNetworkContext.test.ts b/tests/unit/webserver/detectNetworkContext.test.ts
-index b27262693..e1508766d 100644
+index 0e134f93a..e1508766d 100644
 --- a/tests/unit/webserver/detectNetworkContext.test.ts
 +++ b/tests/unit/webserver/detectNetworkContext.test.ts
-@@ -1,4 +1,5 @@
--import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-+import os from 'os';
+@@ -1,29 +1,11 @@
+-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+ import os from 'os';
 +import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  import type { Request } from 'express';
  import {
    detectNetworkContext,
-@@ -28,10 +29,12 @@ describe('detectNetworkContext', () => {
+   __resetTailscaleIfaceCacheForTests,
+ } from '@process/webserver/middleware/detectNetworkContext';
+
+-/**
+- * `hasTailscaleInterface()` probes the REAL host via os.networkInterfaces(), so without this stub
+- * these assertions silently depend on whether the machine running the suite happens to have
+- * Tailscale up: a private-range peer resolves to 'tailscale' on a host with a `tailscale*` iface and
+- * to 'private_network' otherwise. That passed on CI (no Tailscale) and on macOS (Tailscale binds
+- * `utun*`, which doesn't match the `tailscale` prefix) while failing on any Linux host with
+- * Tailscale up. Stub the probe so the host can never decide the outcome.
+- */
+-function stubIfaces(names: string[]): void {
+-  // The explicit tuple return type is load-bearing: without it `noImplicitAny` infers
+-  // `[string, any[]]`, Object.fromEntries falls to its `any`-returning overload, and the cast below
+-  // would assert nothing at all.
+-  vi.spyOn(os, 'networkInterfaces').mockReturnValue(
+-    Object.fromEntries(names.map((n): [string, os.NetworkInterfaceInfo[]] => [n, []]))
+-  );
+-  __resetTailscaleIfaceCacheForTests(); // the probe is memoised — drop the cache so the stub is read
+-}
+-
+ type ReqOpts = { hostname?: string; peer?: string; secure?: boolean };
+
+ function makeReq({ hostname, peer, secure }: ReqOpts): Request {
+@@ -47,16 +29,16 @@ describe('detectNetworkContext', () => {
      delete process.env.SERVER_BASE_URL;
      delete process.env.HTTPS;
      process.env.NODE_ENV = 'test';
+-    stubIfaces(['lo', 'eth0']); // default: a host WITHOUT Tailscale, whatever the real machine is
 +    vi.spyOn(os, 'networkInterfaces').mockReturnValue({});
-     __resetTailscaleIfaceCacheForTests();
++    __resetTailscaleIfaceCacheForTests();
    });
 
    afterEach(() => {
@@ -6727,7 +8084,13 @@ index b27262693..e1508766d 100644
      for (const [k, v] of Object.entries(saved)) {
        if (v === undefined) delete process.env[k];
        else process.env[k] = v;
-@@ -44,10 +47,10 @@ describe('detectNetworkContext', () => {
+     }
+-    vi.restoreAllMocks();
+-    __resetTailscaleIfaceCacheForTests();
+   });
+
+   it('isHttps reflects WAYLAND_HTTPS env', () => {
+@@ -65,10 +47,10 @@ describe('detectNetworkContext', () => {
      expect(ctx.isHttps).toBe(true);
    });
 
@@ -6740,3 +8103,87 @@ index b27262693..e1508766d 100644
    });
 
    it('isHttps reflects req.secure (trust-proxy resolved)', () => {
+@@ -82,9 +64,7 @@ describe('detectNetworkContext', () => {
+   });
+
+   it('hostnameIsStable is false for an IPv4 literal, localhost, and missing host', () => {
+-    expect(detectNetworkContext(makeReq({ hostname: '192.168.1.5', peer: '192.168.1.5' })).hostnameIsStable).toBe(
+-      false
+-    );
++    expect(detectNetworkContext(makeReq({ hostname: '192.168.1.5', peer: '192.168.1.5' })).hostnameIsStable).toBe(false);
+     expect(detectNetworkContext(makeReq({ hostname: 'localhost', peer: '127.0.0.1' })).hostnameIsStable).toBe(false);
+     expect(detectNetworkContext(makeReq({ hostname: '127.0.0.1', peer: '127.0.0.1' })).hostnameIsStable).toBe(false);
+     expect(detectNetworkContext(makeReq({ hostname: undefined, peer: '203.0.113.5' })).hostnameIsStable).toBe(false);
+@@ -92,9 +72,7 @@ describe('detectNetworkContext', () => {
+
+   it('hostnameIsStable is false for an IPv6 literal host', () => {
+     expect(detectNetworkContext(makeReq({ hostname: '::1', peer: '::1' })).hostnameIsStable).toBe(false);
+-    expect(detectNetworkContext(makeReq({ hostname: '2001:db8::1', peer: '2001:db8::1' })).hostnameIsStable).toBe(
+-      false
+-    );
++    expect(detectNetworkContext(makeReq({ hostname: '2001:db8::1', peer: '2001:db8::1' })).hostnameIsStable).toBe(false);
+   });
+
+   it('reachedVia=loopback for a loopback peer', () => {
+@@ -111,38 +89,7 @@ describe('detectNetworkContext', () => {
+     );
+   });
+
+-  it('reachedVia=private_network for a bare RFC1918 peer on a host without Tailscale', () => {
+-    expect(detectNetworkContext(makeReq({ hostname: 'box.example.com', peer: '192.168.1.10' })).reachedVia).toBe(
+-      'private_network'
+-    );
+-  });
+-
+-  // The other half of the same branch, previously unasserted (and the reason the test above was
+-  // host-dependent): the SAME private peer reads as 'tailscale' when the host has a Tailscale iface.
+-  it('reachedVia=tailscale for an RFC1918 peer when the host HAS a Tailscale interface', () => {
+-    stubIfaces(['lo', 'eth0', 'tailscale0']);
+-    expect(detectNetworkContext(makeReq({ hostname: 'box.example.com', peer: '192.168.1.10' })).reachedVia).toBe(
+-      'tailscale'
+-    );
+-  });
+-
+-  // A Tailscale iface being up must NOT relabel a PUBLIC peer. This is a security floor, not a nicety:
+-  // requireSecureConfigWrite() only refuses when reachedVia === 'public_internet' && !isHttps, so a
+-  // classifier that called every public peer 'tailscale' on a Tailscale-running host would silently
+-  // open the plain-HTTP secret-write path. Without this assertion, dropping the `isPrivateNetworkIp(ip)`
+-  // guard from the impl leaves the whole suite green.
+-  it('a public peer stays public_internet even when the host HAS a Tailscale interface', () => {
+-    stubIfaces(['lo', 'eth0', 'tailscale0']);
+-    expect(detectNetworkContext(makeReq({ hostname: 'box.example.com', peer: '203.0.113.5' })).reachedVia).toBe(
+-      'public_internet'
+-    );
+-  });
+-
+-  // Pins the claim the hermetic stub rests on: macOS Tailscale binds `utun*`, which does NOT match the
+-  // `tailscale` prefix the detector looks for. If someone "improves" the detector to match utun*/wg*,
+-  // classification (and the config-write floor above) shifts under every macOS dev — loudly, here.
+-  it('a utun* interface (macOS Tailscale) does not count as a Tailscale interface', () => {
+-    stubIfaces(['lo0', 'utun0', 'utun1', 'en0']);
++  it('reachedVia=private_network for a bare RFC1918 peer', () => {
+     expect(detectNetworkContext(makeReq({ hostname: 'box.example.com', peer: '192.168.1.10' })).reachedVia).toBe(
+       'private_network'
+     );
+@@ -157,15 +104,15 @@ describe('detectNetworkContext', () => {
+   it('passkeyEligible = isHttps && hostnameIsStable (vendor-neutral)', () => {
+     process.env.WAYLAND_HTTPS = 'true';
+     // HTTPS + stable hostname, public peer -> still eligible (NOT gated on Tailscale).
+-    expect(
+-      detectNetworkContext(makeReq({ hostname: 'wayland.example.com', peer: '203.0.113.5' })).passkeyEligible
+-    ).toBe(true);
++    expect(detectNetworkContext(makeReq({ hostname: 'wayland.example.com', peer: '203.0.113.5' })).passkeyEligible).toBe(
++      true
++    );
+   });
+
+   it('passkeyEligible is false without HTTPS even on a stable hostname', () => {
+-    expect(
+-      detectNetworkContext(makeReq({ hostname: 'wayland.example.com', peer: '203.0.113.5' })).passkeyEligible
+-    ).toBe(false);
++    expect(detectNetworkContext(makeReq({ hostname: 'wayland.example.com', peer: '203.0.113.5' })).passkeyEligible).toBe(
++      false
++    );
+   });
+
+   it('passkeyEligible is false on HTTPS with an IP-literal host', () => {

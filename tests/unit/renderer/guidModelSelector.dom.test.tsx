@@ -25,7 +25,7 @@
  * The `.dom.test.tsx` suffix runs the file in the jsdom Vitest project.
  */
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -660,6 +660,35 @@ describe('GuidModelSelector home picker', () => {
     await waitFor(() => expect(mockCuratedForAgent).toHaveBeenCalledWith('codex'));
     expect(screen.queryByText('GPT-5.2 Codex')).not.toBeInTheDocument();
     expect(screen.getByText('common.defaultModel')).toBeInTheDocument();
+  });
+
+  it('keeps Codex effort selectable before the first session when ACP config options are not cached', async () => {
+    mockCuratedForAgent.mockResolvedValue([]);
+    const setSelectedAcpEffort = vi.fn();
+
+    render(
+      <GuidModelSelector
+        {...baseProps}
+        isGeminiMode={false}
+        agentKey='codex'
+        currentAcpCachedModelInfo={{
+          currentModelId: 'gpt-5.4',
+          currentModelLabel: 'GPT-5.4',
+          availableModels: [{ id: 'gpt-5.4', label: 'GPT-5.4' }],
+          canSwitch: true,
+          source: 'models' as const,
+          sourceDetail: 'codex-stream' as const,
+        }}
+        selectedAcpModel='gpt-5.4'
+        selectedAcpEffort='medium'
+        setSelectedAcpEffort={setSelectedAcpEffort}
+        cachedConfigOptions={[]}
+      />
+    );
+
+    expect(await screen.findByText('conversation.modelSelector.effort')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('conversation.modelSelector.effortXhigh'));
+    expect(setSelectedAcpEffort).toHaveBeenCalledWith('xhigh');
   });
 
   it('does not show a Hermes speed selector unless the ACP backend advertises service_tier', async () => {
