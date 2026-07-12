@@ -12,12 +12,17 @@ if [[ $# -gt 0 ]]; then
   BASE_REF="$1"
 fi
 FILES=(
+  AGENTS.md
   package.json
+  THIRD-PARTY-NOTICES.md
   atius-overlay.json
+  codex-acp/
   scripts/install-ubuntu.sh
   scripts/build-server.mjs
   scripts/build-mcp-servers.js
   scripts/atius-apply-source-patch.sh
+  scripts/atius-build-codex-acp.sh
+  scripts/atius-verify-codex-acp.sh
   scripts/atius-build-renderer-overlay.sh
   scripts/atius-postinstall-hook.sh
   scripts/atius-refresh-source-patch.sh
@@ -103,7 +108,9 @@ FILES=(
   src/renderer/styles/layout.css
   tests/unit/WebSocketManager.test.ts
   tests/unit/AgentPillBar.dom.test.tsx
+  tests/unit/atiusCodexAcpRuntime.test.ts
   tests/unit/AcpAgentManagerSkillInjection.test.ts
+  tests/unit/acpConnectors.test.ts
   tests/unit/RemoteAgentCore.test.ts
   tests/unit/RemoteAgentManagement.dom.test.tsx
   tests/unit/remoteAgentBridge.test.ts
@@ -117,6 +124,8 @@ FILES=(
   tests/unit/webserver/cookieOptions.test.ts
   tests/unit/webserver/detectNetworkContext.test.ts
   docs/README.md
+  docs/legal/THIRD-PARTY-NOTICES.md
+  docs/guides/atius-codex-acp.md
   docs/guides/atius-fork-runtime.md
 )
 cd "$ROOT"
@@ -150,6 +159,8 @@ upstream.scripts = {
   ...(upstream.scripts || {}),
   'atius:apply-patch': 'bash scripts/atius-apply-source-patch.sh',
   'atius:build-overlay': 'bash scripts/atius-build-renderer-overlay.sh',
+  'atius:build-codex-acp': 'bash scripts/atius-build-codex-acp.sh',
+  'atius:verify-codex-acp': 'bash scripts/atius-verify-codex-acp.sh',
   'atius:reapply-overlay': 'bash scripts/atius-reapply-renderer-overlay.sh',
   'atius:postinstall-hook': 'bash scripts/atius-postinstall-hook.sh',
   'atius:update': 'bash scripts/atius-update.sh',

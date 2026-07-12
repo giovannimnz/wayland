@@ -601,6 +601,31 @@ describe('connectCodex - Linux package selection', () => {
     expect(args).toContain('@zed-industries/codex-acp-linux-x64@0.9.5');
   });
 
+  it('uses the explicit embedded adapter override before npm packages', async () => {
+    const originalOverride = process.env.WAYLAND_CODEX_ACP_CLI;
+    process.env.WAYLAND_CODEX_ACP_CLI = '/home/ubuntu/.local/bin/codex-acp-atius';
+    const hooks = {
+      setup: vi.fn(async () => {}),
+      cleanup: vi.fn(async () => {}),
+    };
+
+    try {
+      await connectCodex('/cwd', hooks);
+    } finally {
+      if (originalOverride === undefined) {
+        delete process.env.WAYLAND_CODEX_ACP_CLI;
+      } else {
+        process.env.WAYLAND_CODEX_ACP_CLI = originalOverride;
+      }
+    }
+
+    const [command, args] = mockSpawn.mock.calls[0];
+    expect(command).toBe('/home/ubuntu/.local/bin/codex-acp-atius');
+    expect(args).toEqual([]);
+    expect(hooks.setup).toHaveBeenCalledTimes(1);
+    expect(hooks.cleanup).not.toHaveBeenCalled();
+  });
+
   it('uses the direct Linux platform package first when startup succeeds', async () => {
     const hooks = {
       setup: vi.fn(async () => {}),

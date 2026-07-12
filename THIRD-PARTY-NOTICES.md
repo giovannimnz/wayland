@@ -41,6 +41,19 @@ root of this repository.
   - Original aionrs Apache-2.0 copyright headers are preserved in all forked source
     files.
 
+## Codex ACP
+
+- **Project:** codex-acp
+- **Upstream source:** https://github.com/zed-industries/codex-acp
+- **ATIUS fork:** https://github.com/giovannimnz/codex-acp
+- **License:** Apache License, Version 2.0
+- **Copyright:** Copyright Zed Industries and codex-acp contributors
+- **Use in Wayland:** The full-history ATIUS fork is embedded at `codex-acp/` and
+  compiled as the production ACP bridge between Wayland and Codex.
+- **Modifications:** ATIUS adds account-aware model configuration, agent-profile
+  support, runtime controls, and the six-position advanced power ladder. The
+  subtree retains its own `LICENSE` and upstream history.
+
 ---
 
 ### How to update this file

@@ -318,3 +318,11 @@ Project memory at .ijfw/memory/. Call `ijfw_memory_prelude` for full context.
 No project agents yet. Run `ijfw team` to set them up.
 
 <!-- IJFW-AGENTS-END -->
+
+<!-- codex-policy:parallel-headless:start -->
+## Paralelismo e automacao de browser
+
+- Use multiplos subagentes sempre que houver trabalho paralelo util. Atribua objetivos delimitados e sem sobreposicao, depois integre e valide os resultados no agente principal.
+- Toda automacao de browser deve executar em modo headless, incluindo chrome-devtools, Playwright, Selenium, Puppeteer ou ferramenta equivalente. Nao abra janelas visiveis do browser.
+
+<!-- codex-policy:parallel-headless:end -->

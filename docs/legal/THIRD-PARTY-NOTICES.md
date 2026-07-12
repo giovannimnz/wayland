@@ -41,3 +41,13 @@ maintained in its own repository under the same Apache License, Version 2.0.
 The channels subsystem (`src/process/services/channels/...` and related code)
 incorporates work derived from OpenClaw, licensed under the MIT License. See
 the per-file headers under that subtree for original copyright statements.
+
+## Codex ACP
+
+The production Codex ACP bridge is a full-history subtree at `codex-acp/`,
+derived from Zed Industries' `codex-acp`
+(<https://github.com/zed-industries/codex-acp>) and maintained for ATIUS at
+<https://github.com/giovannimnz/codex-acp> under the Apache License, Version
+2.0. ATIUS modifications add account-aware model configuration, agent-profile
+support, runtime controls, and the six-position advanced power ladder. The
+subtree preserves its own `LICENSE`, copyright notices, and upstream history.

@@ -86,6 +86,8 @@
     "build:server": "node scripts/build-server.mjs",
     "atius:apply-patch": "bash scripts/atius-apply-source-patch.sh",
     "atius:build-overlay": "bash scripts/atius-build-renderer-overlay.sh",
+    "atius:build-codex-acp": "bash scripts/atius-build-codex-acp.sh",
+    "atius:verify-codex-acp": "bash scripts/atius-verify-codex-acp.sh",
     "atius:reapply-overlay": "bash scripts/atius-reapply-renderer-overlay.sh",
     "atius:postinstall-hook": "bash scripts/atius-postinstall-hook.sh",
     "atius:update": "bash scripts/atius-update.sh"

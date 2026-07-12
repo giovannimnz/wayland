@@ -151,7 +151,9 @@ bash scripts/atius-update.sh
 
 - runs Wayland as Linux user `ubuntu`, not `wayland`;
 - wires `HOME=/home/ubuntu`, `CODEX_HOME=/home/ubuntu/.codex`, and `HERMES_HOME=/home/ubuntu/.hermes`;
+- builds the full-history embedded Codex ACP subtree from `<wayland>/codex-acp` under the 20% CPU ceiling;
 - exposes the ATIUS Codex ACP fork through `/home/ubuntu/.local/bin/codex-acp-atius`;
+- removes the runtime dependency on the former sibling checkout `/home/ubuntu/GitHub/codex-acp`;
 - syncs the live Wayland storage into `/home/ubuntu/.config/Wayland/config/wayland-config.txt`;
 - regenerates `model.config` from the `ubuntu` Codex runtime;
 - stores `atius.workspaceHybridRoutes` and defaults NFS GitHub mounts to hybrid execution guidance (edit on the mount, validate on the owner host via SSH alias);
@@ -162,9 +164,14 @@ bash scripts/atius-update.sh
 - writes `/etc/systemd/system/wayland.service.d/atius-overlay.conf`;
 - rebuilds the source runtime and restarts the services.
 
+The adapter architecture, subtree update process, rollback and validation are
+documented in [ATIUS embedded Codex ACP runtime](atius-codex-acp.md).
+
 ## Validation
 
 ```bash
+bash scripts/atius-build-codex-acp.sh --test --force
+bash scripts/atius-verify-codex-acp.sh --live
 NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/renderer/guid/firstSafeCuratedModel.test.ts
 NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/AcpAgentManagerSkillInjection.test.ts tests/unit/AgentPillBar.dom.test.tsx tests/unit/renderer/guidModelSelector.dom.test.tsx tests/unit/useGuidSend.dom.test.ts tests/unit/process/task/codexNativeSandbox.test.ts tests/unit/process/task/codexConfigEffort.test.ts
 bun test tests/unit/webserver/cookieOptions.test.ts tests/unit/webserver/detectNetworkContext.test.ts
@@ -174,7 +181,7 @@ sudo systemctl restart wayland.service
 systemctl is-active wayland.service
 systemctl is-active wayland-https-proxy.service
 curl -fsS -o /dev/null -w "http=%{http_code}\n" http://127.0.0.1:25725/
-curl -fsS -o /dev/null -w "https=%{http_code}\n" https://10.100.100.3:25750/
+curl -fsS -o /dev/null -w "https=%{http_code}\n" https://10.13.1.13:25750/
 journalctl -u wayland.service --since "5 minutes ago" --no-pager | grep -E "AgentRegistry|Serving renderer|WebUI running"
 node -e 'const fs=require("fs");const p="/home/ubuntu/.config/Wayland/config/wayland-config.txt";const c=JSON.parse(decodeURIComponent(Buffer.from(fs.readFileSync(p,"utf8").trim(),"base64").toString("utf8")));const slash=c["slash.customCommands"]||[];const agents=c["acp.customAgents"]||[];console.log({customAgents:agents.length, generatedCustomAgents:agents.filter(a=>String(a.id||"").startsWith("codex-agent-profile-")).length, slashCommands:slash.length, gsdPlanPhase:slash.some(x=>x.name==="gsd-plan-phase"), geminiHidden:(c["agents.hidden"]||[]).includes("gemini")})'
 ```

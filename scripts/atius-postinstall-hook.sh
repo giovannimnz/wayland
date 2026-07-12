@@ -9,7 +9,7 @@ UBUNTU_DATA_DIR="${UBUNTU_HOME}/.config/Wayland"
 UBUNTU_LOGS_DIR="${UBUNTU_DATA_DIR}/logs"
 UBUNTU_CODEX_HOME="${UBUNTU_HOME}/.codex"
 UBUNTU_HERMES_HOME="${UBUNTU_HOME}/.hermes"
-CODEX_ACP_ROOT="/home/ubuntu/GitHub/codex-acp"
+CODEX_ACP_ROOT="${ROOT}/codex-acp"
 CODEX_ACP_BIN="${UBUNTU_HOME}/.local/bin/codex-acp-atius"
 WAYLAND_HTTP_PORT=25725
 WAYLAND_HTTPS_PORT=25750
@@ -24,6 +24,7 @@ if [[ -d /var/lib/wayland/.config/Wayland ]]; then
   sudo chown -R ubuntu:ubuntu "${UBUNTU_DATA_DIR}"
 fi
 sudo install -d -m 0750 -o ubuntu -g ubuntu "${UBUNTU_HOME}/.local/bin"
+bash "${ROOT}/scripts/atius-build-codex-acp.sh"
 sudo install -m 0755 -o ubuntu -g ubuntu "${CODEX_ACP_ROOT}/scripts/codex-acp-atius-wrapper.sh" "${CODEX_ACP_BIN}"
 sudo mkdir -p /etc/systemd/system/wayland.service.d
 sudo tee /etc/systemd/system/wayland.service.d/atius-overlay.conf >/dev/null <<CONF
