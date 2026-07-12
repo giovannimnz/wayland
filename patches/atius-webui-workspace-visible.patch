@@ -1142,10 +1142,10 @@ index 000000000..8b00c48b5
 +.claude
 diff --git a/codex-acp/AGENTS.md b/codex-acp/AGENTS.md
 new file mode 100644
-index 000000000..aa1dc5708
+index 000000000..d9d85d26c
 --- /dev/null
 +++ b/codex-acp/AGENTS.md
-@@ -0,0 +1,18 @@
+@@ -0,0 +1,26 @@
 +# Codex ACP subtree instructions
 +
 +This directory is the embedded ATIUS Codex ACP fork used by Wayland.
@@ -1164,6 +1164,14 @@ index 000000000..aa1dc5708
 +- Any Chrome DevTools, Playwright, Chromium, Chrome, or equivalent browser
 +  automation must run headless. Store screenshots, traces, console/network
 +  evidence, and reports as files; never open an automated visible browser.
++
++<!-- codex-policy:parallel-headless:start -->
++## Paralelismo e automacao de browser
++
++- Use multiplos subagentes sempre que houver trabalho paralelo util. Atribua objetivos delimitados e sem sobreposicao, depois integre e valide os resultados no agente principal.
++- Toda automacao de browser deve executar em modo headless, incluindo chrome-devtools, Playwright, Selenium, Puppeteer ou ferramenta equivalente. Nao abra janelas visiveis do browser.
++
++<!-- codex-policy:parallel-headless:end -->
 diff --git a/codex-acp/ATIUS.md b/codex-acp/ATIUS.md
 new file mode 100644
 index 000000000..8af51723a

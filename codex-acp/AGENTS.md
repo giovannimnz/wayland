@@ -16,3 +16,11 @@ This directory is the embedded ATIUS Codex ACP fork used by Wayland.
 - Any Chrome DevTools, Playwright, Chromium, Chrome, or equivalent browser
   automation must run headless. Store screenshots, traces, console/network
   evidence, and reports as files; never open an automated visible browser.
+
+<!-- codex-policy:parallel-headless:start -->
+## Paralelismo e automacao de browser
+
+- Use multiplos subagentes sempre que houver trabalho paralelo util. Atribua objetivos delimitados e sem sobreposicao, depois integre e valide os resultados no agente principal.
+- Toda automacao de browser deve executar em modo headless, incluindo chrome-devtools, Playwright, Selenium, Puppeteer ou ferramenta equivalente. Nao abra janelas visiveis do browser.
+
+<!-- codex-policy:parallel-headless:end -->
