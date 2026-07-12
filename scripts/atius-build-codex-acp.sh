@@ -99,4 +99,6 @@ install -d -m 0755 "$(dirname "$STAMP_FILE")"
 printf '%s\n' "$TREE_HASH" > "$STAMP_FILE"
 
 echo "[atius-codex-acp] installed ${INSTALL_BIN}"
-"$INSTALL_BIN" --version
+ACP_VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "${ACP_ROOT}/Cargo.toml" | head -n 1)"
+"$INSTALL_BIN" --help >/dev/null
+echo "[atius-codex-acp] version=${ACP_VERSION} smoke=ok"

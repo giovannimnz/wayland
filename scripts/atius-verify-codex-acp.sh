@@ -33,7 +33,7 @@ if [[ $LIVE -eq 1 ]]; then
   [[ -x "$WRAPPER_LIVE" ]] || { echo "live wrapper missing" >&2; exit 1; }
   [[ -x "$BINARY_LIVE" ]] || { echo "live binary missing" >&2; exit 1; }
   cmp -s "$WRAPPER_SOURCE" "$WRAPPER_LIVE" || { echo "live wrapper differs from embedded source" >&2; exit 1; }
-  "$WRAPPER_LIVE" --version
+  "$WRAPPER_LIVE" --help >/dev/null
   systemctl is-active --quiet wayland.service
   systemctl is-active --quiet wayland-https-proxy.service
   systemctl show wayland.service -p Environment --value | grep -Fq 'WAYLAND_CODEX_ACP_CLI=/home/ubuntu/.local/bin/codex-acp-atius'

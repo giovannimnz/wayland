@@ -1140,6 +1140,85 @@ index 000000000..8b00c48b5
 +codex
 +.agents
 +.claude
+diff --git a/codex-acp/AGENTS.md b/codex-acp/AGENTS.md
+new file mode 100644
+index 000000000..aa1dc5708
+--- /dev/null
++++ b/codex-acp/AGENTS.md
+@@ -0,0 +1,18 @@
++# Codex ACP subtree instructions
++
++This directory is the embedded ATIUS Codex ACP fork used by Wayland.
++
++- Preserve compatibility with Wayland's `WAYLAND_CODEX_ACP_CLI` runtime.
++- Keep `CODEX_HOME` account-aware model discovery, agent profiles, model effort,
++  speed, permission, and the six-position advanced power ladder covered by
++  focused tests.
++- Run Rust build/tests under the ATIUS 20% total CPU guardrail through
++  `../scripts/atius-build-codex-acp.sh`; do not run raw heavy cargo commands.
++- Do not add nested `.git`, `target/`, credentials, or runtime home files.
++- Update through `git subtree pull`, never by replacing this directory with an
++  unversioned copy.
++- Use multiple subagents for independent investigation, implementation, review,
++  and validation fronts, with explicit non-overlapping ownership.
++- Any Chrome DevTools, Playwright, Chromium, Chrome, or equivalent browser
++  automation must run headless. Store screenshots, traces, console/network
++  evidence, and reports as files; never open an automated visible browser.
+diff --git a/codex-acp/ATIUS.md b/codex-acp/ATIUS.md
+new file mode 100644
+index 000000000..8af51723a
+--- /dev/null
++++ b/codex-acp/ATIUS.md
+@@ -0,0 +1,49 @@
++# ATIUS Codex ACP fork
++
++This directory is a full-history Git subtree imported from
++`https://github.com/giovannimnz/codex-acp`. It is the production adapter used
++by the ATIUS Wayland fork and is intentionally committed inside the Wayland
++repository so a Wayland clone contains the exact adapter source it runs.
++
++## Runtime contract
++
++- Source: `<wayland>/codex-acp`.
++- Build: `bash ../scripts/atius-build-codex-acp.sh --test`.
++- Installed binary: `/home/ubuntu/.local/bin/codex-acp`.
++- Wayland entrypoint: `/home/ubuntu/.local/bin/codex-acp-atius`.
++- Runtime homes: `CODEX_HOME=/home/ubuntu/.codex` and
++  `HERMES_HOME=/home/ubuntu/.hermes`.
++- Wayland service user: `ubuntu`.
++
++The wrapper is kept separate from the compiled binary so runtime homes are
++explicit and the service can continue to use `WAYLAND_CODEX_ACP_CLI`.
++
++## ATIUS behavior
++
++The two ATIUS commits imported with the subtree add Codex agent-profile support,
++account-aware model configuration, and the six-position advanced power ladder
++used by the Wayland model/effort UI. Do not replace this subtree with the npm
++adapter without validating those contracts end to end.
++
++The old Zed adapter now recommends `agentclientprotocol/codex-acp` for new
++installs. Migrating to that App Server implementation is a separate project;
++it must not be coupled to an upstream Wayland sync or this path migration.
++
++## Updating the subtree
++
++Fetch and test the standalone fork first, then update Wayland from a clean
++branch or worktree:
++
++```bash
++git subtree pull --prefix=codex-acp \
++  https://github.com/giovannimnz/codex-acp.git main
++bash scripts/atius-build-codex-acp.sh --test --force
++bash scripts/atius-verify-codex-acp.sh --live
++```
++
++Never copy `.git`, `target/`, `node_modules/`, credentials, or runtime homes
++into this directory. `target/` is an ignored local build cache only.
++
++The Apache-2.0 `LICENSE` in this directory must remain present. Fork-sync must
++protect `codex-acp/**`; the ATIUS source patch protects the Wayland wiring and
++also carries a recovery copy of the fork-owned subtree.
 diff --git a/codex-acp/Cargo.lock b/codex-acp/Cargo.lock
 new file mode 100644
 index 000000000..84bcb62c4
@@ -27205,10 +27284,10 @@ index 000000000..9bd37b712
 +exit 1
 diff --git a/scripts/atius-build-codex-acp.sh b/scripts/atius-build-codex-acp.sh
 new file mode 100755
-index 000000000..e145e4871
+index 000000000..1eed5909e
 --- /dev/null
 +++ b/scripts/atius-build-codex-acp.sh
-@@ -0,0 +1,102 @@
+@@ -0,0 +1,104 @@
 +#!/usr/bin/env bash
 +set -euo pipefail
 +
@@ -27310,7 +27389,9 @@ index 000000000..e145e4871
 +printf '%s\n' "$TREE_HASH" > "$STAMP_FILE"
 +
 +echo "[atius-codex-acp] installed ${INSTALL_BIN}"
-+"$INSTALL_BIN" --version
++ACP_VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "${ACP_ROOT}/Cargo.toml" | head -n 1)"
++"$INSTALL_BIN" --help >/dev/null
++echo "[atius-codex-acp] version=${ACP_VERSION} smoke=ok"
 diff --git a/scripts/atius-build-renderer-overlay.sh b/scripts/atius-build-renderer-overlay.sh
 new file mode 100755
 index 000000000..4935ed9bc
@@ -28213,7 +28294,7 @@ index 000000000..7450c2c18
 +echo "[atius-update] source patch refreshed, standalone runtime rebuilt and restarted"
 diff --git a/scripts/atius-verify-codex-acp.sh b/scripts/atius-verify-codex-acp.sh
 new file mode 100755
-index 000000000..95a464f21
+index 000000000..b90b42a94
 --- /dev/null
 +++ b/scripts/atius-verify-codex-acp.sh
 @@ -0,0 +1,52 @@
@@ -28252,7 +28333,7 @@ index 000000000..95a464f21
 +  [[ -x "$WRAPPER_LIVE" ]] || { echo "live wrapper missing" >&2; exit 1; }
 +  [[ -x "$BINARY_LIVE" ]] || { echo "live binary missing" >&2; exit 1; }
 +  cmp -s "$WRAPPER_SOURCE" "$WRAPPER_LIVE" || { echo "live wrapper differs from embedded source" >&2; exit 1; }
-+  "$WRAPPER_LIVE" --version
++  "$WRAPPER_LIVE" --help >/dev/null
 +  systemctl is-active --quiet wayland.service
 +  systemctl is-active --quiet wayland-https-proxy.service
 +  systemctl show wayland.service -p Environment --value | grep -Fq 'WAYLAND_CODEX_ACP_CLI=/home/ubuntu/.local/bin/codex-acp-atius'
