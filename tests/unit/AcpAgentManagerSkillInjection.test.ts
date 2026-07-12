@@ -147,7 +147,10 @@ vi.mock('@process/agent/acp', () => ({
   })),
 }));
 
-import AcpAgentManager from '@process/task/AcpAgentManager';
+import AcpAgentManager, {
+  DEFAULT_WORKSPACE_HYBRID_ROUTES,
+  resolveWorkspaceHybridContextFromRoutes,
+} from '@process/task/AcpAgentManager';
 
 function createManager(
   overrides: {
@@ -155,12 +158,13 @@ function createManager(
     customWorkspace?: boolean;
     presetContext?: string;
     enabledSkills?: string[];
+    workspace?: string;
   } = {}
 ) {
   const data = {
     conversation_id: 'test-conv',
     backend: overrides.backend ?? 'claude',
-    workspace: '/tmp/test-workspace',
+    workspace: overrides.workspace ?? '/tmp/test-workspace',
     customWorkspace: overrides.customWorkspace,
     presetContext: overrides.presetContext,
     enabledSkills: overrides.enabledSkills,
@@ -192,22 +196,64 @@ describe('AcpAgentManager - first-message skill injection', () => {
     vi.clearAllMocks();
   });
 
-  it('uses native skills (no prompt injection) for supported backend without customWorkspace', async () => {
+
+  it('maps mounted NFS workspaces back to their owner host paths', () => {
+    const srv1 = resolveWorkspaceHybridContextFromRoutes(
+      '/home/ubuntu/Servers/atius-srv-1/GitHub/router-ai-atius',
+      DEFAULT_WORKSPACE_HYBRID_ROUTES
+    );
+    expect(srv1).toMatchObject({
+      hostId: 'atius-srv-1',
+      sshTarget: 'atius-srv-1',
+      remoteWorkspace: '/home/ubuntu/GitHub/router-ai-atius',
+    });
+
+    const horistic = resolveWorkspaceHybridContextFromRoutes(
+      '/home/ubuntu/Servers/horistic-srv/GitHub/strategy-lab',
+      DEFAULT_WORKSPACE_HYBRID_ROUTES
+    );
+    expect(horistic).toMatchObject({
+      hostId: 'horistic-srv',
+      sshTarget: 'horistic-srv',
+      remoteWorkspace: '/home/horistic/GitHub/strategy-lab',
+    });
+  });
+
+  it('uses native skills and injects hybrid workspace rules for supported NFS mounts', async () => {
     const manager = createManager({
       backend: 'claude',
       customWorkspace: false,
       presetContext: 'You are helpful.',
       enabledSkills: ['pptx'],
+      workspace: '/home/ubuntu/Servers/atius-srv-1/GitHub/router-ai-atius',
     });
 
     await sendFirstMessage(manager);
 
     expect(mockPrepareFirstMessage).not.toHaveBeenCalled();
-    // Should have injected presetContext directly into content
     const sentContent = mockAgentSendMessage.mock.calls[0][0].content as string;
     expect(sentContent).toContain('[Assistant Rules');
     expect(sentContent).toContain('You are helpful.');
+    expect(sentContent).toContain('[Workspace Execution Mode]');
+    expect(sentContent).toContain('ssh atius-srv-1');
+    expect(sentContent).toContain('/home/ubuntu/GitHub/router-ai-atius');
     expect(sentContent).toContain('[User Request]');
+  });
+
+  it('prepends a short hybrid reminder on later turns in NFS workspaces', async () => {
+    const manager = createManager({
+      backend: 'claude',
+      customWorkspace: false,
+      workspace: '/home/ubuntu/Servers/atius-srv-2/GitHub/ats',
+    });
+
+    await sendFirstMessage(manager, 'Prime turn');
+    await manager.sendMessage({ content: 'Run the validation command', msg_id: 'msg-2' });
+
+    const secondTurnContent = mockAgentSendMessage.mock.calls[1][0].content as string;
+    expect(secondTurnContent).toContain('[Workspace Execution Mode]');
+    expect(secondTurnContent).toContain('Hybrid default for this folder');
+    expect(secondTurnContent).toContain('atius-srv-2:/home/ubuntu/GitHub/ats');
   });
 
   it('falls back to prompt injection for supported backend WITH customWorkspace', async () => {
@@ -216,16 +262,22 @@ describe('AcpAgentManager - first-message skill injection', () => {
       customWorkspace: true,
       presetContext: 'You are helpful.',
       enabledSkills: ['pptx'],
+      workspace: '/home/ubuntu/Servers/atius-srv-1/GitHub/router-ai-atius',
     });
 
     await sendFirstMessage(manager);
 
-    expect(mockPrepareFirstMessage).toHaveBeenCalledWith('Hello', {
-      presetContext: 'You are helpful.',
-      enabledSkills: ['pptx'],
-      enableTeamGuide: true,
-      backend: 'claude',
-    });
+    expect(mockPrepareFirstMessage).toHaveBeenCalledWith(
+      'Hello',
+      expect.objectContaining({
+        enabledSkills: ['pptx'],
+        enableTeamGuide: true,
+        backend: 'claude',
+        presetContext: expect.stringContaining('You are helpful.'),
+      })
+    );
+    expect(mockPrepareFirstMessage.mock.calls[0][1]?.presetContext).toContain('[Workspace Execution Mode]');
+    expect(mockPrepareFirstMessage.mock.calls[0][1]?.presetContext).toContain('/home/ubuntu/GitHub/router-ai-atius');
   });
 
   it('falls back to prompt injection for unsupported backend regardless of customWorkspace', async () => {

@@ -14,6 +14,27 @@ const generatedProviderId = 'atius-chatgpt-subscription';
 const generatedAgentPrefix = 'codex-agent-profile-';
 const generatedSlashCommandPrefix = 'atius-codex-skill-command-';
 const generatedCommandTimestamp = Date.UTC(2026, 6, 10);
+
+const generatedWorkspaceHybridRoutes = [
+  {
+    hostId: 'atius-srv-1',
+    mountPath: '/home/ubuntu/Servers/atius-srv-1/GitHub',
+    remoteRoot: '/home/ubuntu/GitHub',
+    sshTarget: 'atius-srv-1',
+  },
+  {
+    hostId: 'atius-srv-2',
+    mountPath: '/home/ubuntu/Servers/atius-srv-2/GitHub',
+    remoteRoot: '/home/ubuntu/GitHub',
+    sshTarget: 'atius-srv-2',
+  },
+  {
+    hostId: 'horistic-srv',
+    mountPath: '/home/ubuntu/Servers/horistic-srv/GitHub',
+    remoteRoot: '/home/horistic/GitHub',
+    sshTarget: 'horistic-srv',
+  },
+];
 const slashCommandNamePattern = /^[a-zA-Z][a-zA-Z0-9_-]{0,31}$/;
 
 function decodeStorage(filePath) {
@@ -410,6 +431,7 @@ function mergeConfig(sourceConfig, targetConfig) {
 
   const hiddenAgents = Array.isArray(merged['agents.hidden']) ? merged['agents.hidden'] : [];
   merged['agents.hidden'] = Array.from(new Set([...hiddenAgents, 'gemini']));
+  merged['atius.workspaceHybridRoutes'] = generatedWorkspaceHybridRoutes;
   merged['atius.codexSkillSync'] = {
     skills: codexSkills.length,
     symlinksCreated: syncedCodexSkills,

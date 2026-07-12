@@ -103,6 +103,7 @@ FILES=(
   src/renderer/styles/layout.css
   tests/unit/WebSocketManager.test.ts
   tests/unit/AgentPillBar.dom.test.tsx
+  tests/unit/AcpAgentManagerSkillInjection.test.ts
   tests/unit/RemoteAgentCore.test.ts
   tests/unit/RemoteAgentManagement.dom.test.tsx
   tests/unit/remoteAgentBridge.test.ts

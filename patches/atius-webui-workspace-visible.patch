@@ -27,10 +27,10 @@ index a85d779cb..36b229afd 100644
  ## Where to put new docs
 diff --git a/docs/guides/atius-fork-runtime.md b/docs/guides/atius-fork-runtime.md
 new file mode 100644
-index 000000000..e07485e59
+index 000000000..cb6905b8f
 --- /dev/null
 +++ b/docs/guides/atius-fork-runtime.md
-@@ -0,0 +1,258 @@
+@@ -0,0 +1,260 @@
 +# Atius srv-3 fork/runtime guide
 +
 +This guide documents the ATIUS-managed source runtime served at
@@ -87,6 +87,7 @@ index 000000000..e07485e59
 +- `src/common/types/codex/codexModes.ts`
 +- `src/common/types/codex/types/eventData.ts`
 +- `src/process/task/AcpAgentManager.ts`
++- `tests/unit/AcpAgentManagerSkillInjection.test.ts`
 +- `src/process/task/WCoreManager.ts`
 +- `src/process/task/claudeConfig.ts`
 +- `src/process/task/codexConfig.ts`
@@ -186,6 +187,7 @@ index 000000000..e07485e59
 +- exposes the ATIUS Codex ACP fork through `/home/ubuntu/.local/bin/codex-acp-atius`;
 +- syncs the live Wayland storage into `/home/ubuntu/.config/Wayland/config/wayland-config.txt`;
 +- regenerates `model.config` from the `ubuntu` Codex runtime;
++- stores `atius.workspaceHybridRoutes` and defaults NFS GitHub mounts to hybrid execution guidance (edit on the mount, validate on the owner host via SSH alias);
 +- prunes generated `codex-agent-profile-*` rows from `acp.customAgents` while preserving user-owned custom ACP agents;
 +- mirrors `/home/ubuntu/.codex/skills/*/SKILL.md` into `/home/ubuntu/.config/Wayland/config/skills/` as symlinks;
 +- generates `slash.customCommands` entries that insert `$skill-name` for Codex skills, including GSD/SDD commands;
@@ -197,7 +199,7 @@ index 000000000..e07485e59
 +
 +```bash
 +NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/renderer/guid/firstSafeCuratedModel.test.ts
-+NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/AgentPillBar.dom.test.tsx tests/unit/renderer/guidModelSelector.dom.test.tsx tests/unit/useGuidSend.dom.test.ts tests/unit/process/task/codexNativeSandbox.test.ts tests/unit/process/task/codexConfigEffort.test.ts
++NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/AcpAgentManagerSkillInjection.test.ts tests/unit/AgentPillBar.dom.test.tsx tests/unit/renderer/guidModelSelector.dom.test.tsx tests/unit/useGuidSend.dom.test.ts tests/unit/process/task/codexNativeSandbox.test.ts tests/unit/process/task/codexConfigEffort.test.ts
 +bun test tests/unit/webserver/cookieOptions.test.ts tests/unit/webserver/detectNetworkContext.test.ts
 +npm run typecheck
 +bash scripts/atius-build-renderer-overlay.sh
@@ -541,10 +543,10 @@ index 000000000..171b72c4f
 +bash "$ROOT/scripts/atius-build-renderer-overlay.sh"
 diff --git a/scripts/atius-refresh-source-patch.sh b/scripts/atius-refresh-source-patch.sh
 new file mode 100755
-index 000000000..6c7b839a2
+index 000000000..456351584
 --- /dev/null
 +++ b/scripts/atius-refresh-source-patch.sh
-@@ -0,0 +1,185 @@
+@@ -0,0 +1,186 @@
 +#!/usr/bin/env bash
 +set -euo pipefail
 +ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -650,6 +652,7 @@ index 000000000..6c7b839a2
 +  src/renderer/styles/layout.css
 +  tests/unit/WebSocketManager.test.ts
 +  tests/unit/AgentPillBar.dom.test.tsx
++  tests/unit/AcpAgentManagerSkillInjection.test.ts
 +  tests/unit/RemoteAgentCore.test.ts
 +  tests/unit/RemoteAgentManagement.dom.test.tsx
 +  tests/unit/remoteAgentBridge.test.ts
@@ -732,10 +735,10 @@ index 000000000..6c7b839a2
 +fi
 diff --git a/scripts/atius-sync-ubuntu-runtime.mjs b/scripts/atius-sync-ubuntu-runtime.mjs
 new file mode 100755
-index 000000000..64a5d3ccd
+index 000000000..e8eb8f73f
 --- /dev/null
 +++ b/scripts/atius-sync-ubuntu-runtime.mjs
-@@ -0,0 +1,445 @@
+@@ -0,0 +1,467 @@
 +#!/usr/bin/env node
 +import { execFileSync } from 'node:child_process';
 +import { existsSync, lstatSync, mkdirSync, readlinkSync, readdirSync, symlinkSync, unlinkSync, readFileSync, writeFileSync } from 'node:fs';
@@ -752,6 +755,27 @@ index 000000000..64a5d3ccd
 +const generatedAgentPrefix = 'codex-agent-profile-';
 +const generatedSlashCommandPrefix = 'atius-codex-skill-command-';
 +const generatedCommandTimestamp = Date.UTC(2026, 6, 10);
++
++const generatedWorkspaceHybridRoutes = [
++  {
++    hostId: 'atius-srv-1',
++    mountPath: '/home/ubuntu/Servers/atius-srv-1/GitHub',
++    remoteRoot: '/home/ubuntu/GitHub',
++    sshTarget: 'atius-srv-1',
++  },
++  {
++    hostId: 'atius-srv-2',
++    mountPath: '/home/ubuntu/Servers/atius-srv-2/GitHub',
++    remoteRoot: '/home/ubuntu/GitHub',
++    sshTarget: 'atius-srv-2',
++  },
++  {
++    hostId: 'horistic-srv',
++    mountPath: '/home/ubuntu/Servers/horistic-srv/GitHub',
++    remoteRoot: '/home/horistic/GitHub',
++    sshTarget: 'horistic-srv',
++  },
++];
 +const slashCommandNamePattern = /^[a-zA-Z][a-zA-Z0-9_-]{0,31}$/;
 +
 +function decodeStorage(filePath) {
@@ -1148,6 +1172,7 @@ index 000000000..64a5d3ccd
 +
 +  const hiddenAgents = Array.isArray(merged['agents.hidden']) ? merged['agents.hidden'] : [];
 +  merged['agents.hidden'] = Array.from(new Set([...hiddenAgents, 'gemini']));
++  merged['atius.workspaceHybridRoutes'] = generatedWorkspaceHybridRoutes;
 +  merged['atius.codexSkillSync'] = {
 +    skills: codexSkills.length,
 +    symlinksCreated: syncedCodexSkills,
@@ -2223,7 +2248,7 @@ index d6e86a67a..3c2e6674a 100644
 
          let PluginClass = mod.default || mod.Plugin;
 diff --git a/src/process/task/AcpAgentManager.ts b/src/process/task/AcpAgentManager.ts
-index a95a8ea51..ca063cf05 100644
+index a95a8ea51..5fd253aef 100644
 --- a/src/process/task/AcpAgentManager.ts
 +++ b/src/process/task/AcpAgentManager.ts
 @@ -4,11 +4,9 @@ import { channelEventBus } from '@process/channels/agent/ChannelEventBus';
@@ -2257,12 +2282,12 @@ index a95a8ea51..ca063cf05 100644
  import { readConnectedFluxKey } from '@process/connectors/fluxKey';
 +import { readFile } from 'node:fs/promises';
 +import { homedir } from 'node:os';
-+import { join } from 'node:path';
++import { join, posix } from 'node:path';
 +import yaml from 'js-yaml';
 
  interface AcpAgentManagerData {
    workspace?: string;
-@@ -113,22 +118,83 @@ interface AcpAgentManagerData {
+@@ -113,22 +118,229 @@ interface AcpAgentManagerData {
    /** Pending config option selections from Guid page (applied after session creation) */
    pendingConfigOptions?: Record<string, string>;
    /** Per-conversation reasoning effort (codex/claude). Absent => backend default. */
@@ -2286,6 +2311,152 @@ index a95a8ea51..ca063cf05 100644
 +
 +type StaticModelOption = { id: string; label: string };
 +
++type WorkspaceHybridRoute = {
++  hostId: string;
++  mountPath: string;
++  remoteRoot: string;
++  sshTarget?: string;
++};
++
++type ResolvedWorkspaceHybridContext = WorkspaceHybridRoute & {
++  sshTarget: string;
++  localWorkspace: string;
++  remoteWorkspace: string;
++};
++
++const WORKSPACE_HYBRID_ROUTES_CONFIG_KEY = 'atius.workspaceHybridRoutes';
++export const DEFAULT_WORKSPACE_HYBRID_ROUTES: WorkspaceHybridRoute[] = [
++  {
++    hostId: 'atius-srv-1',
++    mountPath: '/home/ubuntu/Servers/atius-srv-1/GitHub',
++    remoteRoot: '/home/ubuntu/GitHub',
++    sshTarget: 'atius-srv-1',
++  },
++  {
++    hostId: 'atius-srv-2',
++    mountPath: '/home/ubuntu/Servers/atius-srv-2/GitHub',
++    remoteRoot: '/home/ubuntu/GitHub',
++    sshTarget: 'atius-srv-2',
++  },
++  {
++    hostId: 'horistic-srv',
++    mountPath: '/home/ubuntu/Servers/horistic-srv/GitHub',
++    remoteRoot: '/home/horistic/GitHub',
++    sshTarget: 'horistic-srv',
++  },
++];
++
++let workspaceHybridRoutesCache: WorkspaceHybridRoute[] | null = null;
++
++function normalizePosixPath(value: string): string {
++  const normalized = posix.normalize(value.trim());
++  if (!normalized || normalized === '.') return '/';
++  return normalized.length > 1 && normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;
++}
++
++function toWorkspaceHybridRoute(value: unknown): WorkspaceHybridRoute | null {
++  if (!value || typeof value !== 'object') return null;
++  const record = value as Record<string, unknown>;
++  const hostId = typeof record.hostId === 'string' ? record.hostId.trim() : '';
++  const mountPath = typeof record.mountPath === 'string' ? record.mountPath.trim() : '';
++  const remoteRoot = typeof record.remoteRoot === 'string' ? record.remoteRoot.trim() : '';
++  const sshTarget = typeof record.sshTarget === 'string' ? record.sshTarget.trim() : '';
++  if (!hostId || !mountPath || !remoteRoot) return null;
++  return {
++    hostId,
++    mountPath: normalizePosixPath(mountPath),
++    remoteRoot: normalizePosixPath(remoteRoot),
++    ...(sshTarget ? { sshTarget } : {}),
++  };
++}
++
++function mergeWorkspaceHybridRoutes(configuredRoutes: WorkspaceHybridRoute[]): WorkspaceHybridRoute[] {
++  const byMountPath = new Map<string, WorkspaceHybridRoute>();
++  for (const route of DEFAULT_WORKSPACE_HYBRID_ROUTES) {
++    byMountPath.set(route.mountPath, route);
++  }
++  for (const route of configuredRoutes) {
++    byMountPath.set(route.mountPath, route);
++  }
++  return Array.from(byMountPath.values());
++}
++
++async function loadWorkspaceHybridRoutes(): Promise<WorkspaceHybridRoute[]> {
++  if (workspaceHybridRoutesCache) return workspaceHybridRoutesCache;
++  try {
++    const raw = await (ProcessConfig as unknown as { get: (key: string) => Promise<unknown> }).get(
++      WORKSPACE_HYBRID_ROUTES_CONFIG_KEY
++    );
++    const configuredRoutes = Array.isArray(raw)
++      ? raw.map((entry) => toWorkspaceHybridRoute(entry)).filter((entry): entry is WorkspaceHybridRoute => entry !== null)
++      : [];
++    workspaceHybridRoutesCache = mergeWorkspaceHybridRoutes(configuredRoutes);
++  } catch {
++    workspaceHybridRoutesCache = [...DEFAULT_WORKSPACE_HYBRID_ROUTES];
++  }
++  return workspaceHybridRoutesCache;
++}
++
++export function resolveWorkspaceHybridContextFromRoutes(
++  workspace: string | undefined,
++  routes: WorkspaceHybridRoute[]
++): ResolvedWorkspaceHybridContext | null {
++  const normalizedWorkspace = typeof workspace === 'string' ? normalizePosixPath(workspace) : '';
++  if (!normalizedWorkspace || normalizedWorkspace === '/') return null;
++
++  for (const route of routes) {
++    const mountPath = normalizePosixPath(route.mountPath);
++    if (normalizedWorkspace !== mountPath && !normalizedWorkspace.startsWith(`${mountPath}/`)) {
++      continue;
++    }
++
++    const relativePath = posix.relative(mountPath, normalizedWorkspace);
++    const remoteWorkspace = !relativePath || relativePath === '.' ? route.remoteRoot : posix.join(route.remoteRoot, relativePath);
++    return {
++      ...route,
++      sshTarget: route.sshTarget?.trim() || route.hostId,
++      localWorkspace: normalizedWorkspace,
++      remoteWorkspace: normalizePosixPath(remoteWorkspace),
++    };
++  }
++
++  return null;
++}
++
++async function resolveWorkspaceHybridContext(workspace?: string): Promise<ResolvedWorkspaceHybridContext | null> {
++  const routes = await loadWorkspaceHybridRoutes();
++  return resolveWorkspaceHybridContextFromRoutes(workspace, routes);
++}
++
++function buildWorkspaceHybridRulesText(context: ResolvedWorkspaceHybridContext): string {
++  return [
++    '[Workspace Execution Mode]',
++    `This workspace is an NFS mirror of ${context.hostId}.`,
++    `- Edit files directly in the mounted workspace: ${context.localWorkspace}`,
++    `- Treat ${context.remoteWorkspace} on ${context.sshTarget} as the owner-host path for validation.`,
++    `- Use hybrid mode by default: read/search/diff locally, but run test/build/dev-server/runtime validation commands on ${context.sshTarget}.`,
++    `- Prefer the host alias ${context.sshTarget}; do not use a reserve 10.100.100.x address when the OCI/DRG alias is available.`,
++    `- Canonical remote validation shape: ssh ${context.sshTarget} 'cd ${context.remoteWorkspace} && <command>'`,
++  ].join('\n');
++}
++
++function buildWorkspaceHybridReminderText(context: ResolvedWorkspaceHybridContext): string {
++  return [
++    '[Workspace Execution Mode]',
++    `Hybrid default for this folder: edit in ${context.localWorkspace}; validate on ${context.sshTarget}:${context.remoteWorkspace}.`,
++  ].join('\n');
++}
++
++async function resolveWorkspaceHybridRulesText(workspace?: string): Promise<string> {
++  const context = await resolveWorkspaceHybridContext(workspace);
++  return context ? buildWorkspaceHybridRulesText(context) : '';
++}
++
++async function resolveWorkspaceHybridReminderText(workspace?: string): Promise<string> {
++  const context = await resolveWorkspaceHybridContext(workspace);
++  return context ? buildWorkspaceHybridReminderText(context) : '';
++}
++
 +function labelForModel(models: StaticModelOption[], modelId: string | null): string | null {
 +  if (!modelId) return null;
 +  return models.find((model) => model.id === modelId)?.label ?? modelId;
@@ -2308,9 +2479,9 @@ index a95a8ea51..ca063cf05 100644
 +    canSwitch: availableModels.length > 1,
 +    source: 'models',
 +    sourceDetail,
-+  };
-+}
-+
+   };
+ }
+
 +function resolveHermesHome(): string {
 +  const configured = process.env.HERMES_HOME?.trim();
 +  if (configured) return configured;
@@ -2328,9 +2499,9 @@ index a95a8ea51..ca063cf05 100644
 +  return {
 +    provider: typeof record.provider === 'string' && record.provider.trim() ? record.provider.trim() : null,
 +    modelId: typeof record.default === 'string' && record.default.trim() ? record.default.trim() : null,
-   };
- }
-
++  };
++}
++
 +async function readHermesModelInfoFromConfig(): Promise<AcpModelInfo | null> {
 +  const hermesHome = resolveHermesHome();
 +  const configRaw = await readFile(join(hermesHome, 'config.yaml'), 'utf8');
@@ -2357,7 +2528,7 @@ index a95a8ea51..ca063cf05 100644
  type BufferedStreamTextMessage = {
    conversationId: string;
    backend: AcpBackend;
-@@ -361,14 +427,14 @@ class AcpAgentManager extends BaseAgentManager<AcpAgentManagerData, AcpPermissio
+@@ -361,14 +573,14 @@ class AcpAgentManager extends BaseAgentManager<AcpAgentManagerData, AcpPermissio
          data: null,
        },
        this.options.backend,
@@ -2374,7 +2545,7 @@ index a95a8ea51..ca063cf05 100644
    ): Promise<void> {
      if (options.trackActiveTurn !== false) {
        this.markActiveTurnFinished();
-@@ -426,13 +492,6 @@ ${collectedResponses.join('\n')}`;
+@@ -426,13 +638,6 @@ ${collectedResponses.join('\n')}`;
      const finishMessage: IResponseMessage = {
        ...(message as IResponseMessage),
        conversation_id: this.conversation_id,
@@ -2388,7 +2559,7 @@ index a95a8ea51..ca063cf05 100644
      };
      ipcBridge.acpConversation.responseStream.emit(finishMessage);
      teamEventBus.emit('responseStream', finishMessage);
-@@ -496,7 +555,7 @@ ${collectedResponses.join('\n')}`;
+@@ -496,7 +701,7 @@ ${collectedResponses.join('\n')}`;
                data: null,
              },
              this.options.backend,
@@ -2397,7 +2568,7 @@ index a95a8ea51..ca063cf05 100644
            );
          }
          return result;
-@@ -527,7 +586,7 @@ ${collectedResponses.join('\n')}`;
+@@ -527,7 +732,7 @@ ${collectedResponses.join('\n')}`;
            data: null,
          },
          this.options.backend,
@@ -2406,7 +2577,7 @@ index a95a8ea51..ca063cf05 100644
        );
        return result;
      } catch (error) {
-@@ -655,6 +714,7 @@ ${collectedResponses.join('\n')}`;
+@@ -655,6 +860,7 @@ ${collectedResponses.join('\n')}`;
      // surface; codex/codebuddy route separately).
      const decision = await this.computeFluxRouting(data.backend, data.currentModelId ?? undefined);
      this.lastRouting = decision.routing;
@@ -2414,7 +2585,7 @@ index a95a8ea51..ca063cf05 100644
      if (decision.routing === 'flux') {
        for (const k of decision.stripKeys) delete mergedEnv[k];
        Object.assign(mergedEnv, decision.env);
-@@ -671,7 +731,8 @@ ${collectedResponses.join('\n')}`;
+@@ -671,7 +877,8 @@ ${collectedResponses.join('\n')}`;
              sandboxMode,
              undefined,
              undefined,
@@ -2424,7 +2595,7 @@ index a95a8ea51..ca063cf05 100644
            );
            mergedEnv.CODEX_HOME = codexHome;
          } catch (err) {
-@@ -703,20 +764,15 @@ ${collectedResponses.join('\n')}`;
+@@ -703,20 +910,15 @@ ${collectedResponses.join('\n')}`;
        // config pins model.provider=custom at the Flux openai surface + flux-auto
        // (reading FLUX_API_KEY at request time), so the user's real ~/.hermes
        // config (and active profile) stays native for non-flux model picks.
@@ -2449,7 +2620,7 @@ index a95a8ea51..ca063cf05 100644
            );
          } catch (err) {
            mainWarn('[AcpAgentManager]', 'materializeFluxHermesHome failed', err);
-@@ -725,14 +781,22 @@ ${collectedResponses.join('\n')}`;
+@@ -725,14 +927,22 @@ ${collectedResponses.join('\n')}`;
      }
 
      // Native (non-Flux) codex spawns: point CODEX_HOME at a Wayland-scoped clone
@@ -2478,7 +2649,7 @@ index a95a8ea51..ca063cf05 100644
        } catch (err) {
          mainWarn('[AcpAgentManager]', 'materializeNativeCodexHome failed', err);
        }
-@@ -909,17 +973,7 @@ ${collectedResponses.join('\n')}`;
+@@ -909,17 +1119,7 @@ ${collectedResponses.join('\n')}`;
      }
 
      if (!customAgentConfig?.defaultCliPath) {
@@ -2497,7 +2668,7 @@ index a95a8ea51..ca063cf05 100644
      }
 
      return {
-@@ -986,14 +1040,21 @@ ${collectedResponses.join('\n')}`;
+@@ -986,14 +1186,21 @@ ${collectedResponses.join('\n')}`;
      }
 
      if (data.backend === 'codex') {
@@ -2527,7 +2698,7 @@ index a95a8ea51..ca063cf05 100644
      }
 
      return { cliPath, customArgs, yoloMode };
-@@ -1221,49 +1282,6 @@ ${collectedResponses.join('\n')}`;
+@@ -1221,49 +1428,6 @@ ${collectedResponses.join('\n')}`;
      }
    }
 
@@ -2577,7 +2748,7 @@ index a95a8ea51..ca063cf05 100644
    /**
     * Handle signal events (permission requests, finish, errors) from the ACP agent.
     * Auto-approves permissions in yolo mode and for team MCP tools,
-@@ -1285,14 +1303,9 @@ ${collectedResponses.join('\n')}`;
+@@ -1285,14 +1449,9 @@ ${collectedResponses.join('\n')}`;
          return;
        }
 
@@ -2595,7 +2766,7 @@ index a95a8ea51..ca063cf05 100644
          const autoOption = options[0];
          setTimeout(() => {
            void this.confirm(v.msg_id, toolCall.toolCallId || v.msg_id, autoOption);
-@@ -1312,25 +1325,6 @@ ${collectedResponses.join('\n')}`;
+@@ -1312,25 +1471,6 @@ ${collectedResponses.join('\n')}`;
          return;
        }
 
@@ -2621,7 +2792,7 @@ index a95a8ea51..ca063cf05 100644
        // Autopilot guardrail. In guarded-auto mode (workflows / Autopilot run the
        // bridge in 'default' so it escalates risky tool calls) the run proceeds
        // unattended, so auto-approve every escalated request EXCEPT a catastrophic
-@@ -1490,6 +1484,7 @@ ${collectedResponses.join('\n')}`;
+@@ -1490,6 +1630,7 @@ ${collectedResponses.join('\n')}`;
 
    initAgent(data: AcpAgentManagerData = this.options) {
      if (this.bootstrap) return this.bootstrap;
@@ -2629,7 +2800,7 @@ index a95a8ea51..ca063cf05 100644
 
      this.bootstrapping = true;
      const bootstrapPromise = (async () => {
-@@ -1531,6 +1526,8 @@ ${collectedResponses.join('\n')}`;
+@@ -1531,6 +1672,8 @@ ${collectedResponses.join('\n')}`;
            currentModelId: this.persistedModelId ?? undefined,
            sessionMode: this.currentMode,
            pendingConfigOptions: data.pendingConfigOptions,
@@ -2638,7 +2809,7 @@ index a95a8ea51..ca063cf05 100644
            // Per-conversation MCP scoping (#348): forward to loadBuiltinSessionMcpServers.
            activeMcpServers: data.activeMcpServers,
            // The read-only concierge diagnostics MCP server is Concierge-only.
-@@ -1540,8 +1537,7 @@ ${collectedResponses.join('\n')}`;
+@@ -1540,8 +1683,7 @@ ${collectedResponses.join('\n')}`;
            allowConciergeDiag: isConciergeAssistant(data.presetAssistantId) || isConciergeAssistant(data.customAgentId),
            // Forward team MCP stdio config so AcpAgent.loadBuiltinSessionMcpServers() can inject it
            teamMcpStdioConfig: (data as unknown as Record<string, unknown>).teamMcpStdioConfig as
@@ -2648,7 +2819,47 @@ index a95a8ea51..ca063cf05 100644
          },
          onSessionIdUpdate: (sessionId: string) => {
            // Save ACP session ID to database for resume support
-@@ -2029,44 +2025,61 @@ ${collectedResponses.join('\n')}`;
+@@ -1664,10 +1806,14 @@ ${collectedResponses.join('\n')}`;
+         if (this.isFirstMessage) {
+           const isInTeam = Boolean((this.options as unknown as Record<string, unknown>).teamMcpStdioConfig);
+           const useNativeSkills = this.resolveNativeSkillSupport() && !this.options.customWorkspace;
++          const workspaceHybridRules = await resolveWorkspaceHybridRulesText(this.workspace);
++          const effectivePresetContext = [this.options.presetContext, workspaceHybridRules]
++            .filter((value): value is string => Boolean(value && value.trim().length > 0))
++            .join('\n\n');
+           if (useNativeSkills) {
+             // Native skill discovery via workspace symlinks - inject preset rules + team guide
+             const parts: string[] = [];
+-            if (this.options.presetContext) parts.push(this.options.presetContext);
++            if (effectivePresetContext) parts.push(effectivePresetContext);
+             if (!isInTeam && (await shouldInjectTeamGuideMcp(this.options.backend))) {
+               const [{ getTeamGuidePrompt }, { resolveLeaderAssistantLabel }] = await Promise.all([
+                 import('@process/team/prompts/teamGuidePrompt.ts'),
+@@ -1709,7 +1855,7 @@ ${collectedResponses.join('\n')}`;
+           } else {
+             // Custom workspace or no native support - inject rules + skills via prompt
+             const { content: injectedContent } = await prepareFirstMessageWithSkillsIndex(contentToSend, {
+-              presetContext: this.options.presetContext,
++              presetContext: effectivePresetContext || undefined,
+               enabledSkills: this.options.enabledSkills,
+               excludeBuiltinSkills: this.options.excludeBuiltinSkills,
+               enableTeamGuide: !isInTeam && (await shouldInjectTeamGuideMcp(this.options.backend)),
+@@ -1737,6 +1883,14 @@ ${collectedResponses.join('\n')}`;
+             const rawUserText = data.content.includes(WAYLAND_FILES_MARKER)
+               ? data.content.split(WAYLAND_FILES_MARKER)[0]
+               : data.content;
++            if (!this.isFirstMessage) {
++              const workspaceHybridReminder = await resolveWorkspaceHybridReminderText(this.workspace);
++              if (workspaceHybridReminder) {
++                contentToSend = `${workspaceHybridReminder}
++
++${contentToSend}`;
++              }
++            }
+             // Skills the user added to this chat from the composer - inject once.
+             const pending = await consumePendingSessionSkills(this.conversation_id);
+             if (pending) {
+@@ -2029,44 +2183,61 @@ ${collectedResponses.join('\n')}`;
 
    /**
     * Model info for a backend BEFORE any task/agent exists (cold start on a new
@@ -2734,7 +2945,7 @@ index a95a8ea51..ca063cf05 100644
    }
 
    /**
-@@ -2239,7 +2252,9 @@ ${collectedResponses.join('\n')}`;
+@@ -2239,7 +2410,9 @@ ${collectedResponses.join('\n')}`;
        // spawn's scoped CODEX_HOME (materializeNativeCodexHome) carries it. We no
        // longer write the user's ~/.codex/config.toml. codex-acp has no live
        // set_mode, so the change applies on the next spawn regardless.
@@ -2745,7 +2956,7 @@ index a95a8ea51..ca063cf05 100644
        this.saveSessionMode(mode);
 
        if (this.isYoloMode(prev) && !this.isYoloMode(mode)) {
-@@ -2345,49 +2360,6 @@ ${collectedResponses.join('\n')}`;
+@@ -2345,49 +2518,6 @@ ${collectedResponses.join('\n')}`;
      } catch (error) {
        mainWarn('[AcpAgentManager]', 'Failed to save model ID', error);
      }
@@ -7644,6 +7855,134 @@ index 3b9f8f839..480119ba5 100644
    ],
    cursor: [
      { value: 'agent', label: 'Agent', description: 'Full agent capabilities with tool access' },
+diff --git a/tests/unit/AcpAgentManagerSkillInjection.test.ts b/tests/unit/AcpAgentManagerSkillInjection.test.ts
+index 60cece09d..704e744e2 100644
+--- a/tests/unit/AcpAgentManagerSkillInjection.test.ts
++++ b/tests/unit/AcpAgentManagerSkillInjection.test.ts
+@@ -147,7 +147,10 @@ vi.mock('@process/agent/acp', () => ({
+   })),
+ }));
+
+-import AcpAgentManager from '@process/task/AcpAgentManager';
++import AcpAgentManager, {
++  DEFAULT_WORKSPACE_HYBRID_ROUTES,
++  resolveWorkspaceHybridContextFromRoutes,
++} from '@process/task/AcpAgentManager';
+
+ function createManager(
+   overrides: {
+@@ -155,12 +158,13 @@ function createManager(
+     customWorkspace?: boolean;
+     presetContext?: string;
+     enabledSkills?: string[];
++    workspace?: string;
+   } = {}
+ ) {
+   const data = {
+     conversation_id: 'test-conv',
+     backend: overrides.backend ?? 'claude',
+-    workspace: '/tmp/test-workspace',
++    workspace: overrides.workspace ?? '/tmp/test-workspace',
+     customWorkspace: overrides.customWorkspace,
+     presetContext: overrides.presetContext,
+     enabledSkills: overrides.enabledSkills,
+@@ -192,40 +196,88 @@ describe('AcpAgentManager - first-message skill injection', () => {
+     vi.clearAllMocks();
+   });
+
+-  it('uses native skills (no prompt injection) for supported backend without customWorkspace', async () => {
++
++  it('maps mounted NFS workspaces back to their owner host paths', () => {
++    const srv1 = resolveWorkspaceHybridContextFromRoutes(
++      '/home/ubuntu/Servers/atius-srv-1/GitHub/router-ai-atius',
++      DEFAULT_WORKSPACE_HYBRID_ROUTES
++    );
++    expect(srv1).toMatchObject({
++      hostId: 'atius-srv-1',
++      sshTarget: 'atius-srv-1',
++      remoteWorkspace: '/home/ubuntu/GitHub/router-ai-atius',
++    });
++
++    const horistic = resolveWorkspaceHybridContextFromRoutes(
++      '/home/ubuntu/Servers/horistic-srv/GitHub/strategy-lab',
++      DEFAULT_WORKSPACE_HYBRID_ROUTES
++    );
++    expect(horistic).toMatchObject({
++      hostId: 'horistic-srv',
++      sshTarget: 'horistic-srv',
++      remoteWorkspace: '/home/horistic/GitHub/strategy-lab',
++    });
++  });
++
++  it('uses native skills and injects hybrid workspace rules for supported NFS mounts', async () => {
+     const manager = createManager({
+       backend: 'claude',
+       customWorkspace: false,
+       presetContext: 'You are helpful.',
+       enabledSkills: ['pptx'],
++      workspace: '/home/ubuntu/Servers/atius-srv-1/GitHub/router-ai-atius',
+     });
+
+     await sendFirstMessage(manager);
+
+     expect(mockPrepareFirstMessage).not.toHaveBeenCalled();
+-    // Should have injected presetContext directly into content
+     const sentContent = mockAgentSendMessage.mock.calls[0][0].content as string;
+     expect(sentContent).toContain('[Assistant Rules');
+     expect(sentContent).toContain('You are helpful.');
++    expect(sentContent).toContain('[Workspace Execution Mode]');
++    expect(sentContent).toContain('ssh atius-srv-1');
++    expect(sentContent).toContain('/home/ubuntu/GitHub/router-ai-atius');
+     expect(sentContent).toContain('[User Request]');
+   });
+
++  it('prepends a short hybrid reminder on later turns in NFS workspaces', async () => {
++    const manager = createManager({
++      backend: 'claude',
++      customWorkspace: false,
++      workspace: '/home/ubuntu/Servers/atius-srv-2/GitHub/ats',
++    });
++
++    await sendFirstMessage(manager, 'Prime turn');
++    await manager.sendMessage({ content: 'Run the validation command', msg_id: 'msg-2' });
++
++    const secondTurnContent = mockAgentSendMessage.mock.calls[1][0].content as string;
++    expect(secondTurnContent).toContain('[Workspace Execution Mode]');
++    expect(secondTurnContent).toContain('Hybrid default for this folder');
++    expect(secondTurnContent).toContain('atius-srv-2:/home/ubuntu/GitHub/ats');
++  });
++
+   it('falls back to prompt injection for supported backend WITH customWorkspace', async () => {
+     const manager = createManager({
+       backend: 'claude',
+       customWorkspace: true,
+       presetContext: 'You are helpful.',
+       enabledSkills: ['pptx'],
++      workspace: '/home/ubuntu/Servers/atius-srv-1/GitHub/router-ai-atius',
+     });
+
+     await sendFirstMessage(manager);
+
+-    expect(mockPrepareFirstMessage).toHaveBeenCalledWith('Hello', {
+-      presetContext: 'You are helpful.',
+-      enabledSkills: ['pptx'],
+-      enableTeamGuide: true,
+-      backend: 'claude',
+-    });
++    expect(mockPrepareFirstMessage).toHaveBeenCalledWith(
++      'Hello',
++      expect.objectContaining({
++        enabledSkills: ['pptx'],
++        enableTeamGuide: true,
++        backend: 'claude',
++        presetContext: expect.stringContaining('You are helpful.'),
++      })
++    );
++    expect(mockPrepareFirstMessage.mock.calls[0][1]?.presetContext).toContain('[Workspace Execution Mode]');
++    expect(mockPrepareFirstMessage.mock.calls[0][1]?.presetContext).toContain('/home/ubuntu/GitHub/router-ai-atius');
+   });
+
+   it('falls back to prompt injection for unsupported backend regardless of customWorkspace', async () => {
 diff --git a/tests/unit/AgentPillBar.dom.test.tsx b/tests/unit/AgentPillBar.dom.test.tsx
 index a4b0b5ed7..69288fd2f 100644
 --- a/tests/unit/AgentPillBar.dom.test.tsx

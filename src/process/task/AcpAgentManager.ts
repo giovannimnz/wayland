@@ -83,7 +83,7 @@ import { readCodexStaticModelInfo } from '@process/task/codexStaticModelInfo';
 import { readConnectedFluxKey } from '@process/connectors/fluxKey';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import yaml from 'js-yaml';
 
 interface AcpAgentManagerData {
@@ -126,6 +126,152 @@ interface AcpAgentManagerData {
 }
 
 type StaticModelOption = { id: string; label: string };
+
+type WorkspaceHybridRoute = {
+  hostId: string;
+  mountPath: string;
+  remoteRoot: string;
+  sshTarget?: string;
+};
+
+type ResolvedWorkspaceHybridContext = WorkspaceHybridRoute & {
+  sshTarget: string;
+  localWorkspace: string;
+  remoteWorkspace: string;
+};
+
+const WORKSPACE_HYBRID_ROUTES_CONFIG_KEY = 'atius.workspaceHybridRoutes';
+export const DEFAULT_WORKSPACE_HYBRID_ROUTES: WorkspaceHybridRoute[] = [
+  {
+    hostId: 'atius-srv-1',
+    mountPath: '/home/ubuntu/Servers/atius-srv-1/GitHub',
+    remoteRoot: '/home/ubuntu/GitHub',
+    sshTarget: 'atius-srv-1',
+  },
+  {
+    hostId: 'atius-srv-2',
+    mountPath: '/home/ubuntu/Servers/atius-srv-2/GitHub',
+    remoteRoot: '/home/ubuntu/GitHub',
+    sshTarget: 'atius-srv-2',
+  },
+  {
+    hostId: 'horistic-srv',
+    mountPath: '/home/ubuntu/Servers/horistic-srv/GitHub',
+    remoteRoot: '/home/horistic/GitHub',
+    sshTarget: 'horistic-srv',
+  },
+];
+
+let workspaceHybridRoutesCache: WorkspaceHybridRoute[] | null = null;
+
+function normalizePosixPath(value: string): string {
+  const normalized = posix.normalize(value.trim());
+  if (!normalized || normalized === '.') return '/';
+  return normalized.length > 1 && normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;
+}
+
+function toWorkspaceHybridRoute(value: unknown): WorkspaceHybridRoute | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const hostId = typeof record.hostId === 'string' ? record.hostId.trim() : '';
+  const mountPath = typeof record.mountPath === 'string' ? record.mountPath.trim() : '';
+  const remoteRoot = typeof record.remoteRoot === 'string' ? record.remoteRoot.trim() : '';
+  const sshTarget = typeof record.sshTarget === 'string' ? record.sshTarget.trim() : '';
+  if (!hostId || !mountPath || !remoteRoot) return null;
+  return {
+    hostId,
+    mountPath: normalizePosixPath(mountPath),
+    remoteRoot: normalizePosixPath(remoteRoot),
+    ...(sshTarget ? { sshTarget } : {}),
+  };
+}
+
+function mergeWorkspaceHybridRoutes(configuredRoutes: WorkspaceHybridRoute[]): WorkspaceHybridRoute[] {
+  const byMountPath = new Map<string, WorkspaceHybridRoute>();
+  for (const route of DEFAULT_WORKSPACE_HYBRID_ROUTES) {
+    byMountPath.set(route.mountPath, route);
+  }
+  for (const route of configuredRoutes) {
+    byMountPath.set(route.mountPath, route);
+  }
+  return Array.from(byMountPath.values());
+}
+
+async function loadWorkspaceHybridRoutes(): Promise<WorkspaceHybridRoute[]> {
+  if (workspaceHybridRoutesCache) return workspaceHybridRoutesCache;
+  try {
+    const raw = await (ProcessConfig as unknown as { get: (key: string) => Promise<unknown> }).get(
+      WORKSPACE_HYBRID_ROUTES_CONFIG_KEY
+    );
+    const configuredRoutes = Array.isArray(raw)
+      ? raw.map((entry) => toWorkspaceHybridRoute(entry)).filter((entry): entry is WorkspaceHybridRoute => entry !== null)
+      : [];
+    workspaceHybridRoutesCache = mergeWorkspaceHybridRoutes(configuredRoutes);
+  } catch {
+    workspaceHybridRoutesCache = [...DEFAULT_WORKSPACE_HYBRID_ROUTES];
+  }
+  return workspaceHybridRoutesCache;
+}
+
+export function resolveWorkspaceHybridContextFromRoutes(
+  workspace: string | undefined,
+  routes: WorkspaceHybridRoute[]
+): ResolvedWorkspaceHybridContext | null {
+  const normalizedWorkspace = typeof workspace === 'string' ? normalizePosixPath(workspace) : '';
+  if (!normalizedWorkspace || normalizedWorkspace === '/') return null;
+
+  for (const route of routes) {
+    const mountPath = normalizePosixPath(route.mountPath);
+    if (normalizedWorkspace !== mountPath && !normalizedWorkspace.startsWith(`${mountPath}/`)) {
+      continue;
+    }
+
+    const relativePath = posix.relative(mountPath, normalizedWorkspace);
+    const remoteWorkspace = !relativePath || relativePath === '.' ? route.remoteRoot : posix.join(route.remoteRoot, relativePath);
+    return {
+      ...route,
+      sshTarget: route.sshTarget?.trim() || route.hostId,
+      localWorkspace: normalizedWorkspace,
+      remoteWorkspace: normalizePosixPath(remoteWorkspace),
+    };
+  }
+
+  return null;
+}
+
+async function resolveWorkspaceHybridContext(workspace?: string): Promise<ResolvedWorkspaceHybridContext | null> {
+  const routes = await loadWorkspaceHybridRoutes();
+  return resolveWorkspaceHybridContextFromRoutes(workspace, routes);
+}
+
+function buildWorkspaceHybridRulesText(context: ResolvedWorkspaceHybridContext): string {
+  return [
+    '[Workspace Execution Mode]',
+    `This workspace is an NFS mirror of ${context.hostId}.`,
+    `- Edit files directly in the mounted workspace: ${context.localWorkspace}`,
+    `- Treat ${context.remoteWorkspace} on ${context.sshTarget} as the owner-host path for validation.`,
+    `- Use hybrid mode by default: read/search/diff locally, but run test/build/dev-server/runtime validation commands on ${context.sshTarget}.`,
+    `- Prefer the host alias ${context.sshTarget}; do not use a reserve 10.100.100.x address when the OCI/DRG alias is available.`,
+    `- Canonical remote validation shape: ssh ${context.sshTarget} 'cd ${context.remoteWorkspace} && <command>'`,
+  ].join('\n');
+}
+
+function buildWorkspaceHybridReminderText(context: ResolvedWorkspaceHybridContext): string {
+  return [
+    '[Workspace Execution Mode]',
+    `Hybrid default for this folder: edit in ${context.localWorkspace}; validate on ${context.sshTarget}:${context.remoteWorkspace}.`,
+  ].join('\n');
+}
+
+async function resolveWorkspaceHybridRulesText(workspace?: string): Promise<string> {
+  const context = await resolveWorkspaceHybridContext(workspace);
+  return context ? buildWorkspaceHybridRulesText(context) : '';
+}
+
+async function resolveWorkspaceHybridReminderText(workspace?: string): Promise<string> {
+  const context = await resolveWorkspaceHybridContext(workspace);
+  return context ? buildWorkspaceHybridReminderText(context) : '';
+}
 
 function labelForModel(models: StaticModelOption[], modelId: string | null): string | null {
   if (!modelId) return null;
@@ -1660,10 +1806,14 @@ ${collectedResponses.join('\n')}`;
         if (this.isFirstMessage) {
           const isInTeam = Boolean((this.options as unknown as Record<string, unknown>).teamMcpStdioConfig);
           const useNativeSkills = this.resolveNativeSkillSupport() && !this.options.customWorkspace;
+          const workspaceHybridRules = await resolveWorkspaceHybridRulesText(this.workspace);
+          const effectivePresetContext = [this.options.presetContext, workspaceHybridRules]
+            .filter((value): value is string => Boolean(value && value.trim().length > 0))
+            .join('\n\n');
           if (useNativeSkills) {
             // Native skill discovery via workspace symlinks - inject preset rules + team guide
             const parts: string[] = [];
-            if (this.options.presetContext) parts.push(this.options.presetContext);
+            if (effectivePresetContext) parts.push(effectivePresetContext);
             if (!isInTeam && (await shouldInjectTeamGuideMcp(this.options.backend))) {
               const [{ getTeamGuidePrompt }, { resolveLeaderAssistantLabel }] = await Promise.all([
                 import('@process/team/prompts/teamGuidePrompt.ts'),
@@ -1705,7 +1855,7 @@ ${collectedResponses.join('\n')}`;
           } else {
             // Custom workspace or no native support - inject rules + skills via prompt
             const { content: injectedContent } = await prepareFirstMessageWithSkillsIndex(contentToSend, {
-              presetContext: this.options.presetContext,
+              presetContext: effectivePresetContext || undefined,
               enabledSkills: this.options.enabledSkills,
               excludeBuiltinSkills: this.options.excludeBuiltinSkills,
               enableTeamGuide: !isInTeam && (await shouldInjectTeamGuideMcp(this.options.backend)),
@@ -1733,6 +1883,14 @@ ${collectedResponses.join('\n')}`;
             const rawUserText = data.content.includes(WAYLAND_FILES_MARKER)
               ? data.content.split(WAYLAND_FILES_MARKER)[0]
               : data.content;
+            if (!this.isFirstMessage) {
+              const workspaceHybridReminder = await resolveWorkspaceHybridReminderText(this.workspace);
+              if (workspaceHybridReminder) {
+                contentToSend = `${workspaceHybridReminder}
+
+${contentToSend}`;
+              }
+            }
             // Skills the user added to this chat from the composer - inject once.
             const pending = await consumePendingSessionSkills(this.conversation_id);
             if (pending) {

@@ -54,6 +54,7 @@ Tracked ATIUS source customizations live in these files:
 - `src/common/types/codex/codexModes.ts`
 - `src/common/types/codex/types/eventData.ts`
 - `src/process/task/AcpAgentManager.ts`
+- `tests/unit/AcpAgentManagerSkillInjection.test.ts`
 - `src/process/task/WCoreManager.ts`
 - `src/process/task/claudeConfig.ts`
 - `src/process/task/codexConfig.ts`
@@ -153,6 +154,7 @@ bash scripts/atius-update.sh
 - exposes the ATIUS Codex ACP fork through `/home/ubuntu/.local/bin/codex-acp-atius`;
 - syncs the live Wayland storage into `/home/ubuntu/.config/Wayland/config/wayland-config.txt`;
 - regenerates `model.config` from the `ubuntu` Codex runtime;
+- stores `atius.workspaceHybridRoutes` and defaults NFS GitHub mounts to hybrid execution guidance (edit on the mount, validate on the owner host via SSH alias);
 - prunes generated `codex-agent-profile-*` rows from `acp.customAgents` while preserving user-owned custom ACP agents;
 - mirrors `/home/ubuntu/.codex/skills/*/SKILL.md` into `/home/ubuntu/.config/Wayland/config/skills/` as symlinks;
 - generates `slash.customCommands` entries that insert `$skill-name` for Codex skills, including GSD/SDD commands;
@@ -164,7 +166,7 @@ bash scripts/atius-update.sh
 
 ```bash
 NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/renderer/guid/firstSafeCuratedModel.test.ts
-NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/AgentPillBar.dom.test.tsx tests/unit/renderer/guidModelSelector.dom.test.tsx tests/unit/useGuidSend.dom.test.ts tests/unit/process/task/codexNativeSandbox.test.ts tests/unit/process/task/codexConfigEffort.test.ts
+NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/AcpAgentManagerSkillInjection.test.ts tests/unit/AgentPillBar.dom.test.tsx tests/unit/renderer/guidModelSelector.dom.test.tsx tests/unit/useGuidSend.dom.test.ts tests/unit/process/task/codexNativeSandbox.test.ts tests/unit/process/task/codexConfigEffort.test.ts
 bun test tests/unit/webserver/cookieOptions.test.ts tests/unit/webserver/detectNetworkContext.test.ts
 npm run typecheck
 bash scripts/atius-build-renderer-overlay.sh
