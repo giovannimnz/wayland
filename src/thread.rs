@@ -45,7 +45,7 @@ use codex_protocol::{
         ActivePermissionProfile, AdditionalPermissionProfile, PermissionProfile, ResponseItem,
         WebSearchAction,
     },
-    openai_models::{ModelPreset, ReasoningEffort},
+    openai_models::{ModelPreset, ReasoningEffort, ReasoningEffortPreset},
     parse_command::ParsedCommand,
     permissions::{
         FileSystemAccessMode, FileSystemPath, FileSystemSandboxEntry, FileSystemSpecialPath,
@@ -116,6 +116,111 @@ const INIT_COMMAND_PROMPT: &str = include_str!("./prompt_for_init_command.md");
 const CODEX_READ_ONLY_PROFILE_ID: &str = ":read-only";
 const CODEX_WORKSPACE_PROFILE_ID: &str = ":workspace";
 const CODEX_DANGER_NO_SANDBOX_PROFILE_ID: &str = ":danger-no-sandbox";
+
+// Codex Desktop exposes Advanced as a six-position intelligence ladder. It is
+// intentionally not the Cartesian product of every visible model and effort,
+// and it intentionally omits Sol Max.
+const CODEX_56_DESKTOP_POWER_LADDER: [(&str, ReasoningEffort); 6] = [
+    ("gpt-5.6-terra", ReasoningEffort::Low),
+    ("gpt-5.6-sol", ReasoningEffort::Low),
+    ("gpt-5.6-sol", ReasoningEffort::Medium),
+    ("gpt-5.6-sol", ReasoningEffort::High),
+    ("gpt-5.6-sol", ReasoningEffort::XHigh),
+    ("gpt-5.6-sol", ReasoningEffort::Ultra),
+];
+
+type PowerStep<'a> = (&'a ModelPreset, &'a ReasoningEffortPreset);
+
+fn codex_power_steps<'a>(
+    visible_presets: &'a [ModelPreset],
+    current_preset: &'a ModelPreset,
+) -> Vec<PowerStep<'a>> {
+    let has_codex_56 = visible_presets
+        .iter()
+        .any(|preset| preset.id.starts_with("gpt-5.6-") || preset.model.starts_with("gpt-5.6-"));
+    let desktop_steps = CODEX_56_DESKTOP_POWER_LADDER
+        .iter()
+        .filter_map(|(model_id, effort)| {
+            let preset = visible_presets
+                .iter()
+                .find(|preset| preset.id == *model_id || preset.model == *model_id)?;
+            let supported = preset
+                .supported_reasoning_efforts
+                .iter()
+                .find(|supported| supported.effort == *effort)?;
+            Some((preset, supported))
+        })
+        .collect::<Vec<_>>();
+
+    // A partially-enabled 5.6 catalog must never fall back to Luna or expose
+    // Max in this aggregate control. Unsupported ladder positions simply stay
+    // absent. Older catalogs retain a useful current-model-only fallback.
+    if has_codex_56 {
+        return desktop_steps;
+    }
+
+    current_preset
+        .supported_reasoning_efforts
+        .iter()
+        .map(|effort| (current_preset, effort))
+        .collect()
+}
+
+fn current_power_step_value(
+    steps: &[PowerStep<'_>],
+    current_preset: &ModelPreset,
+    current_effort: &ReasoningEffort,
+) -> Option<String> {
+    let exact = steps.iter().find(|(preset, effort)| {
+        (preset.id == current_preset.id || preset.model == current_preset.model)
+            && effort.effort == *current_effort
+    });
+    if let Some((preset, effort)) = exact {
+        return Some(format!("{}:{}", preset.id, effort.effort));
+    }
+
+    let target_effort = match current_effort {
+        ReasoningEffort::None | ReasoningEffort::Minimal | ReasoningEffort::Low => {
+            ReasoningEffort::Low
+        }
+        ReasoningEffort::Medium => ReasoningEffort::Medium,
+        ReasoningEffort::High => ReasoningEffort::High,
+        ReasoningEffort::XHigh | ReasoningEffort::Max => ReasoningEffort::XHigh,
+        ReasoningEffort::Ultra => ReasoningEffort::Ultra,
+        ReasoningEffort::Custom(_) => ReasoningEffort::Medium,
+    };
+    let preferred_model = if target_effort == ReasoningEffort::Low {
+        "gpt-5.6-terra"
+    } else {
+        "gpt-5.6-sol"
+    };
+    let nearest = steps
+        .iter()
+        .find(|(preset, effort)| {
+            (preset.id == preferred_model || preset.model == preferred_model)
+                && effort.effort == target_effort
+        })
+        .or_else(|| {
+            steps
+                .iter()
+                .find(|(_, effort)| effort.effort == target_effort)
+        })
+        .or_else(|| {
+            if matches!(
+                current_effort,
+                ReasoningEffort::High
+                    | ReasoningEffort::XHigh
+                    | ReasoningEffort::Max
+                    | ReasoningEffort::Ultra
+            ) {
+                steps.last()
+            } else {
+                steps.first()
+            }
+        })?;
+
+    Some(format!("{}:{}", nearest.0.id, nearest.1.effort))
+}
 
 fn session_mode_id_for_active_profile(profile_id: &str) -> Option<&'static str> {
     match profile_id {
@@ -3116,32 +3221,33 @@ impl<A: Auth> ThreadActor<A> {
         if let (Some(preset), Some(current_effort)) =
             (current_preset.as_ref(), current_reasoning_effort.as_ref())
         {
-            let power_options = visible_presets
+            let power_steps = codex_power_steps(&visible_presets, preset);
+            let power_options = power_steps
                 .iter()
-                .flat_map(|model| {
-                    model.supported_reasoning_efforts.iter().map(move |effort| {
-                        SessionConfigSelectOption::new(
-                            format!("{}:{}", model.id, effort.effort),
-                            format!(
-                                "{} {}",
-                                model.display_name,
-                                effort.effort.to_string().to_title_case()
-                            ),
-                        )
-                        .description(effort.description.clone())
-                    })
+                .map(|(model, effort)| {
+                    SessionConfigSelectOption::new(
+                        format!("{}:{}", model.id, effort.effort),
+                        format!(
+                            "{} {}",
+                            model.display_name,
+                            effort.effort.to_string().to_title_case()
+                        ),
+                    )
+                    .description(effort.description.clone())
                 })
                 .collect::<Vec<_>>();
 
-            if !power_options.is_empty() {
+            if let Some(current_power_value) =
+                current_power_step_value(&power_steps, preset, current_effort)
+            {
                 options.push(
                     SessionConfigOption::select(
                         "power",
                         "Power",
-                        format!("{}:{current_effort}", preset.id),
+                        current_power_value,
                         power_options,
                     )
-                    .description("Choose a model and reasoning effort together"),
+                    .description("Choose a Codex Desktop-compatible model and reasoning step"),
                 );
             }
         }
@@ -4570,6 +4676,71 @@ mod tests {
         assert!(!mode_trusts_project("read-only"));
         assert!(mode_trusts_project("auto"));
         assert!(mode_trusts_project("full-access"));
+    }
+
+    fn power_test_preset(id: &str, efforts: &[&str]) -> ModelPreset {
+        serde_json::from_value(serde_json::json!({
+            "id": id,
+            "model": id,
+            "display_name": id,
+            "description": "power ladder test model",
+            "default_reasoning_effort": efforts[0],
+            "supported_reasoning_efforts": efforts
+                .iter()
+                .map(|effort| serde_json::json!({
+                    "effort": effort,
+                    "description": format!("{effort} reasoning")
+                }))
+                .collect::<Vec<_>>(),
+            "supports_personality": false,
+            "additional_speed_tiers": [],
+            "service_tiers": [],
+            "default_service_tier": null,
+            "is_default": false,
+            "upgrade": null,
+            "show_in_picker": true,
+            "availability_nux": null,
+            "supported_in_api": true,
+            "input_modalities": ["text", "image"]
+        }))
+        .expect("valid power test preset")
+    }
+
+    #[test]
+    fn codex_56_power_ladder_matches_desktop_six_steps() {
+        let efforts = ["low", "medium", "high", "xhigh", "max", "ultra"];
+        let presets = vec![
+            power_test_preset("gpt-5.6-sol", &efforts),
+            power_test_preset("gpt-5.6-terra", &efforts),
+            power_test_preset("gpt-5.6-luna", &["low", "medium", "high", "xhigh", "max"]),
+        ];
+        let steps = codex_power_steps(&presets, &presets[2]);
+        let values = steps
+            .iter()
+            .map(|(preset, effort)| format!("{}:{}", preset.id, effort.effort))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            values,
+            vec![
+                "gpt-5.6-terra:low",
+                "gpt-5.6-sol:low",
+                "gpt-5.6-sol:medium",
+                "gpt-5.6-sol:high",
+                "gpt-5.6-sol:xhigh",
+                "gpt-5.6-sol:ultra",
+            ]
+        );
+        assert!(values.iter().all(|value| !value.ends_with(":max")));
+        assert!(values.iter().all(|value| !value.contains("luna")));
+        assert_eq!(
+            current_power_step_value(&steps, &presets[2], &ReasoningEffort::XHigh).as_deref(),
+            Some("gpt-5.6-sol:xhigh")
+        );
+        assert_eq!(
+            current_power_step_value(&steps, &presets[0], &ReasoningEffort::Max).as_deref(),
+            Some("gpt-5.6-sol:xhigh")
+        );
     }
 
     #[tokio::test]
