@@ -359,6 +359,43 @@ describe('groupConversationsByWorkspace', () => {
     expect(result[0].items[0].workspaceGroup?.displayName).toBe('My Cool App');
   });
 
+  it('groups a project conversation even when customWorkspace is false', () => {
+    const conversations: TChatConversation[] = [
+      {
+        id: 'conv-project',
+        title: 'Project chat',
+        createdAt: 1000,
+        updatedAt: 1000,
+        extra: {
+          workspace: '/servers/srv-1/router-ai-atius',
+          customWorkspace: false,
+          projectId: 'p-router',
+        },
+        userMsgCount: 0,
+      },
+    ];
+
+    const projects = [
+      {
+        id: 'p-router',
+        name: 'Router AI Atius SRV-1',
+        workspace: '/servers/srv-1/router-ai-atius',
+        pinned: false,
+        createTime: 0,
+        modifyTime: 0,
+      },
+    ] as unknown as Parameters<typeof groupConversationsByWorkspace>[2];
+
+    const result = groupConversationsByWorkspace(conversations, mockT, projects);
+    expect(result[0].items).toHaveLength(1);
+    expect(result[0].items[0].type).toBe('workspace');
+    expect(result[0].items[0].workspaceGroup?.workspace).toBe('/servers/srv-1/router-ai-atius');
+    expect(result[0].items[0].workspaceGroup?.displayName).toBe('Router AI Atius SRV-1');
+    expect(result[0].items[0].workspaceGroup?.conversations.map((conversation) => conversation.id)).toEqual([
+      'conv-project',
+    ]);
+  });
+
   it('falls back to the basename display when no project matches the workspace', () => {
     const conversations: TChatConversation[] = [
       {

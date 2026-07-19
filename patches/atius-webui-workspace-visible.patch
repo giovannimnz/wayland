@@ -27042,7 +27042,7 @@ index 000000000..41de3e5a0
 +history during an incident.
 diff --git a/docs/guides/atius-fork-runtime.md b/docs/guides/atius-fork-runtime.md
 new file mode 100644
-index 000000000..daf7227e4
+index 000000000..409b58278
 --- /dev/null
 +++ b/docs/guides/atius-fork-runtime.md
 @@ -0,0 +1,273 @@
@@ -27164,7 +27164,7 @@ index 000000000..daf7227e4
 +- The GUID agent pill bar exposes collapsed agents by accessible name so Hermes/Codex can be selected by keyboard and automation.
 +- Mobile GUID controls wrap visibly instead of hiding later model/effort/permission or intent options behind horizontal overflow.
 +- The left sidebar never exposes a bottom horizontal scrollbar; long recents and footer controls truncate or compact inside the available width.
-+- Project conversations remain visible and counted in global Recent Chats; team conversations and health checks stay on their owning/internal surfaces.
++- Project conversations remain visible and counted in global Recent Chats, grouped under the Project name even when the Project workspace chat has `customWorkspace=false`; team conversations and health checks stay on their owning/internal surfaces.
 +- The desktop left sidebar divider is a real resize handle: drag persists `wayland:sidebar-width` while preserving the rail snap behavior below the collapse threshold.
 +
 +## IJFW Memory (Ferrox Labs)
@@ -31823,10 +31823,33 @@ index b6ce92bf0..69ab00075 100644
          conversationsState = filteredData;
          // Use ALL conversation IDs (including team/healthCheck) so the
 diff --git a/src/renderer/pages/conversation/GroupedHistory/utils/groupingHelpers.ts b/src/renderer/pages/conversation/GroupedHistory/utils/groupingHelpers.ts
-index 9b98fac65..724800176 100644
+index 9b98fac65..0247633cc 100644
 --- a/src/renderer/pages/conversation/GroupedHistory/utils/groupingHelpers.ts
 +++ b/src/renderer/pages/conversation/GroupedHistory/utils/groupingHelpers.ts
-@@ -96,10 +96,10 @@ export const groupConversationsByWorkspace = (
+@@ -41,14 +41,20 @@ export const groupConversationsByWorkspace = (
+   const projectNameByWorkspace = new Map<string, string>(
+     projects.filter((p) => p.workspace).map((p) => [p.workspace as string, p.name])
+   );
++  const projectById = new Map(projects.map((project) => [project.id, project]));
+   const allWorkspaceGroups = new Map<string, TChatConversation[]>();
+   const withoutWorkspaceConvs: TChatConversation[] = [];
+
+   conversations.forEach((conv) => {
+-    const workspace = conv.extra?.workspace;
++    const projectId = (conv.extra as { projectId?: string } | undefined)?.projectId;
++    const project = projectId ? projectById.get(projectId) : undefined;
++    const workspace = project?.workspace ?? conv.extra?.workspace;
+     const customWorkspace = conv.extra?.customWorkspace;
+
+-    if (customWorkspace && workspace) {
++    // A project workspace is an explicit grouping boundary even when the chat
++    // itself was created with customWorkspace=false (for example via the
++    // Projects surface using an NFS-backed workspace).
++    if (workspace && (customWorkspace || project?.workspace)) {
+       if (!allWorkspaceGroups.has(workspace)) {
+         allWorkspaceGroups.set(workspace, []);
+       }
+@@ -96,10 +102,10 @@ export const groupConversationsByWorkspace = (
    ];
  };
 
@@ -31841,7 +31864,7 @@ index 9b98fac65..724800176 100644
  };
 
  export const buildGroupedHistory = (
-@@ -107,8 +107,8 @@ export const buildGroupedHistory = (
+@@ -107,8 +113,8 @@ export const buildGroupedHistory = (
    t: (key: string) => string,
    projects: IProject[] = []
  ): GroupedHistoryResult => {
@@ -35744,10 +35767,54 @@ index 2c29232b2..fb3acd272 100644
 
    it('keeps the body (WorkspaceGroupedHistory stub) always visible - no collapse affordance', async () => {
 diff --git a/tests/unit/renderer/groupingHelpers.test.ts b/tests/unit/renderer/groupingHelpers.test.ts
-index 6a20e6583..57eca6843 100644
+index 6a20e6583..e42de8712 100644
 --- a/tests/unit/renderer/groupingHelpers.test.ts
 +++ b/tests/unit/renderer/groupingHelpers.test.ts
-@@ -460,7 +460,7 @@ describe('buildGroupedHistory', () => {
+@@ -359,6 +359,43 @@ describe('groupConversationsByWorkspace', () => {
+     expect(result[0].items[0].workspaceGroup?.displayName).toBe('My Cool App');
+   });
+
++  it('groups a project conversation even when customWorkspace is false', () => {
++    const conversations: TChatConversation[] = [
++      {
++        id: 'conv-project',
++        title: 'Project chat',
++        createdAt: 1000,
++        updatedAt: 1000,
++        extra: {
++          workspace: '/servers/srv-1/router-ai-atius',
++          customWorkspace: false,
++          projectId: 'p-router',
++        },
++        userMsgCount: 0,
++      },
++    ];
++
++    const projects = [
++      {
++        id: 'p-router',
++        name: 'Router AI Atius SRV-1',
++        workspace: '/servers/srv-1/router-ai-atius',
++        pinned: false,
++        createTime: 0,
++        modifyTime: 0,
++      },
++    ] as unknown as Parameters<typeof groupConversationsByWorkspace>[2];
++
++    const result = groupConversationsByWorkspace(conversations, mockT, projects);
++    expect(result[0].items).toHaveLength(1);
++    expect(result[0].items[0].type).toBe('workspace');
++    expect(result[0].items[0].workspaceGroup?.workspace).toBe('/servers/srv-1/router-ai-atius');
++    expect(result[0].items[0].workspaceGroup?.displayName).toBe('Router AI Atius SRV-1');
++    expect(result[0].items[0].workspaceGroup?.conversations.map((conversation) => conversation.id)).toEqual([
++      'conv-project',
++    ]);
++  });
++
+   it('falls back to the basename display when no project matches the workspace', () => {
+     const conversations: TChatConversation[] = [
+       {
+@@ -460,7 +497,7 @@ describe('buildGroupedHistory', () => {
      expect(result.timelineSections[0].items[0].conversation?.id).toBe('conv-1');
    });
 
@@ -35756,7 +35823,7 @@ index 6a20e6583..57eca6843 100644
      const conversations: TChatConversation[] = [
        {
          id: 'conv-1',
-@@ -491,8 +491,10 @@ describe('buildGroupedHistory', () => {
+@@ -491,8 +528,10 @@ describe('buildGroupedHistory', () => {
      const result = buildGroupedHistory(conversations, mockT);
 
      expect(result.pinnedConversations).toHaveLength(0);

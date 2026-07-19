@@ -116,7 +116,7 @@ Generated artifacts are intentionally not tracked:
 - The GUID agent pill bar exposes collapsed agents by accessible name so Hermes/Codex can be selected by keyboard and automation.
 - Mobile GUID controls wrap visibly instead of hiding later model/effort/permission or intent options behind horizontal overflow.
 - The left sidebar never exposes a bottom horizontal scrollbar; long recents and footer controls truncate or compact inside the available width.
-- Project conversations remain visible and counted in global Recent Chats; team conversations and health checks stay on their owning/internal surfaces.
+- Project conversations remain visible and counted in global Recent Chats, grouped under the Project name even when the Project workspace chat has `customWorkspace=false`; team conversations and health checks stay on their owning/internal surfaces.
 - The desktop left sidebar divider is a real resize handle: drag persists `wayland:sidebar-width` while preserving the rail snap behavior below the collapse threshold.
 
 ## IJFW Memory (Ferrox Labs)

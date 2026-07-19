@@ -41,14 +41,20 @@ export const groupConversationsByWorkspace = (
   const projectNameByWorkspace = new Map<string, string>(
     projects.filter((p) => p.workspace).map((p) => [p.workspace as string, p.name])
   );
+  const projectById = new Map(projects.map((project) => [project.id, project]));
   const allWorkspaceGroups = new Map<string, TChatConversation[]>();
   const withoutWorkspaceConvs: TChatConversation[] = [];
 
   conversations.forEach((conv) => {
-    const workspace = conv.extra?.workspace;
+    const projectId = (conv.extra as { projectId?: string } | undefined)?.projectId;
+    const project = projectId ? projectById.get(projectId) : undefined;
+    const workspace = project?.workspace ?? conv.extra?.workspace;
     const customWorkspace = conv.extra?.customWorkspace;
 
-    if (customWorkspace && workspace) {
+    // A project workspace is an explicit grouping boundary even when the chat
+    // itself was created with customWorkspace=false (for example via the
+    // Projects surface using an NFS-backed workspace).
+    if (workspace && (customWorkspace || project?.workspace)) {
       if (!allWorkspaceGroups.has(workspace)) {
         allWorkspaceGroups.set(workspace, []);
       }
