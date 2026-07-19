@@ -31985,10 +31985,10 @@ index e6711b8f9..dd662c5d4 100644
      if (item.isDirectory) {
 diff --git a/src/renderer/components/workspace/WorkspaceComputerIndicator.tsx b/src/renderer/components/workspace/WorkspaceComputerIndicator.tsx
 new file mode 100644
-index 000000000..75fe6ce78
+index 000000000..67cfdf4b4
 --- /dev/null
 +++ b/src/renderer/components/workspace/WorkspaceComputerIndicator.tsx
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,36 @@
 +import type { WorkspaceComputerStatus } from '@/common/utils/workspaceComputer';
 +import { Circle } from 'lucide-react';
 +import React from 'react';
@@ -32001,6 +32001,7 @@ index 000000000..75fe6ce78
 +  if (!status) return null;
 +
 +  const statusLabel = status.connected ? 'connected' : 'disconnected';
++  const connectedColor = 'var(--success, #34d399)';
 +  return (
 +    <span
 +      className='flex items-center gap-6px shrink-0 text-11px font-500 leading-16px text-t-tertiary'
@@ -32012,10 +32013,11 @@ index 000000000..75fe6ce78
 +        <Circle
 +          aria-hidden='true'
 +          data-testid='workspace-computer-connected'
-+          size={7}
++          size={8}
 +          strokeWidth={0}
-+          fill='currentColor'
-+          className='text-[rgb(var(--success-6))]'
++          color={connectedColor}
++          fill={connectedColor}
++          className='shrink-0'
 +        />
 +      )}
 +    </span>
@@ -32045,10 +32047,10 @@ index 267fd8679..fe547ec02 100644
      />
 diff --git a/src/renderer/hooks/useWorkspaceComputerStatuses.ts b/src/renderer/hooks/useWorkspaceComputerStatuses.ts
 new file mode 100644
-index 000000000..3b6100178
+index 000000000..f81122727
 --- /dev/null
 +++ b/src/renderer/hooks/useWorkspaceComputerStatuses.ts
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,46 @@
 +import { ipcBridge } from '@/common';
 +import type { WorkspaceComputerStatus } from '@/common/utils/workspaceComputer';
 +import { useEffect, useMemo, useState } from 'react';
@@ -32084,7 +32086,9 @@ index 000000000..3b6100178
 +    };
 +
 +    void refresh();
-+    const timer = window.setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
++    const timer = window.setInterval((): void => {
++      void refresh();
++    }, REFRESH_INTERVAL_MS);
 +    return () => {
 +      active = false;
 +      window.clearInterval(timer);
@@ -35868,10 +35872,10 @@ index a837db695..872d740a8 100644
  });
 diff --git a/tests/unit/WorkspaceComputerIndicator.dom.test.tsx b/tests/unit/WorkspaceComputerIndicator.dom.test.tsx
 new file mode 100644
-index 000000000..0a0656834
+index 000000000..89a330f1b
 --- /dev/null
 +++ b/tests/unit/WorkspaceComputerIndicator.dom.test.tsx
-@@ -0,0 +1,28 @@
+@@ -0,0 +1,32 @@
 +import React from 'react';
 +import { render, screen } from '@testing-library/react';
 +import { describe, expect, it } from 'vitest';
@@ -35886,7 +35890,11 @@ index 000000000..0a0656834
 +    );
 +
 +    expect(screen.getByText('ATIUS-SRV-1')).toBeInTheDocument();
-+    expect(screen.getByTestId('workspace-computer-connected')).toHaveClass('text-[rgb(var(--success-6))]');
++    const dot = screen.getByTestId('workspace-computer-connected');
++    expect(dot).toHaveAttribute('width', '8');
++    expect(dot).toHaveAttribute('height', '8');
++    expect(dot).toHaveAttribute('stroke', 'var(--success, #34d399)');
++    expect(dot).toHaveAttribute('fill', 'var(--success, #34d399)');
 +  });
 +
 +  it('keeps the computer name but hides the green dot when disconnected', () => {

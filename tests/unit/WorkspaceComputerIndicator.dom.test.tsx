@@ -12,7 +12,11 @@ describe('WorkspaceComputerIndicator', () => {
     );
 
     expect(screen.getByText('ATIUS-SRV-1')).toBeInTheDocument();
-    expect(screen.getByTestId('workspace-computer-connected')).toHaveClass('text-[rgb(var(--success-6))]');
+    const dot = screen.getByTestId('workspace-computer-connected');
+    expect(dot).toHaveAttribute('width', '8');
+    expect(dot).toHaveAttribute('height', '8');
+    expect(dot).toHaveAttribute('stroke', 'var(--success, #34d399)');
+    expect(dot).toHaveAttribute('fill', 'var(--success, #34d399)');
   });
 
   it('keeps the computer name but hides the green dot when disconnected', () => {

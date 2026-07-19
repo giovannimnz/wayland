@@ -33,7 +33,9 @@ export function useWorkspaceComputerStatuses(workspaces: readonly (string | unde
     };
 
     void refresh();
-    const timer = window.setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
+    const timer = window.setInterval((): void => {
+      void refresh();
+    }, REFRESH_INTERVAL_MS);
     return () => {
       active = false;
       window.clearInterval(timer);

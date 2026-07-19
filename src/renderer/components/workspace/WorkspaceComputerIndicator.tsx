@@ -10,6 +10,7 @@ const WorkspaceComputerIndicator: React.FC<WorkspaceComputerIndicatorProps> = ({
   if (!status) return null;
 
   const statusLabel = status.connected ? 'connected' : 'disconnected';
+  const connectedColor = 'var(--success, #34d399)';
   return (
     <span
       className='flex items-center gap-6px shrink-0 text-11px font-500 leading-16px text-t-tertiary'
@@ -21,10 +22,11 @@ const WorkspaceComputerIndicator: React.FC<WorkspaceComputerIndicatorProps> = ({
         <Circle
           aria-hidden='true'
           data-testid='workspace-computer-connected'
-          size={7}
+          size={8}
           strokeWidth={0}
-          fill='currentColor'
-          className='text-[rgb(var(--success-6))]'
+          color={connectedColor}
+          fill={connectedColor}
+          className='shrink-0'
         />
       )}
     </span>
