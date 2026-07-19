@@ -88,6 +88,8 @@ export type IChannelAssistantConfigRefer = {
 };
 
 export interface IConfigStorageRefer {
+  /** NFS workspace ownership routes used for remote execution and computer status. */
+  'atius.workspaceHybridRoutes'?: import('@/common/utils/workspaceComputer').WorkspaceHybridRoute[];
   'gemini.config': {
     authType: string;
     proxy: string;

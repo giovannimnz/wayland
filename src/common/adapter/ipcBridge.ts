@@ -2835,6 +2835,11 @@ export const project = {
   >('project.create'),
   get: buildProvider<import('@/common/types/project').IProject | null, { id: string }>('project.get'),
   list: buildProvider<import('@/common/types/project').IProject[], void>('project.list'),
+  /** Resolve the owner computer and current local/NFS availability for workspace paths. */
+  getComputerStatuses: buildProvider<
+    import('@/common/utils/workspaceComputer').WorkspaceComputerStatus[],
+    { workspaces: string[] }
+  >('project.get-computer-statuses'),
   update: buildProvider<void, { id: string; updates: import('@/common/types/project').IUpdateProjectParams }>(
     'project.update'
   ),

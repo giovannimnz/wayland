@@ -16,6 +16,7 @@ import { useProjects } from './hooks/useProjects';
 import ProjectCard from './components/ProjectCard';
 import CreateProjectModal from './components/CreateProjectModal';
 import NewProjectWizard from './components/NewProjectWizard';
+import { useWorkspaceComputerStatuses } from '@/renderer/hooks/useWorkspaceComputerStatuses';
 
 /**
  * Top-level Projects surface: a grid of project tiles plus one obvious "New
@@ -27,6 +28,8 @@ const ProjectsListPage: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { projects, counts, loading, createProject, updateProject, removeProject } = useProjects();
+  const projectWorkspaces = React.useMemo(() => projects.map((project) => project.workspace), [projects]);
+  const computerStatuses = useWorkspaceComputerStatuses(projectWorkspaces);
 
   const [editing, setEditing] = React.useState<IProject | undefined>(undefined);
   const [wizardOpen, setWizardOpen] = React.useState(false);
@@ -150,6 +153,7 @@ const ProjectsListPage: React.FC = () => {
                 key={p.id}
                 project={p}
                 chatCount={counts[p.id] ?? 0}
+                computerStatus={p.workspace ? computerStatuses[p.workspace] : undefined}
                 onOpen={(proj) => navigate(`/project/${proj.id}`)}
                 onEdit={openEdit}
                 onDelete={handleDelete}

@@ -20,6 +20,7 @@ import {
   readProjectIjfwMemory,
 } from '@process/services/projectKnowledge/knowledge';
 import { hasUsableModel, oneShotComplete, oneShotCompleteBest } from '@process/services/completion/oneShot';
+import { getWorkspaceComputerStatuses } from '@process/services/workspaceComputerStatus';
 
 /** Prompt the cheap model with a knowledge doc and ask for a single-sentence summary. */
 const SUMMARY_KIND_LABEL = { context: 'project instructions', rules: 'project rules', decisions: 'project decisions' };
@@ -125,6 +126,10 @@ export function initProjectBridge(): void {
 
   ipcBridge.project.list.provider(async () => {
     return projectService.listProjects();
+  });
+
+  ipcBridge.project.getComputerStatuses.provider(async ({ workspaces }) => {
+    return getWorkspaceComputerStatuses(workspaces);
   });
 
   ipcBridge.project.update.provider(async ({ id, updates }) => {

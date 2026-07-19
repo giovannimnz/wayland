@@ -8,6 +8,7 @@ import { ChevronDown, ChevronRight, FolderOpen } from 'lucide-react';
 import { ipcBridge } from '@/common';
 import type { TChatConversation } from '@/common/config/storage';
 import DirectorySelectionModal from '@/renderer/components/settings/DirectorySelectionModal';
+import WorkspaceComputerIndicator from '@/renderer/components/workspace/WorkspaceComputerIndicator';
 import AssignToProjectModal from '@/renderer/pages/projects/components/AssignToProjectModal';
 import { CronJobIndicator, useCronJobsMap } from '@/renderer/pages/cron';
 import { DndContext, DragOverlay, closestCenter } from '@dnd-kit/core';
@@ -18,6 +19,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { emitter } from '@/renderer/utils/emitter';
+import { useWorkspaceComputerStatuses } from '@/renderer/hooks/useWorkspaceComputerStatuses';
 
 import WorkspaceCollapse from '../components/WorkspaceCollapse';
 import ConversationRow from './ConversationRow';
@@ -69,6 +71,16 @@ const WorkspaceGroupedHistory: React.FC<WorkspaceGroupedHistoryProps> = ({
     timelineSections,
     handleToggleWorkspace,
   } = useConversations();
+  const groupedWorkspaces = useMemo(
+    () =>
+      timelineSections.flatMap((section) =>
+        section.items.flatMap((item) =>
+          item.type === 'workspace' && item.workspaceGroup ? [item.workspaceGroup.workspace] : []
+        )
+      ),
+    [timelineSections]
+  );
+  const computerStatuses = useWorkspaceComputerStatuses(groupedWorkspaces);
 
   const {
     selectedConversationIds,
@@ -465,10 +477,11 @@ const WorkspaceGroupedHistory: React.FC<WorkspaceGroupedHistoryProps> = ({
                         onToggle={() => handleToggleWorkspace(group.workspace)}
                         siderCollapsed={collapsed}
                         header={
-                          <div className='flex items-center gap-8px text-14px min-w-0'>
+                          <div className='flex items-center gap-8px text-14px min-w-0 w-full'>
                             <span className='font-medium truncate flex-1 text-t-primary min-w-0'>
                               {group.displayName}
                             </span>
+                            <WorkspaceComputerIndicator status={computerStatuses[group.workspace]} />
                           </div>
                         }
                       >

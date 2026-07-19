@@ -32,6 +32,7 @@ FILES=(
   scripts/atius-wayland-https-proxy.js
   src/common/adapter/ipcBridge.ts
   src/common/config/storage.ts
+  src/common/utils/workspaceComputer.ts
   src/common/types/acpTypes.ts
   src/common/types/codex/codexModes.ts
   src/common/types/codex/types/eventData.ts
@@ -40,6 +41,7 @@ FILES=(
   src/process/agent/remote/RemoteAgentCore.ts
   src/process/acp/compat/typeBridge.ts
   src/process/bridge/remoteAgentBridge.ts
+  src/process/bridge/projectBridge.ts
   src/process/extensions/data/bundle-vendored/agentProfileMerge.ts
   src/process/extensions/resolvers/ChannelPluginResolver.ts
   src/process/task/AcpAgentManager.ts
@@ -48,6 +50,7 @@ FILES=(
   src/process/task/codexConfig.ts
   src/process/task/codexStaticModelInfo.ts
   src/process/task/hermesConfig.ts
+  src/process/services/workspaceComputerStatus.ts
   src/process/utils/initStorage.ts
   src/process/utils/shellEnv.ts
   src/process/webserver/config/constants.ts
@@ -65,8 +68,10 @@ FILES=(
   src/renderer/components/agent/MarqueePillLabel.tsx
   src/renderer/components/model/modelSelector/EffortSubRow.tsx
   src/renderer/components/model/modelSelector/modelSelectorTypes.ts
+  src/renderer/components/workspace/WorkspaceComputerIndicator.tsx
   src/renderer/components/settings/DirectorySelectionModal.tsx
   src/renderer/hooks/file/useDirectorySelection.tsx
+  src/renderer/hooks/useWorkspaceComputerStatuses.ts
   src/renderer/pages/guid/GuidPage.tsx
   src/renderer/pages/guid/index.module.css
   src/renderer/pages/guid/components/AgentPillBar.tsx
@@ -77,8 +82,11 @@ FILES=(
   src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
   src/renderer/pages/guid/hooks/useGuidSend.ts
   src/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync.ts
+  src/renderer/pages/conversation/GroupedHistory/index.tsx
   src/renderer/pages/conversation/GroupedHistory/utils/groupingHelpers.ts
   src/renderer/pages/settings/AgentSettings/RemoteAgentManagement.tsx
+  src/renderer/pages/projects/ProjectsListPage.tsx
+  src/renderer/pages/projects/components/ProjectCard.tsx
   src/renderer/services/i18n/i18n-keys.d.ts
   src/renderer/services/i18n/index.ts
   src/renderer/utils/model/agentModes.ts
@@ -128,6 +136,8 @@ FILES=(
   tests/unit/useGuidSend.dom.test.ts
   tests/unit/webserver/cookieOptions.test.ts
   tests/unit/webserver/detectNetworkContext.test.ts
+  tests/unit/workspaceComputerStatus.test.ts
+  tests/unit/WorkspaceComputerIndicator.dom.test.tsx
   docs/README.md
   docs/legal/THIRD-PARTY-NOTICES.md
   docs/guides/atius-codex-acp.md

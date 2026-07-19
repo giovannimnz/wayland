@@ -11,6 +11,15 @@ import type { SlashCommandItem } from '@/common/chat/slash/types';
 import { transformMessage } from '@/common/chat/chatLib';
 import type { IConfigStorageRefer } from '@/common/config/storage';
 import { WAYLAND_FILES_MARKER } from '@/common/config/constants';
+import {
+  DEFAULT_WORKSPACE_HYBRID_ROUTES,
+  WORKSPACE_HYBRID_ROUTES_CONFIG_KEY,
+  mergeWorkspaceHybridRoutes,
+  resolveWorkspaceHybridContextFromRoutes,
+  toWorkspaceHybridRoute,
+  type ResolvedWorkspaceHybridContext,
+  type WorkspaceHybridRoute,
+} from '@/common/utils/workspaceComputer';
 import type { IResponseMessage } from '@/common/adapter/ipcBridge';
 import { parseError, uuid } from '@/common/utils';
 import { claudeSlotForModelId } from '@process/agent/acp/utils';
@@ -83,7 +92,7 @@ import { readCodexStaticModelInfo } from '@process/task/codexStaticModelInfo';
 import { readConnectedFluxKey } from '@process/connectors/fluxKey';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, posix } from 'node:path';
+import { join } from 'node:path';
 import yaml from 'js-yaml';
 
 interface AcpAgentManagerData {
@@ -127,75 +136,12 @@ interface AcpAgentManagerData {
 
 type StaticModelOption = { id: string; label: string };
 
-type WorkspaceHybridRoute = {
-  hostId: string;
-  mountPath: string;
-  remoteRoot: string;
-  sshTarget?: string;
-};
-
-type ResolvedWorkspaceHybridContext = WorkspaceHybridRoute & {
-  sshTarget: string;
-  localWorkspace: string;
-  remoteWorkspace: string;
-};
-
-const WORKSPACE_HYBRID_ROUTES_CONFIG_KEY = 'atius.workspaceHybridRoutes';
-export const DEFAULT_WORKSPACE_HYBRID_ROUTES: WorkspaceHybridRoute[] = [
-  {
-    hostId: 'atius-srv-1',
-    mountPath: '/home/ubuntu/Servers/atius-srv-1/GitHub',
-    remoteRoot: '/home/ubuntu/GitHub',
-    sshTarget: 'atius-srv-1',
-  },
-  {
-    hostId: 'atius-srv-2',
-    mountPath: '/home/ubuntu/Servers/atius-srv-2/GitHub',
-    remoteRoot: '/home/ubuntu/GitHub',
-    sshTarget: 'atius-srv-2',
-  },
-  {
-    hostId: 'horistic-srv',
-    mountPath: '/home/ubuntu/Servers/horistic-srv/GitHub',
-    remoteRoot: '/home/horistic/GitHub',
-    sshTarget: 'horistic-srv',
-  },
-];
+export {
+  DEFAULT_WORKSPACE_HYBRID_ROUTES,
+  resolveWorkspaceHybridContextFromRoutes,
+} from '@/common/utils/workspaceComputer';
 
 let workspaceHybridRoutesCache: WorkspaceHybridRoute[] | null = null;
-
-function normalizePosixPath(value: string): string {
-  const normalized = posix.normalize(value.trim());
-  if (!normalized || normalized === '.') return '/';
-  return normalized.length > 1 && normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;
-}
-
-function toWorkspaceHybridRoute(value: unknown): WorkspaceHybridRoute | null {
-  if (!value || typeof value !== 'object') return null;
-  const record = value as Record<string, unknown>;
-  const hostId = typeof record.hostId === 'string' ? record.hostId.trim() : '';
-  const mountPath = typeof record.mountPath === 'string' ? record.mountPath.trim() : '';
-  const remoteRoot = typeof record.remoteRoot === 'string' ? record.remoteRoot.trim() : '';
-  const sshTarget = typeof record.sshTarget === 'string' ? record.sshTarget.trim() : '';
-  if (!hostId || !mountPath || !remoteRoot) return null;
-  return {
-    hostId,
-    mountPath: normalizePosixPath(mountPath),
-    remoteRoot: normalizePosixPath(remoteRoot),
-    ...(sshTarget ? { sshTarget } : {}),
-  };
-}
-
-function mergeWorkspaceHybridRoutes(configuredRoutes: WorkspaceHybridRoute[]): WorkspaceHybridRoute[] {
-  const byMountPath = new Map<string, WorkspaceHybridRoute>();
-  for (const route of DEFAULT_WORKSPACE_HYBRID_ROUTES) {
-    byMountPath.set(route.mountPath, route);
-  }
-  for (const route of configuredRoutes) {
-    byMountPath.set(route.mountPath, route);
-  }
-  return Array.from(byMountPath.values());
-}
 
 async function loadWorkspaceHybridRoutes(): Promise<WorkspaceHybridRoute[]> {
   if (workspaceHybridRoutesCache) return workspaceHybridRoutesCache;
@@ -204,39 +150,15 @@ async function loadWorkspaceHybridRoutes(): Promise<WorkspaceHybridRoute[]> {
       WORKSPACE_HYBRID_ROUTES_CONFIG_KEY
     );
     const configuredRoutes = Array.isArray(raw)
-      ? raw.map((entry) => toWorkspaceHybridRoute(entry)).filter((entry): entry is WorkspaceHybridRoute => entry !== null)
+      ? raw
+          .map((entry) => toWorkspaceHybridRoute(entry))
+          .filter((entry): entry is WorkspaceHybridRoute => entry !== null)
       : [];
     workspaceHybridRoutesCache = mergeWorkspaceHybridRoutes(configuredRoutes);
   } catch {
     workspaceHybridRoutesCache = [...DEFAULT_WORKSPACE_HYBRID_ROUTES];
   }
   return workspaceHybridRoutesCache;
-}
-
-export function resolveWorkspaceHybridContextFromRoutes(
-  workspace: string | undefined,
-  routes: WorkspaceHybridRoute[]
-): ResolvedWorkspaceHybridContext | null {
-  const normalizedWorkspace = typeof workspace === 'string' ? normalizePosixPath(workspace) : '';
-  if (!normalizedWorkspace || normalizedWorkspace === '/') return null;
-
-  for (const route of routes) {
-    const mountPath = normalizePosixPath(route.mountPath);
-    if (normalizedWorkspace !== mountPath && !normalizedWorkspace.startsWith(`${mountPath}/`)) {
-      continue;
-    }
-
-    const relativePath = posix.relative(mountPath, normalizedWorkspace);
-    const remoteWorkspace = !relativePath || relativePath === '.' ? route.remoteRoot : posix.join(route.remoteRoot, relativePath);
-    return {
-      ...route,
-      sshTarget: route.sshTarget?.trim() || route.hostId,
-      localWorkspace: normalizedWorkspace,
-      remoteWorkspace: normalizePosixPath(remoteWorkspace),
-    };
-  }
-
-  return null;
 }
 
 async function resolveWorkspaceHybridContext(workspace?: string): Promise<ResolvedWorkspaceHybridContext | null> {
@@ -1683,7 +1605,8 @@ ${collectedResponses.join('\n')}`;
           allowConciergeDiag: isConciergeAssistant(data.presetAssistantId) || isConciergeAssistant(data.customAgentId),
           // Forward team MCP stdio config so AcpAgent.loadBuiltinSessionMcpServers() can inject it
           teamMcpStdioConfig: (data as unknown as Record<string, unknown>).teamMcpStdioConfig as
-            { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> } | undefined,
+            | { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> }
+            | undefined,
         },
         onSessionIdUpdate: (sessionId: string) => {
           // Save ACP session ID to database for resume support

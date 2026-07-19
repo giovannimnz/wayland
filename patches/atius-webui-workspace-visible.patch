@@ -27042,10 +27042,10 @@ index 000000000..41de3e5a0
 +history during an incident.
 diff --git a/docs/guides/atius-fork-runtime.md b/docs/guides/atius-fork-runtime.md
 new file mode 100644
-index 000000000..409b58278
+index 000000000..8a5080f3e
 --- /dev/null
 +++ b/docs/guides/atius-fork-runtime.md
-@@ -0,0 +1,273 @@
+@@ -0,0 +1,275 @@
 +# Atius srv-3 fork/runtime guide
 +
 +This guide documents the ATIUS-managed source runtime served at
@@ -27211,6 +27211,7 @@ index 000000000..409b58278
 +- syncs the live Wayland storage into `/home/ubuntu/.config/Wayland/config/wayland-config.txt`;
 +- regenerates `model.config` from the `ubuntu` Codex runtime;
 +- stores `atius.workspaceHybridRoutes` and defaults NFS GitHub mounts to hybrid execution guidance (edit on the mount, validate on the owner host via SSH alias);
++- shows the workspace owner computer on the right side of Project cards and Recent Chat folder headers; a green dot means the local workspace or real NFS mount is currently available (an `autofs` placeholder alone is not connected);
 +- prunes generated `codex-agent-profile-*` rows from `acp.customAgents` while preserving user-owned custom ACP agents;
 +- mirrors `/home/ubuntu/.codex/skills/*/SKILL.md` into `/home/ubuntu/.config/Wayland/config/skills/` as symlinks;
 +- generates `slash.customCommands` entries that insert `$skill-name` for Codex skills, including GSD/SDD commands;
@@ -27228,6 +27229,7 @@ index 000000000..409b58278
 +bash scripts/atius-verify-codex-acp.sh --live
 +NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/renderer/guid/firstSafeCuratedModel.test.ts
 +NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/AcpAgentManagerSkillInjection.test.ts tests/unit/AgentPillBar.dom.test.tsx tests/unit/renderer/guidModelSelector.dom.test.tsx tests/unit/useGuidSend.dom.test.ts tests/unit/process/task/codexNativeSandbox.test.ts tests/unit/process/task/codexConfigEffort.test.ts
++NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/workspaceComputerStatus.test.ts tests/unit/WorkspaceComputerIndicator.dom.test.tsx
 +bun test tests/unit/webserver/cookieOptions.test.ts tests/unit/webserver/detectNetworkContext.test.ts
 +npm run typecheck
 +bash scripts/atius-build-renderer-overlay.sh
@@ -27702,10 +27704,10 @@ index 000000000..171b72c4f
 +bash "$ROOT/scripts/atius-build-renderer-overlay.sh"
 diff --git a/scripts/atius-refresh-source-patch.sh b/scripts/atius-refresh-source-patch.sh
 new file mode 100755
-index 000000000..38c0dc077
+index 000000000..04e3a2a66
 --- /dev/null
 +++ b/scripts/atius-refresh-source-patch.sh
-@@ -0,0 +1,202 @@
+@@ -0,0 +1,212 @@
 +#!/usr/bin/env bash
 +set -euo pipefail
 +ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -27740,6 +27742,7 @@ index 000000000..38c0dc077
 +  scripts/atius-wayland-https-proxy.js
 +  src/common/adapter/ipcBridge.ts
 +  src/common/config/storage.ts
++  src/common/utils/workspaceComputer.ts
 +  src/common/types/acpTypes.ts
 +  src/common/types/codex/codexModes.ts
 +  src/common/types/codex/types/eventData.ts
@@ -27748,6 +27751,7 @@ index 000000000..38c0dc077
 +  src/process/agent/remote/RemoteAgentCore.ts
 +  src/process/acp/compat/typeBridge.ts
 +  src/process/bridge/remoteAgentBridge.ts
++  src/process/bridge/projectBridge.ts
 +  src/process/extensions/data/bundle-vendored/agentProfileMerge.ts
 +  src/process/extensions/resolvers/ChannelPluginResolver.ts
 +  src/process/task/AcpAgentManager.ts
@@ -27756,6 +27760,7 @@ index 000000000..38c0dc077
 +  src/process/task/codexConfig.ts
 +  src/process/task/codexStaticModelInfo.ts
 +  src/process/task/hermesConfig.ts
++  src/process/services/workspaceComputerStatus.ts
 +  src/process/utils/initStorage.ts
 +  src/process/utils/shellEnv.ts
 +  src/process/webserver/config/constants.ts
@@ -27773,8 +27778,10 @@ index 000000000..38c0dc077
 +  src/renderer/components/agent/MarqueePillLabel.tsx
 +  src/renderer/components/model/modelSelector/EffortSubRow.tsx
 +  src/renderer/components/model/modelSelector/modelSelectorTypes.ts
++  src/renderer/components/workspace/WorkspaceComputerIndicator.tsx
 +  src/renderer/components/settings/DirectorySelectionModal.tsx
 +  src/renderer/hooks/file/useDirectorySelection.tsx
++  src/renderer/hooks/useWorkspaceComputerStatuses.ts
 +  src/renderer/pages/guid/GuidPage.tsx
 +  src/renderer/pages/guid/index.module.css
 +  src/renderer/pages/guid/components/AgentPillBar.tsx
@@ -27785,8 +27792,11 @@ index 000000000..38c0dc077
 +  src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
 +  src/renderer/pages/guid/hooks/useGuidSend.ts
 +  src/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync.ts
++  src/renderer/pages/conversation/GroupedHistory/index.tsx
 +  src/renderer/pages/conversation/GroupedHistory/utils/groupingHelpers.ts
 +  src/renderer/pages/settings/AgentSettings/RemoteAgentManagement.tsx
++  src/renderer/pages/projects/ProjectsListPage.tsx
++  src/renderer/pages/projects/components/ProjectCard.tsx
 +  src/renderer/services/i18n/i18n-keys.d.ts
 +  src/renderer/services/i18n/index.ts
 +  src/renderer/utils/model/agentModes.ts
@@ -27836,6 +27846,8 @@ index 000000000..38c0dc077
 +  tests/unit/useGuidSend.dom.test.ts
 +  tests/unit/webserver/cookieOptions.test.ts
 +  tests/unit/webserver/detectNetworkContext.test.ts
++  tests/unit/workspaceComputerStatus.test.ts
++  tests/unit/WorkspaceComputerIndicator.dom.test.tsx
 +  docs/README.md
 +  docs/legal/THIRD-PARTY-NOTICES.md
 +  docs/guides/atius-codex-acp.md
@@ -28657,7 +28669,7 @@ index d9ba0071b..6fd211ce2 100755
      print_summary
  }
 diff --git a/src/common/adapter/ipcBridge.ts b/src/common/adapter/ipcBridge.ts
-index 28e5a7a8e..88baa7ff0 100644
+index 28e5a7a8e..db7bebd05 100644
 --- a/src/common/adapter/ipcBridge.ts
 +++ b/src/common/adapter/ipcBridge.ts
 @@ -16,7 +16,6 @@ import type { MicPermissionStatus } from '../../process/services/macPermissions/
@@ -28961,7 +28973,19 @@ index 28e5a7a8e..88baa7ff0 100644
    /** Get permission summary for an extension (Figma-inspired) */
    getPermissions: buildProvider<IExtensionPermissionSummary[], { name: string }>('extensions.get-permissions'),
    /** Get overall risk level for an extension */
-@@ -3138,23 +2954,3 @@ export const terminal = {
+@@ -3019,6 +2835,11 @@ export const project = {
+   >('project.create'),
+   get: buildProvider<import('@/common/types/project').IProject | null, { id: string }>('project.get'),
+   list: buildProvider<import('@/common/types/project').IProject[], void>('project.list'),
++  /** Resolve the owner computer and current local/NFS availability for workspace paths. */
++  getComputerStatuses: buildProvider<
++    import('@/common/utils/workspaceComputer').WorkspaceComputerStatus[],
++    { workspaces: string[] }
++  >('project.get-computer-statuses'),
+   update: buildProvider<void, { id: string; updates: import('@/common/types/project').IUpdateProjectParams }>(
+     'project.update'
+   ),
+@@ -3138,23 +2959,3 @@ export const terminal = {
    /** PTY exited → renderer (filter by terminalId). */
    exit: buildEmitter<TerminalExitPayload>('terminal.exit'),
  };
@@ -28986,10 +29010,19 @@ index 28e5a7a8e..88baa7ff0 100644
 -  set: buildProvider<void, { workspace: string; level: WorkspaceTrustLevel }>('workspaceTrust.set'),
 -};
 diff --git a/src/common/config/storage.ts b/src/common/config/storage.ts
-index b219eb6d3..bb6383e2b 100644
+index b219eb6d3..3a0f1e834 100644
 --- a/src/common/config/storage.ts
 +++ b/src/common/config/storage.ts
-@@ -147,23 +147,6 @@ export interface IConfigStorageRefer {
+@@ -88,6 +88,8 @@ export type IChannelAssistantConfigRefer = {
+ };
+
+ export interface IConfigStorageRefer {
++  /** NFS workspace ownership routes used for remote execution and computer status. */
++  'atius.workspaceHybridRoutes'?: import('@/common/utils/workspaceComputer').WorkspaceHybridRoute[];
+   'gemini.config': {
+     authType: string;
+     proxy: string;
+@@ -147,23 +149,6 @@ export interface IConfigStorageRefer {
    'assistant.presetAgentTypeOverrides'?: Record<string, string>;
    // Cached initialize results per ACP backend (persisted across sessions)
    'acp.cachedInitializeResult'?: Record<string, import('@/common/types/acpTypes').AcpInitializeResult>;
@@ -29013,7 +29046,7 @@ index b219eb6d3..bb6383e2b 100644
    // Cached model lists per ACP backend for Guid page pre-selection
    'acp.cachedModels'?: Record<string, import('@/common/types/acpTypes').AcpModelInfo>;
    // Cached config options per ACP backend for Guid page pre-selection
-@@ -260,13 +243,6 @@ export interface IConfigStorageRefer {
+@@ -260,13 +245,6 @@ export interface IConfigStorageRefer {
    'migration.promptsI18nAdded'?: boolean;
    /** Migration flag: split 'assistants' into presets-only + 'acp.customAgents' (user-defined customs). */
    'migration.assistantsSplitCustom'?: boolean;
@@ -29027,7 +29060,7 @@ index b219eb6d3..bb6383e2b 100644
    /** Migration flag: Electron desktop config has been imported to server config */
    'migration.electronConfigImported'?: boolean;
    /**
-@@ -555,7 +531,9 @@ export type TChatConversation =
+@@ -555,7 +533,9 @@ export type TChatConversation =
            /** Project ID this conversation belongs to (umbrella scoping). Mirrors cronJobId - read via json_extract(extra,'$.projectId'). */
            projectId?: string;
            /** Per-conversation reasoning effort (Claude-ACP `effortLevel`). Absent => backend default. */
@@ -29038,7 +29071,7 @@ index b219eb6d3..bb6383e2b 100644
          }
        >,
        'model'
-@@ -592,7 +570,9 @@ export type TChatConversation =
+@@ -592,7 +572,9 @@ export type TChatConversation =
            /** Project ID this conversation belongs to (umbrella scoping). Mirrors cronJobId - read via json_extract(extra,'$.projectId'). */
            projectId?: string;
            /** Per-conversation reasoning effort (Codex `model_reasoning_effort`). Absent => backend default. */
@@ -29049,7 +29082,7 @@ index b219eb6d3..bb6383e2b 100644
          }
        >,
        'model'
-@@ -744,7 +724,7 @@ export type TChatConversation =
+@@ -744,7 +726,7 @@ export type TChatConversation =
          /** Project ID this conversation belongs to (umbrella scoping). Mirrors cronJobId - read via json_extract(extra,'$.projectId'). */
          projectId?: string;
          /** Per-conversation reasoning effort (WCore `set_config.effort`). Absent => backend default. */
@@ -29103,6 +29136,126 @@ index d953cf047..fc5610b0b 100644
    history_log_id?: number;
    history_entry_count?: number;
    initial_messages?: unknown[] | null;
+diff --git a/src/common/utils/workspaceComputer.ts b/src/common/utils/workspaceComputer.ts
+new file mode 100644
+index 000000000..5f1060a25
+--- /dev/null
++++ b/src/common/utils/workspaceComputer.ts
+@@ -0,0 +1,114 @@
++import { posix } from 'node:path';
++
++export type WorkspaceHybridRoute = {
++  hostId: string;
++  mountPath: string;
++  remoteRoot: string;
++  sshTarget?: string;
++};
++
++export type ResolvedWorkspaceHybridContext = WorkspaceHybridRoute & {
++  sshTarget: string;
++  localWorkspace: string;
++  remoteWorkspace: string;
++};
++
++export type WorkspaceComputerStatus = {
++  workspace: string;
++  computerName: string;
++  connected: boolean;
++  checkedAt: number;
++};
++
++export const WORKSPACE_HYBRID_ROUTES_CONFIG_KEY = 'atius.workspaceHybridRoutes' as const;
++
++export const DEFAULT_WORKSPACE_HYBRID_ROUTES: WorkspaceHybridRoute[] = [
++  {
++    hostId: 'atius-srv-1',
++    mountPath: '/home/ubuntu/Servers/atius-srv-1/GitHub',
++    remoteRoot: '/home/ubuntu/GitHub',
++    sshTarget: 'atius-srv-1',
++  },
++  {
++    hostId: 'atius-srv-2',
++    mountPath: '/home/ubuntu/Servers/atius-srv-2/GitHub',
++    remoteRoot: '/home/ubuntu/GitHub',
++    sshTarget: 'atius-srv-2',
++  },
++  {
++    hostId: 'horistic-srv',
++    mountPath: '/home/ubuntu/Servers/horistic-srv/GitHub',
++    remoteRoot: '/home/horistic/GitHub',
++    sshTarget: 'horistic-srv',
++  },
++];
++
++export function normalizeWorkspacePath(value: string): string {
++  const normalized = posix.normalize(value.trim());
++  if (!normalized || normalized === '.') return '/';
++  return normalized.length > 1 && normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;
++}
++
++export function toWorkspaceHybridRoute(value: unknown): WorkspaceHybridRoute | null {
++  if (!value || typeof value !== 'object') return null;
++  const record = value as Record<string, unknown>;
++  const hostId = typeof record.hostId === 'string' ? record.hostId.trim() : '';
++  const mountPath = typeof record.mountPath === 'string' ? record.mountPath.trim() : '';
++  const remoteRoot = typeof record.remoteRoot === 'string' ? record.remoteRoot.trim() : '';
++  const sshTarget = typeof record.sshTarget === 'string' ? record.sshTarget.trim() : '';
++  if (!hostId || !mountPath || !remoteRoot) return null;
++  return {
++    hostId,
++    mountPath: normalizeWorkspacePath(mountPath),
++    remoteRoot: normalizeWorkspacePath(remoteRoot),
++    ...(sshTarget ? { sshTarget } : {}),
++  };
++}
++
++export function mergeWorkspaceHybridRoutes(configuredRoutes: WorkspaceHybridRoute[]): WorkspaceHybridRoute[] {
++  const byMountPath = new Map<string, WorkspaceHybridRoute>();
++  for (const route of DEFAULT_WORKSPACE_HYBRID_ROUTES) byMountPath.set(route.mountPath, route);
++  for (const route of configuredRoutes) byMountPath.set(route.mountPath, route);
++  return Array.from(byMountPath.values());
++}
++
++export function resolveWorkspaceHybridContextFromRoutes(
++  workspace: string | undefined,
++  routes: WorkspaceHybridRoute[]
++): ResolvedWorkspaceHybridContext | null {
++  const normalizedWorkspace = typeof workspace === 'string' ? normalizeWorkspacePath(workspace) : '';
++  if (!normalizedWorkspace || normalizedWorkspace === '/') return null;
++
++  for (const route of routes.toSorted((a, b) => b.mountPath.length - a.mountPath.length)) {
++    const mountPath = normalizeWorkspacePath(route.mountPath);
++    if (normalizedWorkspace !== mountPath && !normalizedWorkspace.startsWith(`${mountPath}/`)) continue;
++
++    const relativePath = posix.relative(mountPath, normalizedWorkspace);
++    const remoteWorkspace =
++      !relativePath || relativePath === '.' ? route.remoteRoot : posix.join(route.remoteRoot, relativePath);
++    return {
++      ...route,
++      sshTarget: route.sshTarget?.trim() || route.hostId,
++      localWorkspace: normalizedWorkspace,
++      remoteWorkspace: normalizeWorkspacePath(remoteWorkspace),
++    };
++  }
++
++  return null;
++}
++
++export function resolveWorkspaceComputerIdentity(
++  workspace: string,
++  routes: WorkspaceHybridRoute[],
++  localHostname: string
++): { hostId: string; computerName: string; remote: boolean } {
++  const route = resolveWorkspaceHybridContextFromRoutes(workspace, routes);
++  const normalizedWorkspace = normalizeWorkspacePath(workspace);
++  const mountedHost = normalizedWorkspace.match(/\/Servers\/([^/]+)(?:\/|$)/)?.[1];
++  const hostId = route?.hostId || mountedHost || localHostname.split('.')[0] || localHostname;
++  return {
++    hostId,
++    computerName: hostId.toUpperCase(),
++    remote: Boolean(route || mountedHost),
++  };
++}
 diff --git a/src/process/acp/compat/typeBridge.ts b/src/process/acp/compat/typeBridge.ts
 index ef8788b60..af6e1fdee 100644
 --- a/src/process/acp/compat/typeBridge.ts
@@ -29276,6 +29429,29 @@ index e717e969e..8fe692f22 100644
          this.handleApprovalRequest(evt.payload);
          break;
        case 'shutdown':
+diff --git a/src/process/bridge/projectBridge.ts b/src/process/bridge/projectBridge.ts
+index 97953754f..a4768bf5c 100644
+--- a/src/process/bridge/projectBridge.ts
++++ b/src/process/bridge/projectBridge.ts
+@@ -20,6 +20,7 @@ import {
+   readProjectIjfwMemory,
+ } from '@process/services/projectKnowledge/knowledge';
+ import { hasUsableModel, oneShotComplete, oneShotCompleteBest } from '@process/services/completion/oneShot';
++import { getWorkspaceComputerStatuses } from '@process/services/workspaceComputerStatus';
+
+ /** Prompt the cheap model with a knowledge doc and ask for a single-sentence summary. */
+ const SUMMARY_KIND_LABEL = { context: 'project instructions', rules: 'project rules', decisions: 'project decisions' };
+@@ -127,6 +128,10 @@ export function initProjectBridge(): void {
+     return projectService.listProjects();
+   });
+
++  ipcBridge.project.getComputerStatuses.provider(async ({ workspaces }) => {
++    return getWorkspaceComputerStatuses(workspaces);
++  });
++
+   ipcBridge.project.update.provider(async ({ id, updates }) => {
+     await projectService.updateProject(id, updates);
+     ipcBridge.project.changed.emit(undefined);
 diff --git a/src/process/bridge/remoteAgentBridge.ts b/src/process/bridge/remoteAgentBridge.ts
 index ec0560010..2cbf16781 100644
 --- a/src/process/bridge/remoteAgentBridge.ts
@@ -29480,11 +29656,115 @@ index d6e86a67a..3c2e6674a 100644
          const mod = nativeRequire(entryPath);
 
          let PluginClass = mod.default || mod.Plugin;
+diff --git a/src/process/services/workspaceComputerStatus.ts b/src/process/services/workspaceComputerStatus.ts
+new file mode 100644
+index 000000000..036b04298
+--- /dev/null
++++ b/src/process/services/workspaceComputerStatus.ts
+@@ -0,0 +1,98 @@
++import fs from 'node:fs/promises';
++import os from 'node:os';
++import { ProcessConfig } from '@process/utils/initStorage';
++import {
++  DEFAULT_WORKSPACE_HYBRID_ROUTES,
++  WORKSPACE_HYBRID_ROUTES_CONFIG_KEY,
++  mergeWorkspaceHybridRoutes,
++  normalizeWorkspacePath,
++  resolveWorkspaceComputerIdentity,
++  toWorkspaceHybridRoute,
++  type WorkspaceComputerStatus,
++  type WorkspaceHybridRoute,
++} from '@/common/utils/workspaceComputer';
++
++export type MountedFilesystem = { mountPoint: string; fsType: string };
++
++const REMOTE_FILESYSTEMS = new Set(['nfs', 'nfs4', 'cifs', 'smb3', 'fuse.sshfs']);
++
++function unescapeMountInfoPath(value: string): string {
++  return value.replace(/\\(040|011|012|134)/g, (_match, code: string) => {
++    if (code === '040') return ' ';
++    if (code === '011') return '\t';
++    if (code === '012') return '\n';
++    return '\\';
++  });
++}
++
++export function parseLinuxMountInfo(contents: string): MountedFilesystem[] {
++  const mounts: MountedFilesystem[] = [];
++  for (const line of contents.split('\n')) {
++    if (!line.trim()) continue;
++    const separator = line.indexOf(' - ');
++    if (separator < 0) continue;
++    const left = line.slice(0, separator).split(' ');
++    const right = line.slice(separator + 3).split(' ');
++    if (left.length < 5 || !right[0]) continue;
++    mounts.push({ mountPoint: normalizeWorkspacePath(unescapeMountInfoPath(left[4])), fsType: right[0] });
++  }
++  return mounts;
++}
++
++export function hasRemoteMountForWorkspace(workspace: string, mounts: MountedFilesystem[]): boolean {
++  const normalizedWorkspace = normalizeWorkspacePath(workspace);
++  return mounts.some(({ mountPoint, fsType }) => {
++    if (!REMOTE_FILESYSTEMS.has(fsType.toLowerCase())) return false;
++    return normalizedWorkspace === mountPoint || normalizedWorkspace.startsWith(`${mountPoint}/`);
++  });
++}
++
++async function loadWorkspaceHybridRoutes(): Promise<WorkspaceHybridRoute[]> {
++  try {
++    const raw = await (ProcessConfig as unknown as { get: (key: string) => Promise<unknown> }).get(
++      WORKSPACE_HYBRID_ROUTES_CONFIG_KEY
++    );
++    const configuredRoutes = Array.isArray(raw)
++      ? raw.map(toWorkspaceHybridRoute).filter((route): route is WorkspaceHybridRoute => route !== null)
++      : [];
++    return mergeWorkspaceHybridRoutes(configuredRoutes);
++  } catch {
++    return [...DEFAULT_WORKSPACE_HYBRID_ROUTES];
++  }
++}
++
++async function localWorkspaceExists(workspace: string): Promise<boolean> {
++  try {
++    await fs.access(workspace);
++    return true;
++  } catch {
++    return false;
++  }
++}
++
++export async function getWorkspaceComputerStatuses(workspaces: string[]): Promise<WorkspaceComputerStatus[]> {
++  const uniqueWorkspaces = Array.from(
++    new Set(
++      workspaces.filter((workspace) => typeof workspace === 'string' && workspace.trim()).map(normalizeWorkspacePath)
++    )
++  ).slice(0, 250);
++  if (uniqueWorkspaces.length === 0) return [];
++
++  const [routes, mountInfo] = await Promise.all([
++    loadWorkspaceHybridRoutes(),
++    fs.readFile('/proc/self/mountinfo', 'utf8').catch(() => ''),
++  ]);
++  const mounts = parseLinuxMountInfo(mountInfo);
++  const localHostname = os.hostname();
++  const checkedAt = Date.now();
++
++  return Promise.all(
++    uniqueWorkspaces.map(async (workspace) => {
++      const identity = resolveWorkspaceComputerIdentity(workspace, routes, localHostname);
++      const connected = identity.remote
++        ? hasRemoteMountForWorkspace(workspace, mounts)
++        : await localWorkspaceExists(workspace);
++      return { workspace, computerName: identity.computerName, connected, checkedAt };
++    })
++  );
++}
 diff --git a/src/process/task/AcpAgentManager.ts b/src/process/task/AcpAgentManager.ts
-index a95a8ea51..5fd253aef 100644
+index a95a8ea51..bc13632df 100644
 --- a/src/process/task/AcpAgentManager.ts
 +++ b/src/process/task/AcpAgentManager.ts
-@@ -4,11 +4,9 @@ import { channelEventBus } from '@process/channels/agent/ChannelEventBus';
+@@ -4,15 +4,22 @@ import { channelEventBus } from '@process/channels/agent/ChannelEventBus';
  import { teamEventBus } from '@process/team/teamEventBus';
  import { ipcBridge } from '@/common';
  import type { CronMessageMeta, TMessage } from '@/common/chat/chatLib';
@@ -29497,7 +29777,20 @@ index a95a8ea51..5fd253aef 100644
  import type { SlashCommandItem } from '@/common/chat/slash/types';
  import { transformMessage } from '@/common/chat/chatLib';
  import type { IConfigStorageRefer } from '@/common/config/storage';
-@@ -50,7 +48,9 @@ import {
+ import { WAYLAND_FILES_MARKER } from '@/common/config/constants';
++import {
++  DEFAULT_WORKSPACE_HYBRID_ROUTES,
++  WORKSPACE_HYBRID_ROUTES_CONFIG_KEY,
++  mergeWorkspaceHybridRoutes,
++  resolveWorkspaceHybridContextFromRoutes,
++  toWorkspaceHybridRoute,
++  type ResolvedWorkspaceHybridContext,
++  type WorkspaceHybridRoute,
++} from '@/common/utils/workspaceComputer';
+ import type { IResponseMessage } from '@/common/adapter/ipcBridge';
+ import { parseError, uuid } from '@/common/utils';
+ import { claudeSlotForModelId } from '@process/agent/acp/utils';
+@@ -50,7 +57,9 @@ import {
    materializeFluxCodexHome,
    materializeNativeCodexHome,
    normalizeCodexSandboxMode,
@@ -29507,7 +29800,7 @@ index a95a8ea51..5fd253aef 100644
  } from '@process/task/codexConfig';
  import { materializeFluxClaudeConfigDir } from '@process/task/claudeConfig';
  import { materializeFluxHermesHome } from '@process/task/hermesConfig';
-@@ -79,7 +79,12 @@ import { shouldInjectTeamGuideMcp } from '@process/team/prompts/teamGuideCapabil
+@@ -79,7 +88,12 @@ import { shouldInjectTeamGuideMcp } from '@process/team/prompts/teamGuideCapabil
  import { extractTextFromMessage, processCronInMessage } from './MessageMiddleware';
  import { ConversationTurnCompletionService } from './ConversationTurnCompletionService';
  import { resolveFluxRouting, type FluxRoutingResult, type RoutingDecision } from '@process/task/fluxRouting';
@@ -29515,12 +29808,12 @@ index a95a8ea51..5fd253aef 100644
  import { readConnectedFluxKey } from '@process/connectors/fluxKey';
 +import { readFile } from 'node:fs/promises';
 +import { homedir } from 'node:os';
-+import { join, posix } from 'node:path';
++import { join } from 'node:path';
 +import yaml from 'js-yaml';
 
  interface AcpAgentManagerData {
    workspace?: string;
-@@ -113,22 +118,229 @@ interface AcpAgentManagerData {
+@@ -113,22 +127,142 @@ interface AcpAgentManagerData {
    /** Pending config option selections from Guid page (applied after session creation) */
    pendingConfigOptions?: Record<string, string>;
    /** Per-conversation reasoning effort (codex/claude). Absent => backend default. */
@@ -29544,75 +29837,12 @@ index a95a8ea51..5fd253aef 100644
 +
 +type StaticModelOption = { id: string; label: string };
 +
-+type WorkspaceHybridRoute = {
-+  hostId: string;
-+  mountPath: string;
-+  remoteRoot: string;
-+  sshTarget?: string;
-+};
-+
-+type ResolvedWorkspaceHybridContext = WorkspaceHybridRoute & {
-+  sshTarget: string;
-+  localWorkspace: string;
-+  remoteWorkspace: string;
-+};
-+
-+const WORKSPACE_HYBRID_ROUTES_CONFIG_KEY = 'atius.workspaceHybridRoutes';
-+export const DEFAULT_WORKSPACE_HYBRID_ROUTES: WorkspaceHybridRoute[] = [
-+  {
-+    hostId: 'atius-srv-1',
-+    mountPath: '/home/ubuntu/Servers/atius-srv-1/GitHub',
-+    remoteRoot: '/home/ubuntu/GitHub',
-+    sshTarget: 'atius-srv-1',
-+  },
-+  {
-+    hostId: 'atius-srv-2',
-+    mountPath: '/home/ubuntu/Servers/atius-srv-2/GitHub',
-+    remoteRoot: '/home/ubuntu/GitHub',
-+    sshTarget: 'atius-srv-2',
-+  },
-+  {
-+    hostId: 'horistic-srv',
-+    mountPath: '/home/ubuntu/Servers/horistic-srv/GitHub',
-+    remoteRoot: '/home/horistic/GitHub',
-+    sshTarget: 'horistic-srv',
-+  },
-+];
++export {
++  DEFAULT_WORKSPACE_HYBRID_ROUTES,
++  resolveWorkspaceHybridContextFromRoutes,
++} from '@/common/utils/workspaceComputer';
 +
 +let workspaceHybridRoutesCache: WorkspaceHybridRoute[] | null = null;
-+
-+function normalizePosixPath(value: string): string {
-+  const normalized = posix.normalize(value.trim());
-+  if (!normalized || normalized === '.') return '/';
-+  return normalized.length > 1 && normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;
-+}
-+
-+function toWorkspaceHybridRoute(value: unknown): WorkspaceHybridRoute | null {
-+  if (!value || typeof value !== 'object') return null;
-+  const record = value as Record<string, unknown>;
-+  const hostId = typeof record.hostId === 'string' ? record.hostId.trim() : '';
-+  const mountPath = typeof record.mountPath === 'string' ? record.mountPath.trim() : '';
-+  const remoteRoot = typeof record.remoteRoot === 'string' ? record.remoteRoot.trim() : '';
-+  const sshTarget = typeof record.sshTarget === 'string' ? record.sshTarget.trim() : '';
-+  if (!hostId || !mountPath || !remoteRoot) return null;
-+  return {
-+    hostId,
-+    mountPath: normalizePosixPath(mountPath),
-+    remoteRoot: normalizePosixPath(remoteRoot),
-+    ...(sshTarget ? { sshTarget } : {}),
-+  };
-+}
-+
-+function mergeWorkspaceHybridRoutes(configuredRoutes: WorkspaceHybridRoute[]): WorkspaceHybridRoute[] {
-+  const byMountPath = new Map<string, WorkspaceHybridRoute>();
-+  for (const route of DEFAULT_WORKSPACE_HYBRID_ROUTES) {
-+    byMountPath.set(route.mountPath, route);
-+  }
-+  for (const route of configuredRoutes) {
-+    byMountPath.set(route.mountPath, route);
-+  }
-+  return Array.from(byMountPath.values());
-+}
 +
 +async function loadWorkspaceHybridRoutes(): Promise<WorkspaceHybridRoute[]> {
 +  if (workspaceHybridRoutesCache) return workspaceHybridRoutesCache;
@@ -29621,39 +29851,15 @@ index a95a8ea51..5fd253aef 100644
 +      WORKSPACE_HYBRID_ROUTES_CONFIG_KEY
 +    );
 +    const configuredRoutes = Array.isArray(raw)
-+      ? raw.map((entry) => toWorkspaceHybridRoute(entry)).filter((entry): entry is WorkspaceHybridRoute => entry !== null)
++      ? raw
++          .map((entry) => toWorkspaceHybridRoute(entry))
++          .filter((entry): entry is WorkspaceHybridRoute => entry !== null)
 +      : [];
 +    workspaceHybridRoutesCache = mergeWorkspaceHybridRoutes(configuredRoutes);
 +  } catch {
 +    workspaceHybridRoutesCache = [...DEFAULT_WORKSPACE_HYBRID_ROUTES];
 +  }
 +  return workspaceHybridRoutesCache;
-+}
-+
-+export function resolveWorkspaceHybridContextFromRoutes(
-+  workspace: string | undefined,
-+  routes: WorkspaceHybridRoute[]
-+): ResolvedWorkspaceHybridContext | null {
-+  const normalizedWorkspace = typeof workspace === 'string' ? normalizePosixPath(workspace) : '';
-+  if (!normalizedWorkspace || normalizedWorkspace === '/') return null;
-+
-+  for (const route of routes) {
-+    const mountPath = normalizePosixPath(route.mountPath);
-+    if (normalizedWorkspace !== mountPath && !normalizedWorkspace.startsWith(`${mountPath}/`)) {
-+      continue;
-+    }
-+
-+    const relativePath = posix.relative(mountPath, normalizedWorkspace);
-+    const remoteWorkspace = !relativePath || relativePath === '.' ? route.remoteRoot : posix.join(route.remoteRoot, relativePath);
-+    return {
-+      ...route,
-+      sshTarget: route.sshTarget?.trim() || route.hostId,
-+      localWorkspace: normalizedWorkspace,
-+      remoteWorkspace: normalizePosixPath(remoteWorkspace),
-+    };
-+  }
-+
-+  return null;
 +}
 +
 +async function resolveWorkspaceHybridContext(workspace?: string): Promise<ResolvedWorkspaceHybridContext | null> {
@@ -29761,7 +29967,7 @@ index a95a8ea51..5fd253aef 100644
  type BufferedStreamTextMessage = {
    conversationId: string;
    backend: AcpBackend;
-@@ -361,14 +573,14 @@ class AcpAgentManager extends BaseAgentManager<AcpAgentManagerData, AcpPermissio
+@@ -361,14 +495,14 @@ class AcpAgentManager extends BaseAgentManager<AcpAgentManagerData, AcpPermissio
          data: null,
        },
        this.options.backend,
@@ -29778,7 +29984,7 @@ index a95a8ea51..5fd253aef 100644
    ): Promise<void> {
      if (options.trackActiveTurn !== false) {
        this.markActiveTurnFinished();
-@@ -426,13 +638,6 @@ ${collectedResponses.join('\n')}`;
+@@ -426,13 +560,6 @@ ${collectedResponses.join('\n')}`;
      const finishMessage: IResponseMessage = {
        ...(message as IResponseMessage),
        conversation_id: this.conversation_id,
@@ -29792,7 +29998,7 @@ index a95a8ea51..5fd253aef 100644
      };
      ipcBridge.acpConversation.responseStream.emit(finishMessage);
      teamEventBus.emit('responseStream', finishMessage);
-@@ -496,7 +701,7 @@ ${collectedResponses.join('\n')}`;
+@@ -496,7 +623,7 @@ ${collectedResponses.join('\n')}`;
                data: null,
              },
              this.options.backend,
@@ -29801,7 +30007,7 @@ index a95a8ea51..5fd253aef 100644
            );
          }
          return result;
-@@ -527,7 +732,7 @@ ${collectedResponses.join('\n')}`;
+@@ -527,7 +654,7 @@ ${collectedResponses.join('\n')}`;
            data: null,
          },
          this.options.backend,
@@ -29810,7 +30016,7 @@ index a95a8ea51..5fd253aef 100644
        );
        return result;
      } catch (error) {
-@@ -655,6 +860,7 @@ ${collectedResponses.join('\n')}`;
+@@ -655,6 +782,7 @@ ${collectedResponses.join('\n')}`;
      // surface; codex/codebuddy route separately).
      const decision = await this.computeFluxRouting(data.backend, data.currentModelId ?? undefined);
      this.lastRouting = decision.routing;
@@ -29818,7 +30024,7 @@ index a95a8ea51..5fd253aef 100644
      if (decision.routing === 'flux') {
        for (const k of decision.stripKeys) delete mergedEnv[k];
        Object.assign(mergedEnv, decision.env);
-@@ -671,7 +877,8 @@ ${collectedResponses.join('\n')}`;
+@@ -671,7 +799,8 @@ ${collectedResponses.join('\n')}`;
              sandboxMode,
              undefined,
              undefined,
@@ -29828,7 +30034,7 @@ index a95a8ea51..5fd253aef 100644
            );
            mergedEnv.CODEX_HOME = codexHome;
          } catch (err) {
-@@ -703,20 +910,15 @@ ${collectedResponses.join('\n')}`;
+@@ -703,20 +832,15 @@ ${collectedResponses.join('\n')}`;
        // config pins model.provider=custom at the Flux openai surface + flux-auto
        // (reading FLUX_API_KEY at request time), so the user's real ~/.hermes
        // config (and active profile) stays native for non-flux model picks.
@@ -29853,7 +30059,7 @@ index a95a8ea51..5fd253aef 100644
            );
          } catch (err) {
            mainWarn('[AcpAgentManager]', 'materializeFluxHermesHome failed', err);
-@@ -725,14 +927,22 @@ ${collectedResponses.join('\n')}`;
+@@ -725,14 +849,22 @@ ${collectedResponses.join('\n')}`;
      }
 
      // Native (non-Flux) codex spawns: point CODEX_HOME at a Wayland-scoped clone
@@ -29882,7 +30088,7 @@ index a95a8ea51..5fd253aef 100644
        } catch (err) {
          mainWarn('[AcpAgentManager]', 'materializeNativeCodexHome failed', err);
        }
-@@ -909,17 +1119,7 @@ ${collectedResponses.join('\n')}`;
+@@ -909,17 +1041,7 @@ ${collectedResponses.join('\n')}`;
      }
 
      if (!customAgentConfig?.defaultCliPath) {
@@ -29901,7 +30107,7 @@ index a95a8ea51..5fd253aef 100644
      }
 
      return {
-@@ -986,14 +1186,21 @@ ${collectedResponses.join('\n')}`;
+@@ -986,14 +1108,21 @@ ${collectedResponses.join('\n')}`;
      }
 
      if (data.backend === 'codex') {
@@ -29931,7 +30137,7 @@ index a95a8ea51..5fd253aef 100644
      }
 
      return { cliPath, customArgs, yoloMode };
-@@ -1221,49 +1428,6 @@ ${collectedResponses.join('\n')}`;
+@@ -1221,49 +1350,6 @@ ${collectedResponses.join('\n')}`;
      }
    }
 
@@ -29981,7 +30187,7 @@ index a95a8ea51..5fd253aef 100644
    /**
     * Handle signal events (permission requests, finish, errors) from the ACP agent.
     * Auto-approves permissions in yolo mode and for team MCP tools,
-@@ -1285,14 +1449,9 @@ ${collectedResponses.join('\n')}`;
+@@ -1285,14 +1371,9 @@ ${collectedResponses.join('\n')}`;
          return;
        }
 
@@ -29999,7 +30205,7 @@ index a95a8ea51..5fd253aef 100644
          const autoOption = options[0];
          setTimeout(() => {
            void this.confirm(v.msg_id, toolCall.toolCallId || v.msg_id, autoOption);
-@@ -1312,25 +1471,6 @@ ${collectedResponses.join('\n')}`;
+@@ -1312,25 +1393,6 @@ ${collectedResponses.join('\n')}`;
          return;
        }
 
@@ -30025,7 +30231,7 @@ index a95a8ea51..5fd253aef 100644
        // Autopilot guardrail. In guarded-auto mode (workflows / Autopilot run the
        // bridge in 'default' so it escalates risky tool calls) the run proceeds
        // unattended, so auto-approve every escalated request EXCEPT a catastrophic
-@@ -1490,6 +1630,7 @@ ${collectedResponses.join('\n')}`;
+@@ -1490,6 +1552,7 @@ ${collectedResponses.join('\n')}`;
 
    initAgent(data: AcpAgentManagerData = this.options) {
      if (this.bootstrap) return this.bootstrap;
@@ -30033,7 +30239,7 @@ index a95a8ea51..5fd253aef 100644
 
      this.bootstrapping = true;
      const bootstrapPromise = (async () => {
-@@ -1531,6 +1672,8 @@ ${collectedResponses.join('\n')}`;
+@@ -1531,6 +1594,8 @@ ${collectedResponses.join('\n')}`;
            currentModelId: this.persistedModelId ?? undefined,
            sessionMode: this.currentMode,
            pendingConfigOptions: data.pendingConfigOptions,
@@ -30042,17 +30248,7 @@ index a95a8ea51..5fd253aef 100644
            // Per-conversation MCP scoping (#348): forward to loadBuiltinSessionMcpServers.
            activeMcpServers: data.activeMcpServers,
            // The read-only concierge diagnostics MCP server is Concierge-only.
-@@ -1540,8 +1683,7 @@ ${collectedResponses.join('\n')}`;
-           allowConciergeDiag: isConciergeAssistant(data.presetAssistantId) || isConciergeAssistant(data.customAgentId),
-           // Forward team MCP stdio config so AcpAgent.loadBuiltinSessionMcpServers() can inject it
-           teamMcpStdioConfig: (data as unknown as Record<string, unknown>).teamMcpStdioConfig as
--            | { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> }
--            | undefined,
-+            { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> } | undefined,
-         },
-         onSessionIdUpdate: (sessionId: string) => {
-           // Save ACP session ID to database for resume support
-@@ -1664,10 +1806,14 @@ ${collectedResponses.join('\n')}`;
+@@ -1664,10 +1729,14 @@ ${collectedResponses.join('\n')}`;
          if (this.isFirstMessage) {
            const isInTeam = Boolean((this.options as unknown as Record<string, unknown>).teamMcpStdioConfig);
            const useNativeSkills = this.resolveNativeSkillSupport() && !this.options.customWorkspace;
@@ -30068,7 +30264,7 @@ index a95a8ea51..5fd253aef 100644
              if (!isInTeam && (await shouldInjectTeamGuideMcp(this.options.backend))) {
                const [{ getTeamGuidePrompt }, { resolveLeaderAssistantLabel }] = await Promise.all([
                  import('@process/team/prompts/teamGuidePrompt.ts'),
-@@ -1709,7 +1855,7 @@ ${collectedResponses.join('\n')}`;
+@@ -1709,7 +1778,7 @@ ${collectedResponses.join('\n')}`;
            } else {
              // Custom workspace or no native support - inject rules + skills via prompt
              const { content: injectedContent } = await prepareFirstMessageWithSkillsIndex(contentToSend, {
@@ -30077,7 +30273,7 @@ index a95a8ea51..5fd253aef 100644
                enabledSkills: this.options.enabledSkills,
                excludeBuiltinSkills: this.options.excludeBuiltinSkills,
                enableTeamGuide: !isInTeam && (await shouldInjectTeamGuideMcp(this.options.backend)),
-@@ -1737,6 +1883,14 @@ ${collectedResponses.join('\n')}`;
+@@ -1737,6 +1806,14 @@ ${collectedResponses.join('\n')}`;
              const rawUserText = data.content.includes(WAYLAND_FILES_MARKER)
                ? data.content.split(WAYLAND_FILES_MARKER)[0]
                : data.content;
@@ -30092,7 +30288,7 @@ index a95a8ea51..5fd253aef 100644
              // Skills the user added to this chat from the composer - inject once.
              const pending = await consumePendingSessionSkills(this.conversation_id);
              if (pending) {
-@@ -2029,44 +2183,61 @@ ${collectedResponses.join('\n')}`;
+@@ -2029,44 +2106,61 @@ ${collectedResponses.join('\n')}`;
 
    /**
     * Model info for a backend BEFORE any task/agent exists (cold start on a new
@@ -30178,7 +30374,7 @@ index a95a8ea51..5fd253aef 100644
    }
 
    /**
-@@ -2239,7 +2410,9 @@ ${collectedResponses.join('\n')}`;
+@@ -2239,7 +2333,9 @@ ${collectedResponses.join('\n')}`;
        // spawn's scoped CODEX_HOME (materializeNativeCodexHome) carries it. We no
        // longer write the user's ~/.codex/config.toml. codex-acp has no live
        // set_mode, so the change applies on the next spawn regardless.
@@ -30189,7 +30385,7 @@ index a95a8ea51..5fd253aef 100644
        this.saveSessionMode(mode);
 
        if (this.isYoloMode(prev) && !this.isYoloMode(mode)) {
-@@ -2345,49 +2518,6 @@ ${collectedResponses.join('\n')}`;
+@@ -2345,49 +2441,6 @@ ${collectedResponses.join('\n')}`;
      } catch (error) {
        mainWarn('[AcpAgentManager]', 'Failed to save model ID', error);
      }
@@ -31787,6 +31983,46 @@ index e6711b8f9..dd662c5d4 100644
 
    const handleItemClick = (item: DirectoryItem) => {
      if (item.isDirectory) {
+diff --git a/src/renderer/components/workspace/WorkspaceComputerIndicator.tsx b/src/renderer/components/workspace/WorkspaceComputerIndicator.tsx
+new file mode 100644
+index 000000000..75fe6ce78
+--- /dev/null
++++ b/src/renderer/components/workspace/WorkspaceComputerIndicator.tsx
+@@ -0,0 +1,34 @@
++import type { WorkspaceComputerStatus } from '@/common/utils/workspaceComputer';
++import { Circle } from 'lucide-react';
++import React from 'react';
++
++type WorkspaceComputerIndicatorProps = {
++  status?: WorkspaceComputerStatus;
++};
++
++const WorkspaceComputerIndicator: React.FC<WorkspaceComputerIndicatorProps> = ({ status }) => {
++  if (!status) return null;
++
++  const statusLabel = status.connected ? 'connected' : 'disconnected';
++  return (
++    <span
++      className='flex items-center gap-6px shrink-0 text-11px font-500 leading-16px text-t-tertiary'
++      title={`${status.computerName} — ${statusLabel}`}
++      aria-label={`${status.computerName} ${statusLabel}`}
++    >
++      <span>{status.computerName}</span>
++      {status.connected && (
++        <Circle
++          aria-hidden='true'
++          data-testid='workspace-computer-connected'
++          size={7}
++          strokeWidth={0}
++          fill='currentColor'
++          className='text-[rgb(var(--success-6))]'
++        />
++      )}
++    </span>
++  );
++};
++
++export default WorkspaceComputerIndicator;
 diff --git a/src/renderer/hooks/file/useDirectorySelection.tsx b/src/renderer/hooks/file/useDirectorySelection.tsx
 index 267fd8679..fe547ec02 100644
 --- a/src/renderer/hooks/file/useDirectorySelection.tsx
@@ -31807,6 +32043,56 @@ index 267fd8679..fe547ec02 100644
        onConfirm={handleConfirm}
        onCancel={handleCancel}
      />
+diff --git a/src/renderer/hooks/useWorkspaceComputerStatuses.ts b/src/renderer/hooks/useWorkspaceComputerStatuses.ts
+new file mode 100644
+index 000000000..3b6100178
+--- /dev/null
++++ b/src/renderer/hooks/useWorkspaceComputerStatuses.ts
+@@ -0,0 +1,44 @@
++import { ipcBridge } from '@/common';
++import type { WorkspaceComputerStatus } from '@/common/utils/workspaceComputer';
++import { useEffect, useMemo, useState } from 'react';
++
++const REFRESH_INTERVAL_MS = 15_000;
++
++export function useWorkspaceComputerStatuses(workspaces: readonly (string | undefined)[]) {
++  const workspaceKey = useMemo(
++    () =>
++      Array.from(new Set(workspaces.filter((workspace): workspace is string => Boolean(workspace?.trim()))))
++        .toSorted()
++        .join('\n'),
++    [workspaces]
++  );
++  const [statuses, setStatuses] = useState<Record<string, WorkspaceComputerStatus>>({});
++
++  useEffect(() => {
++    const requestedWorkspaces = workspaceKey ? workspaceKey.split('\n') : [];
++    if (requestedWorkspaces.length === 0) {
++      setStatuses({});
++      return;
++    }
++
++    let active = true;
++    const refresh = async () => {
++      try {
++        const nextStatuses = await ipcBridge.project.getComputerStatuses.invoke({ workspaces: requestedWorkspaces });
++        if (!active) return;
++        setStatuses(Object.fromEntries(nextStatuses.map((status) => [status.workspace, status])));
++      } catch (error) {
++        console.warn('[workspace-computer-status] refresh failed', error);
++      }
++    };
++
++    void refresh();
++    const timer = window.setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
++    return () => {
++      active = false;
++      window.clearInterval(timer);
++    };
++  }, [workspaceKey]);
++
++  return statuses;
++}
 diff --git a/src/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync.ts b/src/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync.ts
 index b6ce92bf0..69ab00075 100644
 --- a/src/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync.ts
@@ -31822,6 +32108,56 @@ index b6ce92bf0..69ab00075 100644
          });
          conversationsState = filteredData;
          // Use ALL conversation IDs (including team/healthCheck) so the
+diff --git a/src/renderer/pages/conversation/GroupedHistory/index.tsx b/src/renderer/pages/conversation/GroupedHistory/index.tsx
+index 82f52cd32..8c06512c6 100644
+--- a/src/renderer/pages/conversation/GroupedHistory/index.tsx
++++ b/src/renderer/pages/conversation/GroupedHistory/index.tsx
+@@ -8,6 +8,7 @@ import { ChevronDown, ChevronRight, FolderOpen } from 'lucide-react';
+ import { ipcBridge } from '@/common';
+ import type { TChatConversation } from '@/common/config/storage';
+ import DirectorySelectionModal from '@/renderer/components/settings/DirectorySelectionModal';
++import WorkspaceComputerIndicator from '@/renderer/components/workspace/WorkspaceComputerIndicator';
+ import AssignToProjectModal from '@/renderer/pages/projects/components/AssignToProjectModal';
+ import { CronJobIndicator, useCronJobsMap } from '@/renderer/pages/cron';
+ import { DndContext, DragOverlay, closestCenter } from '@dnd-kit/core';
+@@ -18,6 +19,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
+ import { useTranslation } from 'react-i18next';
+ import { useNavigate, useParams } from 'react-router-dom';
+ import { emitter } from '@/renderer/utils/emitter';
++import { useWorkspaceComputerStatuses } from '@/renderer/hooks/useWorkspaceComputerStatuses';
+
+ import WorkspaceCollapse from '../components/WorkspaceCollapse';
+ import ConversationRow from './ConversationRow';
+@@ -69,6 +71,16 @@ const WorkspaceGroupedHistory: React.FC<WorkspaceGroupedHistoryProps> = ({
+     timelineSections,
+     handleToggleWorkspace,
+   } = useConversations();
++  const groupedWorkspaces = useMemo(
++    () =>
++      timelineSections.flatMap((section) =>
++        section.items.flatMap((item) =>
++          item.type === 'workspace' && item.workspaceGroup ? [item.workspaceGroup.workspace] : []
++        )
++      ),
++    [timelineSections]
++  );
++  const computerStatuses = useWorkspaceComputerStatuses(groupedWorkspaces);
+
+   const {
+     selectedConversationIds,
+@@ -465,10 +477,11 @@ const WorkspaceGroupedHistory: React.FC<WorkspaceGroupedHistoryProps> = ({
+                         onToggle={() => handleToggleWorkspace(group.workspace)}
+                         siderCollapsed={collapsed}
+                         header={
+-                          <div className='flex items-center gap-8px text-14px min-w-0'>
++                          <div className='flex items-center gap-8px text-14px min-w-0 w-full'>
+                             <span className='font-medium truncate flex-1 text-t-primary min-w-0'>
+                               {group.displayName}
+                             </span>
++                            <WorkspaceComputerIndicator status={computerStatuses[group.workspace]} />
+                           </div>
+                         }
+                       >
 diff --git a/src/renderer/pages/conversation/GroupedHistory/utils/groupingHelpers.ts b/src/renderer/pages/conversation/GroupedHistory/utils/groupingHelpers.ts
 index 9b98fac65..0247633cc 100644
 --- a/src/renderer/pages/conversation/GroupedHistory/utils/groupingHelpers.ts
@@ -33969,6 +34305,123 @@ index d4f57919e..0f4d31207 100644
 +    gap: 8px;
 +  }
 +}
+diff --git a/src/renderer/pages/projects/ProjectsListPage.tsx b/src/renderer/pages/projects/ProjectsListPage.tsx
+index cec6b7369..61c0dee15 100644
+--- a/src/renderer/pages/projects/ProjectsListPage.tsx
++++ b/src/renderer/pages/projects/ProjectsListPage.tsx
+@@ -16,6 +16,7 @@ import { useProjects } from './hooks/useProjects';
+ import ProjectCard from './components/ProjectCard';
+ import CreateProjectModal from './components/CreateProjectModal';
+ import NewProjectWizard from './components/NewProjectWizard';
++import { useWorkspaceComputerStatuses } from '@/renderer/hooks/useWorkspaceComputerStatuses';
+
+ /**
+  * Top-level Projects surface: a grid of project tiles plus one obvious "New
+@@ -27,6 +28,8 @@ const ProjectsListPage: React.FC = () => {
+   const { t } = useTranslation();
+   const navigate = useNavigate();
+   const { projects, counts, loading, createProject, updateProject, removeProject } = useProjects();
++  const projectWorkspaces = React.useMemo(() => projects.map((project) => project.workspace), [projects]);
++  const computerStatuses = useWorkspaceComputerStatuses(projectWorkspaces);
+
+   const [editing, setEditing] = React.useState<IProject | undefined>(undefined);
+   const [wizardOpen, setWizardOpen] = React.useState(false);
+@@ -126,12 +129,9 @@ const ProjectsListPage: React.FC = () => {
+       actions={newProjectButton}
+       width='full'
+     >
+-      <div className='pb-24px' data-appearance-surface='projects-list'>
++      <div className='pb-24px'>
+         {!loading && projects.length === 0 ? (
+-          <div
+-            className='flex flex-col items-center justify-center gap-16px min-h-[360px] text-center'
+-            data-appearance-role='projects-empty-state'
+-          >
++          <div className='flex flex-col items-center justify-center gap-16px min-h-[360px] text-center'>
+             <div className='flex items-center justify-center w-64px h-64px rd-16px bg-fill-1 text-t-tertiary'>
+               <FolderPlus size={28} />
+             </div>
+@@ -147,16 +147,13 @@ const ProjectsListPage: React.FC = () => {
+             </Button>
+           </div>
+         ) : (
+-          <div
+-            className='grid gap-16px'
+-            style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}
+-            data-appearance-role='project-grid'
+-          >
++          <div className='grid gap-16px' style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
+             {projects.map((p) => (
+               <ProjectCard
+                 key={p.id}
+                 project={p}
+                 chatCount={counts[p.id] ?? 0}
++                computerStatus={p.workspace ? computerStatuses[p.workspace] : undefined}
+                 onOpen={(proj) => navigate(`/project/${proj.id}`)}
+                 onEdit={openEdit}
+                 onDelete={handleDelete}
+diff --git a/src/renderer/pages/projects/components/ProjectCard.tsx b/src/renderer/pages/projects/components/ProjectCard.tsx
+index 19f55f3df..855a15647 100644
+--- a/src/renderer/pages/projects/components/ProjectCard.tsx
++++ b/src/renderer/pages/projects/components/ProjectCard.tsx
+@@ -5,6 +5,8 @@
+  */
+
+ import type { IProject } from '@/common/types/project';
++import type { WorkspaceComputerStatus } from '@/common/utils/workspaceComputer';
++import WorkspaceComputerIndicator from '@/renderer/components/workspace/WorkspaceComputerIndicator';
+ import { Dropdown, Menu } from '@arco-design/web-react';
+ import { Folder, MessageSquare, MoreHorizontal, Pencil, Pin, PinOff, Trash2 } from 'lucide-react';
+ import React from 'react';
+@@ -14,6 +16,7 @@ import styles from './projectCards.module.css';
+ type ProjectCardProps = {
+   project: IProject;
+   chatCount: number;
++  computerStatus?: WorkspaceComputerStatus;
+   onOpen: (project: IProject) => void;
+   onEdit: (project: IProject) => void;
+   onDelete: (project: IProject) => void;
+@@ -26,7 +29,15 @@ type ProjectCardProps = {
+  * whole card is one obvious click target into the workspace (Krug); secondary
+  * actions hide behind a 3-dot menu so they never compete with the primary action.
+  */
+-const ProjectCard: React.FC<ProjectCardProps> = ({ project, chatCount, onOpen, onEdit, onDelete, onTogglePin }) => {
++const ProjectCard: React.FC<ProjectCardProps> = ({
++  project,
++  chatCount,
++  computerStatus,
++  onOpen,
++  onEdit,
++  onDelete,
++  onTogglePin,
++}) => {
+   const { t } = useTranslation();
+   const color = project.iconColor || '#FF6A00';
+
+@@ -42,7 +53,6 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, chatCount, onOpen, o
+         }
+       }}
+       className={`group relative flex flex-col gap-12px p-16px cursor-pointer ${styles.card}`}
+-      data-appearance-role='project-card'
+     >
+       <div className='flex items-start justify-between'>
+         <div
+@@ -108,9 +118,12 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, chatCount, onOpen, o
+         </div>
+       </div>
+
+-      <div className='flex items-center gap-4px text-12px text-t-tertiary'>
+-        <MessageSquare size={13} />
+-        <span>{t('projects.card.chatCount', { count: chatCount })}</span>
++      <div className='flex items-center justify-between gap-8px min-w-0'>
++        <div className='flex items-center gap-4px text-12px text-t-tertiary min-w-0'>
++          <MessageSquare size={13} className='shrink-0' />
++          <span className='truncate'>{t('projects.card.chatCount', { count: chatCount })}</span>
++        </div>
++        <WorkspaceComputerIndicator status={computerStatus} />
+       </div>
+     </div>
+   );
 diff --git a/src/renderer/pages/settings/AgentSettings/RemoteAgentManagement.tsx b/src/renderer/pages/settings/AgentSettings/RemoteAgentManagement.tsx
 index 250efe1a8..80dd0df40 100644
 --- a/src/renderer/pages/settings/AgentSettings/RemoteAgentManagement.tsx
@@ -35413,6 +35866,40 @@ index a837db695..872d740a8 100644
 +  });
 +
  });
+diff --git a/tests/unit/WorkspaceComputerIndicator.dom.test.tsx b/tests/unit/WorkspaceComputerIndicator.dom.test.tsx
+new file mode 100644
+index 000000000..0a0656834
+--- /dev/null
++++ b/tests/unit/WorkspaceComputerIndicator.dom.test.tsx
+@@ -0,0 +1,28 @@
++import React from 'react';
++import { render, screen } from '@testing-library/react';
++import { describe, expect, it } from 'vitest';
++import WorkspaceComputerIndicator from '../../src/renderer/components/workspace/WorkspaceComputerIndicator';
++
++describe('WorkspaceComputerIndicator', () => {
++  it('shows the computer name and a green dot when connected', () => {
++    render(
++      <WorkspaceComputerIndicator
++        status={{ workspace: '/workspace', computerName: 'ATIUS-SRV-1', connected: true, checkedAt: 1 }}
++      />
++    );
++
++    expect(screen.getByText('ATIUS-SRV-1')).toBeInTheDocument();
++    expect(screen.getByTestId('workspace-computer-connected')).toHaveClass('text-[rgb(var(--success-6))]');
++  });
++
++  it('keeps the computer name but hides the green dot when disconnected', () => {
++    render(
++      <WorkspaceComputerIndicator
++        status={{ workspace: '/workspace', computerName: 'ATIUS-SRV-2', connected: false, checkedAt: 1 }}
++      />
++    );
++
++    expect(screen.getByText('ATIUS-SRV-2')).toBeInTheDocument();
++    expect(screen.queryByTestId('workspace-computer-connected')).not.toBeInTheDocument();
++  });
++});
 diff --git a/tests/unit/acpConnectors.test.ts b/tests/unit/acpConnectors.test.ts
 index 710e45ccc..196151a15 100644
 --- a/tests/unit/acpConnectors.test.ts
@@ -36413,3 +36900,62 @@ index 0e134f93a..e1508766d 100644
    });
 
    it('passkeyEligible is false on HTTPS with an IP-literal host', () => {
+diff --git a/tests/unit/workspaceComputerStatus.test.ts b/tests/unit/workspaceComputerStatus.test.ts
+new file mode 100644
+index 000000000..2eac55a08
+--- /dev/null
++++ b/tests/unit/workspaceComputerStatus.test.ts
+@@ -0,0 +1,53 @@
++import { describe, expect, it, vi } from 'vitest';
++
++vi.mock('@process/utils/initStorage', () => ({
++  ProcessConfig: { get: vi.fn(async () => undefined) },
++}));
++
++import {
++  DEFAULT_WORKSPACE_HYBRID_ROUTES,
++  resolveWorkspaceComputerIdentity,
++  resolveWorkspaceHybridContextFromRoutes,
++} from '@/common/utils/workspaceComputer';
++import { hasRemoteMountForWorkspace, parseLinuxMountInfo } from '@process/services/workspaceComputerStatus';
++
++describe('workspace computer status', () => {
++  it('resolves an NFS workspace to its owner computer', () => {
++    const workspace = '/home/ubuntu/Servers/atius-srv-1/GitHub/containers/router-ai-atius';
++    expect(resolveWorkspaceComputerIdentity(workspace, DEFAULT_WORKSPACE_HYBRID_ROUTES, 'atius-srv-3')).toEqual({
++      hostId: 'atius-srv-1',
++      computerName: 'ATIUS-SRV-1',
++      remote: true,
++    });
++  });
++
++  it('labels local workspaces with the local short hostname', () => {
++    expect(resolveWorkspaceComputerIdentity('/home/ubuntu/GitHub/wayland', [], 'atius-srv-3.atius.test')).toEqual({
++      hostId: 'atius-srv-3',
++      computerName: 'ATIUS-SRV-3',
++      remote: false,
++    });
++  });
++
++  it('uses the longest matching route for nested mounts', () => {
++    const resolved = resolveWorkspaceHybridContextFromRoutes('/mnt/repos/private/app', [
++      { hostId: 'outer', mountPath: '/mnt/repos', remoteRoot: '/repos' },
++      { hostId: 'inner', mountPath: '/mnt/repos/private', remoteRoot: '/private' },
++    ]);
++    expect(resolved?.hostId).toBe('inner');
++    expect(resolved?.remoteWorkspace).toBe('/private/app');
++  });
++
++  it('marks only active remote filesystems as connected, never autofs placeholders', () => {
++    const mountInfo = [
++      '41 29 0:42 / /home/ubuntu/Servers/atius-srv-1/GitHub rw,relatime - autofs systemd-1 rw',
++      '52 41 0:55 / /home/ubuntu/Servers/atius-srv-2/GitHub rw,relatime - nfs4 10.12.1.12:/home/ubuntu/GitHub rw',
++      '53 41 0:56 / /home/ubuntu/Servers/horistic-srv/GitHub\\040Projects rw,relatime - nfs4 host:/exports rw',
++    ].join('\n');
++    const mounts = parseLinuxMountInfo(mountInfo);
++
++    expect(hasRemoteMountForWorkspace('/home/ubuntu/Servers/atius-srv-1/GitHub/app', mounts)).toBe(false);
++    expect(hasRemoteMountForWorkspace('/home/ubuntu/Servers/atius-srv-2/GitHub/app', mounts)).toBe(true);
++    expect(hasRemoteMountForWorkspace('/home/ubuntu/Servers/horistic-srv/GitHub Projects/app', mounts)).toBe(true);
++  });
++});

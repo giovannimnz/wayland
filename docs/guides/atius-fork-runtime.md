@@ -163,6 +163,7 @@ bash scripts/atius-update.sh
 - syncs the live Wayland storage into `/home/ubuntu/.config/Wayland/config/wayland-config.txt`;
 - regenerates `model.config` from the `ubuntu` Codex runtime;
 - stores `atius.workspaceHybridRoutes` and defaults NFS GitHub mounts to hybrid execution guidance (edit on the mount, validate on the owner host via SSH alias);
+- shows the workspace owner computer on the right side of Project cards and Recent Chat folder headers; a green dot means the local workspace or real NFS mount is currently available (an `autofs` placeholder alone is not connected);
 - prunes generated `codex-agent-profile-*` rows from `acp.customAgents` while preserving user-owned custom ACP agents;
 - mirrors `/home/ubuntu/.codex/skills/*/SKILL.md` into `/home/ubuntu/.config/Wayland/config/skills/` as symlinks;
 - generates `slash.customCommands` entries that insert `$skill-name` for Codex skills, including GSD/SDD commands;
@@ -180,6 +181,7 @@ bash scripts/atius-build-codex-acp.sh --test --force
 bash scripts/atius-verify-codex-acp.sh --live
 NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/renderer/guid/firstSafeCuratedModel.test.ts
 NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/AcpAgentManagerSkillInjection.test.ts tests/unit/AgentPillBar.dom.test.tsx tests/unit/renderer/guidModelSelector.dom.test.tsx tests/unit/useGuidSend.dom.test.ts tests/unit/process/task/codexNativeSandbox.test.ts tests/unit/process/task/codexConfigEffort.test.ts
+NODE_OPTIONS=--max-old-space-size=4096 ./node_modules/.bin/vitest run tests/unit/workspaceComputerStatus.test.ts tests/unit/WorkspaceComputerIndicator.dom.test.tsx
 bun test tests/unit/webserver/cookieOptions.test.ts tests/unit/webserver/detectNetworkContext.test.ts
 npm run typecheck
 bash scripts/atius-build-renderer-overlay.sh

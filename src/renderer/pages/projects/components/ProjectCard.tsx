@@ -5,6 +5,8 @@
  */
 
 import type { IProject } from '@/common/types/project';
+import type { WorkspaceComputerStatus } from '@/common/utils/workspaceComputer';
+import WorkspaceComputerIndicator from '@/renderer/components/workspace/WorkspaceComputerIndicator';
 import { Dropdown, Menu } from '@arco-design/web-react';
 import { Folder, MessageSquare, MoreHorizontal, Pencil, Pin, PinOff, Trash2 } from 'lucide-react';
 import React from 'react';
@@ -14,6 +16,7 @@ import styles from './projectCards.module.css';
 type ProjectCardProps = {
   project: IProject;
   chatCount: number;
+  computerStatus?: WorkspaceComputerStatus;
   onOpen: (project: IProject) => void;
   onEdit: (project: IProject) => void;
   onDelete: (project: IProject) => void;
@@ -26,7 +29,15 @@ type ProjectCardProps = {
  * whole card is one obvious click target into the workspace (Krug); secondary
  * actions hide behind a 3-dot menu so they never compete with the primary action.
  */
-const ProjectCard: React.FC<ProjectCardProps> = ({ project, chatCount, onOpen, onEdit, onDelete, onTogglePin }) => {
+const ProjectCard: React.FC<ProjectCardProps> = ({
+  project,
+  chatCount,
+  computerStatus,
+  onOpen,
+  onEdit,
+  onDelete,
+  onTogglePin,
+}) => {
   const { t } = useTranslation();
   const color = project.iconColor || '#FF6A00';
 
@@ -107,9 +118,12 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, chatCount, onOpen, o
         </div>
       </div>
 
-      <div className='flex items-center gap-4px text-12px text-t-tertiary'>
-        <MessageSquare size={13} />
-        <span>{t('projects.card.chatCount', { count: chatCount })}</span>
+      <div className='flex items-center justify-between gap-8px min-w-0'>
+        <div className='flex items-center gap-4px text-12px text-t-tertiary min-w-0'>
+          <MessageSquare size={13} className='shrink-0' />
+          <span className='truncate'>{t('projects.card.chatCount', { count: chatCount })}</span>
+        </div>
+        <WorkspaceComputerIndicator status={computerStatus} />
       </div>
     </div>
   );
