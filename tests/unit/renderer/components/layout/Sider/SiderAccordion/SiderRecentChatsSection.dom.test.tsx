@@ -99,12 +99,12 @@ describe('SiderRecentChatsSection', () => {
       { id: 'c2', extra: {} },
       { id: 'c3', extra: { isHealthCheck: true } }, // filtered out
       { id: 'c4', extra: { teamId: 't1' } }, // filtered out
-      { id: 'c5', extra: { projectId: 'proj-fintrakd' } }, // filtered out
+      { id: 'c5', extra: { projectId: 'proj-fintrakd' } }, // visible in global recents
     ]);
     renderSection();
     const badge = await screen.findByTestId('recent-chats-badge', undefined, { timeout: 2000 });
-    expect(badge).toHaveTextContent('2');
-    expect(badge.getAttribute('aria-label')).toBe('2 chats');
+    expect(badge).toHaveTextContent('3');
+    expect(badge.getAttribute('aria-label')).toBe('3 chats');
   });
 
   it('keeps the body (WorkspaceGroupedHistory stub) always visible - no collapse affordance', async () => {

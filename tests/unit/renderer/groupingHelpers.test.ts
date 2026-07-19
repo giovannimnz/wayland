@@ -460,7 +460,7 @@ describe('buildGroupedHistory', () => {
     expect(result.timelineSections[0].items[0].conversation?.id).toBe('conv-1');
   });
 
-  it('excludes team and project scoped conversations from global history', () => {
+  it('excludes team conversations but keeps project conversations in global history', () => {
     const conversations: TChatConversation[] = [
       {
         id: 'conv-1',
@@ -491,8 +491,10 @@ describe('buildGroupedHistory', () => {
     const result = buildGroupedHistory(conversations, mockT);
 
     expect(result.pinnedConversations).toHaveLength(0);
-    expect(result.timelineSections[0].items).toHaveLength(1);
-    expect(result.timelineSections[0].items[0].conversation?.id).toBe('conv-1');
+    expect(result.timelineSections[0].items).toHaveLength(2);
+    expect(result.timelineSections[0].items[0].conversation?.id).toBe('conv-3');
+    expect(result.timelineSections[0].items[1].conversation?.id).toBe('conv-1');
+    expect(result.timelineSections[0].items.some((item) => item.conversation?.id === 'conv-2')).toBe(false);
   });
 
   it('sorts pinned conversations by sortOrder first', () => {

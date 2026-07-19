@@ -46,6 +46,7 @@ Tracked ATIUS source customizations live in these files:
 - `src/renderer/components/layout/Sider/Sider.module.css`
 - `src/renderer/components/layout/Sider/SiderAccordion/SiderAccordionShell.module.css`
 - `src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.module.css`
+- `src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.tsx`
 - `src/renderer/components/layout/Sider/SiderFooter.tsx`
 - `src/renderer/components/layout/Sider/SiderFooter/SiderFooterQuickActions.module.css`
 - `src/renderer/components/layout/Sider/index.tsx`
@@ -73,6 +74,10 @@ Tracked ATIUS source customizations live in these files:
 - `src/renderer/pages/guid/components/newChatStarter/IntentPillBar.module.css`
 - `src/renderer/pages/guid/hooks/useGuidAgentSelection.ts`
 - `src/renderer/pages/guid/hooks/useGuidSend.ts`
+- `src/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync.ts`
+- `src/renderer/pages/conversation/GroupedHistory/utils/groupingHelpers.ts`
+- `tests/unit/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.dom.test.tsx`
+- `tests/unit/renderer/groupingHelpers.test.ts`
 - `src/renderer/services/i18n/i18n-keys.d.ts`
 - `src/renderer/services/i18n/index.ts`
 - `src/renderer/services/i18n/locales/*/agentMode.json`
@@ -111,6 +116,7 @@ Generated artifacts are intentionally not tracked:
 - The GUID agent pill bar exposes collapsed agents by accessible name so Hermes/Codex can be selected by keyboard and automation.
 - Mobile GUID controls wrap visibly instead of hiding later model/effort/permission or intent options behind horizontal overflow.
 - The left sidebar never exposes a bottom horizontal scrollbar; long recents and footer controls truncate or compact inside the available width.
+- Project conversations remain visible and counted in global Recent Chats; team conversations and health checks stay on their owning/internal surfaces.
 - The desktop left sidebar divider is a real resize handle: drag persists `wayland:sidebar-width` while preserving the rail snap behavior below the collapse threshold.
 
 ## IJFW Memory (Ferrox Labs)

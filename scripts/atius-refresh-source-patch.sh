@@ -57,6 +57,7 @@ FILES=(
   src/renderer/components/layout/Sider/Sider.module.css
   src/renderer/components/layout/Sider/SiderAccordion/SiderAccordionShell.module.css
   src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.module.css
+  src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.tsx
   src/renderer/components/layout/Sider/SiderFooter.tsx
   src/renderer/components/layout/Sider/SiderFooter/SiderFooterQuickActions.module.css
   src/renderer/components/layout/Sider/index.tsx
@@ -75,6 +76,8 @@ FILES=(
   src/renderer/pages/guid/components/newChatStarter/IntentPillBar.module.css
   src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
   src/renderer/pages/guid/hooks/useGuidSend.ts
+  src/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync.ts
+  src/renderer/pages/conversation/GroupedHistory/utils/groupingHelpers.ts
   src/renderer/pages/settings/AgentSettings/RemoteAgentManagement.tsx
   src/renderer/services/i18n/i18n-keys.d.ts
   src/renderer/services/i18n/index.ts
@@ -117,6 +120,8 @@ FILES=(
   tests/unit/process/task/codexConfigEffort.test.ts
   tests/unit/process/task/codexNativeSandbox.test.ts
   tests/unit/renderer/AcpConfigSelector.dom.test.tsx
+  tests/unit/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.dom.test.tsx
+  tests/unit/renderer/groupingHelpers.test.ts
   tests/unit/renderer/GuidActionRow.dom.test.tsx
   tests/unit/renderer/guid/firstSafeCuratedModel.test.ts
   tests/unit/renderer/guidModelSelector.dom.test.tsx

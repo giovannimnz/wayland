@@ -96,10 +96,10 @@ export const groupConversationsByWorkspace = (
   ];
 };
 
-/** Check whether a conversation belongs to a scoped surface (should be hidden from global sidebar). */
-const isScopedConversation = (conversation: TChatConversation): boolean => {
-  const extra = conversation.extra as { teamId?: string; projectId?: string } | undefined;
-  return Boolean(extra?.teamId || extra?.projectId);
+/** Team chats stay on their owning surface; project chats also belong in global recents. */
+const isTeamConversation = (conversation: TChatConversation): boolean => {
+  const extra = conversation.extra as { teamId?: string } | undefined;
+  return Boolean(extra?.teamId);
 };
 
 export const buildGroupedHistory = (
@@ -107,8 +107,8 @@ export const buildGroupedHistory = (
   t: (key: string) => string,
   projects: IProject[] = []
 ): GroupedHistoryResult => {
-  // Filter out scoped conversations; they are only visible via their owning surface.
-  const visibleConversations = conversations.filter((conv) => !isScopedConversation(conv));
+  // Team chats are owned by the Teams surface. Project chats remain globally discoverable.
+  const visibleConversations = conversations.filter((conv) => !isTeamConversation(conv));
 
   const pinnedConversations = visibleConversations
     .filter((conversation) => isConversationPinned(conversation))

@@ -1,8 +1,75 @@
 diff --git a/AGENTS.md b/AGENTS.md
-index 293babd65..ba2bc72ef 100644
+index 293babd65..8734de251 100644
 --- a/AGENTS.md
 +++ b/AGENTS.md
-@@ -1,3 +1,16 @@
+@@ -1,3 +1,83 @@
++---
++ijfw_version: 1.3.2
++ijfw_schema: 1
++type: software
++primary_type: software
++secondary_types:
++  - content
++confidence: 0.9
++detected_at: 2026-07-12T18:07:22.026Z
++signals:
++  - kind: manifest
++    weight: 0.9
++    manifests: [Makefile, package.json, package.json]
++  - kind: dir_design
++    weight: 0.4
++    name: assets
++  - kind: dir_design
++    weight: 0.4
++    name: assets
++  - kind: dir_design
++    weight: 0.4
++    name: assets
++  - kind: dir_design
++    weight: 0.4
++    name: assets
++  - kind: dir_design
++    weight: 0.4
++    name: assets
++  - kind: dir_design
++    weight: 0.4
++    name: assets
++  - kind: dir_design
++    weight: 0.4
++    name: assets
++  - kind: dir_design
++    weight: 0.4
++    name: assets
++  - kind: dir_design
++    weight: 0.4
++    name: assets
++  - kind: file_extension_ratio
++    weight: 0.7
++    domain: software
++    ratio: 0.894
++    count: 3838
++  - kind: file_extension_ratio
++    weight: 0.7
++    domain: design
++    ratio: 0.087
++    count: 373
++  - kind: filename_pattern
++    weight: 0.2
++    domain: content
++    name: seo-content-engine.md
++  - kind: filename_pattern
++    weight: 0.2
++    domain: content
++    name: seo-organic.md
++  - kind: filename_pattern
++    weight: 0.2
++    domain: content
++    name: seo-content-engine.svg
++  - kind: filename_pattern
++    weight: 0.2
++    domain: content
++    name: seo-content-engine.md
++---
 +<!-- ATIUS-CPU-GUARDRAIL:START -->
 +# Regra Maxima: Limite de CPU para Builds e Tarefas Pesadas
 +
@@ -19,10 +86,30 @@ index 293babd65..ba2bc72ef 100644
  ---
  ijfw_version: 1.3.2
  ijfw_schema: 1
-@@ -305,3 +318,11 @@ Project memory at .ijfw/memory/. Call `ijfw_memory_prelude` for full context.
- No project agents yet. Run `ijfw team` to set them up.
+@@ -295,13 +375,27 @@ All user-facing text must use i18n keys - never hardcode strings. Languages and
+ See the `i18n` skill (`.claude/skills/i18n/SKILL.md`) for complete workflow, key naming, and validation steps.
 
+ <!-- IJFW-MEMORY-START -->
+-
+ Project memory at .ijfw/memory/. Call `ijfw_memory_prelude` for full context.
+-
+ <!-- IJFW-MEMORY-END -->
+
+ <!-- IJFW-AGENTS-START -->
+-
+ No project agents yet. Run `ijfw team` to set them up.
+-
  <!-- IJFW-AGENTS-END -->
++
++<!-- CODEX-MULTIAGENT-HEADLESS:START -->
++## Codex Multi-Agent and Headless Browser Policy
++
++- Standing explicit authorization: Codex may use multi-agent delegation for work in this project or host without requesting task-by-task confirmation.
++- Writer serialization is mandatory: concurrent agents may research and validate in parallel, but file mutations must be coordinated so only one writer changes any given file or overlapping scope at a time.
++- Chrome DevTools, Playwright, Chrome, Chromium, and browser automation must run headless by default.
++- Do not open visible browser windows or use XRDP/noVNC desktop sessions for browser automation unless the user gives a task-specific override.
++- Browser validation must retain headless evidence appropriate to the task, such as command output, traces, screenshots, snapshots, or test artifacts.
++<!-- CODEX-MULTIAGENT-HEADLESS:END -->
 +
 +<!-- codex-policy:parallel-headless:start -->
 +## Paralelismo e automacao de browser
@@ -26955,10 +27042,10 @@ index 000000000..41de3e5a0
 +history during an incident.
 diff --git a/docs/guides/atius-fork-runtime.md b/docs/guides/atius-fork-runtime.md
 new file mode 100644
-index 000000000..292413e0a
+index 000000000..daf7227e4
 --- /dev/null
 +++ b/docs/guides/atius-fork-runtime.md
-@@ -0,0 +1,267 @@
+@@ -0,0 +1,273 @@
 +# Atius srv-3 fork/runtime guide
 +
 +This guide documents the ATIUS-managed source runtime served at
@@ -27007,6 +27094,7 @@ index 000000000..292413e0a
 +- `src/renderer/components/layout/Sider/Sider.module.css`
 +- `src/renderer/components/layout/Sider/SiderAccordion/SiderAccordionShell.module.css`
 +- `src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.module.css`
++- `src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.tsx`
 +- `src/renderer/components/layout/Sider/SiderFooter.tsx`
 +- `src/renderer/components/layout/Sider/SiderFooter/SiderFooterQuickActions.module.css`
 +- `src/renderer/components/layout/Sider/index.tsx`
@@ -27034,6 +27122,10 @@ index 000000000..292413e0a
 +- `src/renderer/pages/guid/components/newChatStarter/IntentPillBar.module.css`
 +- `src/renderer/pages/guid/hooks/useGuidAgentSelection.ts`
 +- `src/renderer/pages/guid/hooks/useGuidSend.ts`
++- `src/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync.ts`
++- `src/renderer/pages/conversation/GroupedHistory/utils/groupingHelpers.ts`
++- `tests/unit/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.dom.test.tsx`
++- `tests/unit/renderer/groupingHelpers.test.ts`
 +- `src/renderer/services/i18n/i18n-keys.d.ts`
 +- `src/renderer/services/i18n/index.ts`
 +- `src/renderer/services/i18n/locales/*/agentMode.json`
@@ -27072,6 +27164,7 @@ index 000000000..292413e0a
 +- The GUID agent pill bar exposes collapsed agents by accessible name so Hermes/Codex can be selected by keyboard and automation.
 +- Mobile GUID controls wrap visibly instead of hiding later model/effort/permission or intent options behind horizontal overflow.
 +- The left sidebar never exposes a bottom horizontal scrollbar; long recents and footer controls truncate or compact inside the available width.
++- Project conversations remain visible and counted in global Recent Chats; team conversations and health checks stay on their owning/internal surfaces.
 +- The desktop left sidebar divider is a real resize handle: drag persists `wayland:sidebar-width` while preserving the rail snap behavior below the collapse threshold.
 +
 +## IJFW Memory (Ferrox Labs)
@@ -27609,10 +27702,10 @@ index 000000000..171b72c4f
 +bash "$ROOT/scripts/atius-build-renderer-overlay.sh"
 diff --git a/scripts/atius-refresh-source-patch.sh b/scripts/atius-refresh-source-patch.sh
 new file mode 100755
-index 000000000..00336e36b
+index 000000000..38c0dc077
 --- /dev/null
 +++ b/scripts/atius-refresh-source-patch.sh
-@@ -0,0 +1,197 @@
+@@ -0,0 +1,202 @@
 +#!/usr/bin/env bash
 +set -euo pipefail
 +ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -27672,6 +27765,7 @@ index 000000000..00336e36b
 +  src/renderer/components/layout/Sider/Sider.module.css
 +  src/renderer/components/layout/Sider/SiderAccordion/SiderAccordionShell.module.css
 +  src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.module.css
++  src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.tsx
 +  src/renderer/components/layout/Sider/SiderFooter.tsx
 +  src/renderer/components/layout/Sider/SiderFooter/SiderFooterQuickActions.module.css
 +  src/renderer/components/layout/Sider/index.tsx
@@ -27690,6 +27784,8 @@ index 000000000..00336e36b
 +  src/renderer/pages/guid/components/newChatStarter/IntentPillBar.module.css
 +  src/renderer/pages/guid/hooks/useGuidAgentSelection.ts
 +  src/renderer/pages/guid/hooks/useGuidSend.ts
++  src/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync.ts
++  src/renderer/pages/conversation/GroupedHistory/utils/groupingHelpers.ts
 +  src/renderer/pages/settings/AgentSettings/RemoteAgentManagement.tsx
 +  src/renderer/services/i18n/i18n-keys.d.ts
 +  src/renderer/services/i18n/index.ts
@@ -27732,6 +27828,8 @@ index 000000000..00336e36b
 +  tests/unit/process/task/codexConfigEffort.test.ts
 +  tests/unit/process/task/codexNativeSandbox.test.ts
 +  tests/unit/renderer/AcpConfigSelector.dom.test.tsx
++  tests/unit/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.dom.test.tsx
++  tests/unit/renderer/groupingHelpers.test.ts
 +  tests/unit/renderer/GuidActionRow.dom.test.tsx
 +  tests/unit/renderer/guid/firstSafeCuratedModel.test.ts
 +  tests/unit/renderer/guidModelSelector.dom.test.tsx
@@ -31473,6 +31571,24 @@ index 47f76b715..365e89683 100644
  }
  .fallback {
    min-height: 200px;
+diff --git a/src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.tsx b/src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.tsx
+index eaf024d3a..c211b43ae 100644
+--- a/src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.tsx
++++ b/src/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.tsx
+@@ -38,10 +38,10 @@ export const SiderRecentChatsSection: React.FC<SiderRecentChatsSectionProps> = (
+           .then((list) => {
+             if (!alive) return;
+             if (Array.isArray(list)) {
+-              // Match WorkspaceGroupedHistory's visible-set filter: drop health-checks and scoped chats.
++              // Match WorkspaceGroupedHistory's visible-set filter: drop health-checks and team chats.
+               const visible = list.filter((conv) => {
+-                const extra = conv.extra as { isHealthCheck?: boolean; teamId?: string; projectId?: string } | undefined;
+-                return extra?.isHealthCheck !== true && !extra?.teamId && !extra?.projectId;
++                const extra = conv.extra as { isHealthCheck?: boolean; teamId?: string } | undefined;
++                return extra?.isHealthCheck !== true && !extra?.teamId;
+               });
+               setCount(visible.length);
+             } else {
 diff --git a/src/renderer/components/layout/Sider/SiderFooter.tsx b/src/renderer/components/layout/Sider/SiderFooter.tsx
 index cc221736d..23508f61e 100644
 --- a/src/renderer/components/layout/Sider/SiderFooter.tsx
@@ -31691,6 +31807,51 @@ index 267fd8679..fe547ec02 100644
        onConfirm={handleConfirm}
        onCancel={handleCancel}
      />
+diff --git a/src/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync.ts b/src/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync.ts
+index b6ce92bf0..69ab00075 100644
+--- a/src/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync.ts
++++ b/src/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync.ts
+@@ -103,8 +103,8 @@ const refreshConversations = () => {
+     .then((data) => {
+       if (data && Array.isArray(data)) {
+         const filteredData = data.filter((conv) => {
+-          const extra = conv.extra as { isHealthCheck?: boolean; teamId?: string; projectId?: string } | undefined;
+-          return extra?.isHealthCheck !== true && !extra?.teamId && !extra?.projectId;
++          const extra = conv.extra as { isHealthCheck?: boolean; teamId?: string } | undefined;
++          return extra?.isHealthCheck !== true && !extra?.teamId;
+         });
+         conversationsState = filteredData;
+         // Use ALL conversation IDs (including team/healthCheck) so the
+diff --git a/src/renderer/pages/conversation/GroupedHistory/utils/groupingHelpers.ts b/src/renderer/pages/conversation/GroupedHistory/utils/groupingHelpers.ts
+index 9b98fac65..724800176 100644
+--- a/src/renderer/pages/conversation/GroupedHistory/utils/groupingHelpers.ts
++++ b/src/renderer/pages/conversation/GroupedHistory/utils/groupingHelpers.ts
+@@ -96,10 +96,10 @@ export const groupConversationsByWorkspace = (
+   ];
+ };
+
+-/** Check whether a conversation belongs to a scoped surface (should be hidden from global sidebar). */
+-const isScopedConversation = (conversation: TChatConversation): boolean => {
+-  const extra = conversation.extra as { teamId?: string; projectId?: string } | undefined;
+-  return Boolean(extra?.teamId || extra?.projectId);
++/** Team chats stay on their owning surface; project chats also belong in global recents. */
++const isTeamConversation = (conversation: TChatConversation): boolean => {
++  const extra = conversation.extra as { teamId?: string } | undefined;
++  return Boolean(extra?.teamId);
+ };
+
+ export const buildGroupedHistory = (
+@@ -107,8 +107,8 @@ export const buildGroupedHistory = (
+   t: (key: string) => string,
+   projects: IProject[] = []
+ ): GroupedHistoryResult => {
+-  // Filter out scoped conversations; they are only visible via their owning surface.
+-  const visibleConversations = conversations.filter((conv) => !isScopedConversation(conv));
++  // Team chats are owned by the Teams surface. Project chats remain globally discoverable.
++  const visibleConversations = conversations.filter((conv) => !isTeamConversation(conv));
+
+   const pinnedConversations = visibleConversations
+     .filter((conversation) => isConversationPinned(conversation))
 diff --git a/src/renderer/pages/guid/GuidPage.tsx b/src/renderer/pages/guid/GuidPage.tsx
 index 45d17e02f..5975c48de 100644
 --- a/src/renderer/pages/guid/GuidPage.tsx
@@ -35562,6 +35723,52 @@ index 6f2bb3023..35dcfe104 100644
    it('shows generic error toast when file upload fails', async () => {
      mockIsElectronDesktop.mockReturnValueOnce(false); // WebUI mode so file input is rendered
      const { Message } = await import('@arco-design/web-react');
+diff --git a/tests/unit/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.dom.test.tsx b/tests/unit/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.dom.test.tsx
+index 2c29232b2..fb3acd272 100644
+--- a/tests/unit/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.dom.test.tsx
++++ b/tests/unit/renderer/components/layout/Sider/SiderAccordion/SiderRecentChatsSection.dom.test.tsx
+@@ -99,12 +99,12 @@ describe('SiderRecentChatsSection', () => {
+       { id: 'c2', extra: {} },
+       { id: 'c3', extra: { isHealthCheck: true } }, // filtered out
+       { id: 'c4', extra: { teamId: 't1' } }, // filtered out
+-      { id: 'c5', extra: { projectId: 'proj-fintrakd' } }, // filtered out
++      { id: 'c5', extra: { projectId: 'proj-fintrakd' } }, // visible in global recents
+     ]);
+     renderSection();
+     const badge = await screen.findByTestId('recent-chats-badge', undefined, { timeout: 2000 });
+-    expect(badge).toHaveTextContent('2');
+-    expect(badge.getAttribute('aria-label')).toBe('2 chats');
++    expect(badge).toHaveTextContent('3');
++    expect(badge.getAttribute('aria-label')).toBe('3 chats');
+   });
+
+   it('keeps the body (WorkspaceGroupedHistory stub) always visible - no collapse affordance', async () => {
+diff --git a/tests/unit/renderer/groupingHelpers.test.ts b/tests/unit/renderer/groupingHelpers.test.ts
+index 6a20e6583..57eca6843 100644
+--- a/tests/unit/renderer/groupingHelpers.test.ts
++++ b/tests/unit/renderer/groupingHelpers.test.ts
+@@ -460,7 +460,7 @@ describe('buildGroupedHistory', () => {
+     expect(result.timelineSections[0].items[0].conversation?.id).toBe('conv-1');
+   });
+
+-  it('excludes team and project scoped conversations from global history', () => {
++  it('excludes team conversations but keeps project conversations in global history', () => {
+     const conversations: TChatConversation[] = [
+       {
+         id: 'conv-1',
+@@ -491,8 +491,10 @@ describe('buildGroupedHistory', () => {
+     const result = buildGroupedHistory(conversations, mockT);
+
+     expect(result.pinnedConversations).toHaveLength(0);
+-    expect(result.timelineSections[0].items).toHaveLength(1);
+-    expect(result.timelineSections[0].items[0].conversation?.id).toBe('conv-1');
++    expect(result.timelineSections[0].items).toHaveLength(2);
++    expect(result.timelineSections[0].items[0].conversation?.id).toBe('conv-3');
++    expect(result.timelineSections[0].items[1].conversation?.id).toBe('conv-1');
++    expect(result.timelineSections[0].items.some((item) => item.conversation?.id === 'conv-2')).toBe(false);
+   });
+
+   it('sorts pinned conversations by sortOrder first', () => {
 diff --git a/tests/unit/renderer/guid/firstSafeCuratedModel.test.ts b/tests/unit/renderer/guid/firstSafeCuratedModel.test.ts
 index 62e56ae1b..4b3f1f41a 100644
 --- a/tests/unit/renderer/guid/firstSafeCuratedModel.test.ts
